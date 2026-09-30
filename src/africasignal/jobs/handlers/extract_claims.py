@@ -23,6 +23,7 @@ from africasignal.jobs.handlers.resolve_places import enqueue_place_resolution
 from africasignal.llm import BudgetExhausted, build_adapter
 from africasignal.llm.budget import defer_until_next_day
 from africasignal.models import Claim, EvidenceDocument
+from africasignal.publish.claim_assessments import request_claim_assessments
 from africasignal.sources.nerc import reconcile_tariff_claims
 from africasignal.storage import get_store
 
@@ -79,7 +80,9 @@ def extract_claims_job(ctx: JobContext) -> None:
     reconcile_tariff_claims(session, document, text)  # code, not the model, decides a tariff
     valid = [c for c in claims if c.valid]
     if any(c.place_candidates for c in valid):
-        enqueue_place_resolution(session, document_id, version)
+        enqueue_place_resolution(session, document_id, version)  # which then asks for assessments
+    else:
+        request_claim_assessments(session, document_id)
     log.info(
         "document %s: %d claims, %d valid",
         document_id,

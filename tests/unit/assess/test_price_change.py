@@ -458,7 +458,7 @@ def test_the_hash_does_not_depend_on_the_order_of_states() -> None:
 
 def test_a_new_template_version_changes_the_hash(monkeypatch: pytest.MonkeyPatch) -> None:
     before = compute_price_change(inputs()).inputs_hash
-    monkeypatch.setattr(pc, "TEMPLATE_VERSION", "T1-2")
+    monkeypatch.setattr(pc, "TEMPLATE_VERSION", "T1-3")
     assert compute_price_change(inputs()).inputs_hash != before
 
 

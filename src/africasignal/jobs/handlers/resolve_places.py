@@ -17,6 +17,7 @@ from africasignal.jobs.handlers import JobContext, register
 from africasignal.jobs.queue import enqueue
 from africasignal.models import Claim
 from africasignal.places.resolve import resolve_candidates, resolve_place
+from africasignal.publish.claim_assessments import request_claim_assessments
 
 log = logging.getLogger("africasignal.resolve_places")
 
@@ -76,6 +77,7 @@ def resolve_places_job(ctx: JobContext) -> None:
             claim.place_precision = answer.precision
             resolved += 1
     session.flush()
+    request_claim_assessments(session, document_id)  # claims with places can now corroborate
     log.info(
         "document %s: %d of %d claims placed",
         document_id,
