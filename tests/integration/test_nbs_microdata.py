@@ -355,7 +355,10 @@ def test_fetching_the_microdata_source_imports_the_latest_release_of_every_publi
         assert s.scalar(select(func.count()).select_from(Situation)) == 3 * 38 + 2 * 38 + 3
         versions = s.scalars(select(AssessmentVersion)).all()
         assert len(versions) == 3 * 38 + 2 * 38 + 3
-        assert {v.status for v in versions} == {"draft"}
+        # Published (routine or as insufficient-evidence cards) or held for 60 minutes (R7, a first
+        # high-severity version). Which depends on the clock: May 2026 turns stale on 28 September.
+        assert {v.status for v in versions} <= {"published", "draft"}
+        assert all((v.status == "draft") == (v.hold_until is not None) for v in versions)
         src = s.get(Source, source_id)
         assert src is not None and src.health == "healthy" and src.last_error is None
         states = s.execute(text("SELECT status, count(*) FROM job GROUP BY 1")).all()
