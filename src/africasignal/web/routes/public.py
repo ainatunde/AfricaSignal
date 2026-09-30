@@ -267,7 +267,8 @@ def situation_page(request: Request, slug: str, db: Db) -> Response:
         return _not_found(request, "This situation has no published assessment.")
     suspended = queries.publication_suspended(db)
     status = current.effective_status
-    key = (current.version.id, status, suspended)
+    base_url = public_base_url(db)
+    key = (current.version.id, status, suspended, base_url)
     page = _page_cache.get(key)
     if page is None:
         version = current.version
@@ -288,7 +289,7 @@ def situation_page(request: Request, slug: str, db: Db) -> Response:
             "chart_from": f"{points[0].period_start:%B %Y}" if points else "",
             "chart_to": f"{points[-1].period_start:%B %Y}" if points else "",
             "evidence": queries.evidence_for(db, version),
-            "share_url": f"{public_base_url(db)}/s/{slug}?ref=share",
+            "share_url": f"{base_url}/s/{slug}?ref=share",
         }
         page = templates.env.get_template("situation.html").render(context)
         _page_cache.set(key, page)

@@ -75,10 +75,10 @@ templates.env.filters["datetime"] = fmt_datetime
 templates.env.globals["severity_words"] = SEVERITY_WORDS
 
 
-def public_base_url(db: Session) -> str:
-    """The site's public address, for links that leave the page. It is read from the console
-    settings (environment variable as the fallback) every time, so a change applies at once."""
-    return (settings_store.get(db, "public_base_url") or "http://localhost:8000").rstrip("/")
+def public_base_url(session: Session) -> str:
+    """The site's public address from the operator console, read on every use so a change there
+    applies at once. Empty when nobody has set it: links then stay relative."""
+    return (settings_store.get(session, "public_base_url") or "").rstrip("/")
 
 
 def render(

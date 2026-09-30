@@ -20,6 +20,7 @@ from urllib.parse import quote
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from africasignal import settings_store
 from africasignal.models import AssessmentVersion, Situation
 from africasignal.publish.factfmt import allowed_numbers, format_value, numbers_in
 
@@ -141,8 +142,17 @@ class ChannelPosts:
     x: Post
 
 
-def channel_posts(session: Session, since: datetime, *, base_url: str) -> list[ChannelPosts]:
-    """A WhatsApp post and an X post for every material change published since ``since``."""
+def channel_posts(
+    session: Session, since: datetime, *, base_url: str | None = None
+) -> list[ChannelPosts]:
+    """A WhatsApp post and an X post for every material change published since ``since``.
+
+    The link uses the public address from the operator console, read now; pass ``base_url`` only
+    to override it.
+    """
+    base_url = base_url or settings_store.get(session, "public_base_url")
+    if not base_url:
+        raise PostError("the public address is not set: add it under Settings in the console")
     return [
         ChannelPosts(
             situation.slug,
