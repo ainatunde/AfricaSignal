@@ -13,6 +13,7 @@ default_model: claude-sonnet-5-5
 
 purposes:
   claim_extract: {model: claude-sonnet-5-5, effort: low}
+  explain: {model: claude-sonnet-5-5, effort: low}
 
 prices:
   claude-sonnet-5-5: {input: 2.00, output: 10.00}
