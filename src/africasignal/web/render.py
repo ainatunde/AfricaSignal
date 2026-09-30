@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from fastapi import Request
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
 from starlette.responses import HTMLResponse
 
+from africasignal import settings_store
 from africasignal.publish.factfmt import fact_value_text, format_change
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -74,9 +75,10 @@ templates.env.filters["datetime"] = fmt_datetime
 templates.env.globals["severity_words"] = SEVERITY_WORDS
 
 
-def public_base_url() -> str:
-    """The site's public address, for links that leave the page (set when the domain is known)."""
-    return os.environ.get("PUBLIC_BASE_URL", "http://localhost:8000").rstrip("/")
+def public_base_url(session: Session) -> str:
+    """The site's public address from the operator console, read on every use so a change there
+    applies at once. Empty when nobody has set it: links then stay relative."""
+    return (settings_store.get(session, "public_base_url") or "").rstrip("/")
 
 
 def render(
