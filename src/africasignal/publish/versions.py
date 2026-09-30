@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
 from africasignal.assess.publication_policy import (
@@ -35,12 +35,13 @@ from africasignal.models import (
     EvidenceDocument,
     Measurement,
     MeasurementReview,
+    Notification,
     Place,
     Series,
     Setting,
     Situation,
 )
-from africasignal.publish.hooks import notify_published
+from africasignal.publish.hooks import NotificationKind, notify_published
 
 log = logging.getLogger("africasignal.publish.versions")
 
@@ -168,8 +169,35 @@ def build_draft(session: Session, version: AssessmentVersion, now: datetime) -> 
     )
 
 
+def cancel_pending_delivery(session: Session, version_id: int, now: datetime) -> None:
+    """A corrected or withdrawn version must not reach people after the fact: cancel its unread
+    ``new_version`` notifications and its pending emails. Email rows are found by
+    ``payload.assessment_version_id``, the key delivery writes for emails about a version."""
+    session.execute(
+        update(Notification)
+        .where(
+            Notification.assessment_version_id == version_id,
+            Notification.kind == "new_version",
+            Notification.read_at.is_(None),
+            Notification.cancelled_at.is_(None),
+        )
+        .values(cancelled_at=now)
+    )
+    session.execute(
+        text(
+            "UPDATE outbox SET status = 'dead', last_error = 'superseded' "
+            "WHERE status = 'pending' AND payload->>'assessment_version_id' = :v"
+        ),
+        {"v": str(version_id)},
+    )
+
+
 def _publish(
-    session: Session, situation: Situation, version: AssessmentVersion, now: datetime
+    session: Session,
+    situation: Situation,
+    version: AssessmentVersion,
+    now: datetime,
+    kind: NotificationKind = "new_version",
 ) -> None:
     previous = (
         session.get(AssessmentVersion, situation.current_version_id)
@@ -185,12 +213,17 @@ def _publish(
         previous.status = "superseded"
     situation.current_version_id = version.id
     session.flush()
+    if previous is not None and previous.id != version.id and kind != "new_version":
+        cancel_pending_delivery(session, previous.id, now)
     if version.evidence_state != "insufficient":
-        notify_published(session, version.id, "new_version")
+        notify_published(session, version.id, kind)
 
 
-def apply_policy(session: Session, version_id: int, now: datetime) -> Decision | None:
-    """Decide and act on a draft version. Returns None when it is not a draft any more."""
+def apply_policy(
+    session: Session, version_id: int, now: datetime, kind: NotificationKind = "new_version"
+) -> Decision | None:
+    """Decide and act on a draft version. Returns None when it is not a draft any more. ``kind``
+    is "correction" when the version replaces one that used invalid inputs."""
     version = session.get(AssessmentVersion, version_id)
     if version is None or version.status != "draft":
         return None
@@ -201,7 +234,7 @@ def apply_policy(session: Session, version_id: int, now: datetime) -> Decision |
     version.policy_version = POLICY_VERSION
     match decision.status:
         case "published":
-            _publish(session, situation, version, now)
+            _publish(session, situation, version, now, kind)
         case "held":
             version.hold_until = decision.hold_until
         case _:  # withheld, or unchanged: a draft identical to what is already published

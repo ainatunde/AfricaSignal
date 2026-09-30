@@ -223,6 +223,8 @@ class NbsImport:
     notes: list[str] = field(default_factory=list)
     # (item_code, place_id) pairs whose current data changed: assessments to refresh.
     touched: set[tuple[str, int]] = field(default_factory=set)
+    # ids of measurements that a restated value replaced: assessments that used them are corrected
+    superseded: list[int] = field(default_factory=list)
 
     @property
     def measurements(self) -> int:
@@ -230,7 +232,10 @@ class NbsImport:
 
     def as_result(self) -> ProcessResult:
         return ProcessResult(
-            measurements=self.measurements, notes=self.notes, touched=set(self.touched)
+            measurements=self.measurements,
+            notes=self.notes,
+            touched=set(self.touched),
+            superseded=set(self.superseded),
         )
 
 
@@ -287,8 +292,10 @@ def store_measurement(
     value: Decimal,
     vintage: date,
     document: EvidenceDocument,
+    superseded: list[int] | None = None,
 ) -> Outcome:
-    """Insert one value following the rules in the module docstring."""
+    """Insert one value following the rules in the module docstring. When the value restates
+    one already held, the id of the measurement it replaces is appended to ``superseded``."""
     rows = list(
         session.scalars(
             select(Measurement).where(
@@ -326,6 +333,8 @@ def store_measurement(
     if current is None:
         return "inserted"
     current.superseded_by_id = row.id
+    if superseded is not None:
+        superseded.append(current.id)
     return "revised"
 
 
@@ -398,7 +407,9 @@ def _import_row(
                 result.queued_for_review += 1
                 result.notes.append(f"{series.item_code} {label}: {value} queued for review")
             continue
-        outcome = store_measurement(session, series, place_id, month, value, vintage, document)
+        outcome = store_measurement(
+            session, series, place_id, month, value, vintage, document, result.superseded
+        )
         if outcome == "conflict":
             result.notes.append(
                 f"{series.item_code} {label} {month:%Y-%m}: release {vintage} already holds a "

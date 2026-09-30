@@ -236,11 +236,15 @@ def _change_summary(previous: AssessmentVersion | None, new: PriceAssessment) ->
     return "Re-assessed after the inputs changed"
 
 
-def assess_situation(session: Session, situation_id: int, now: datetime) -> AssessmentOutcome:
+def assess_situation(
+    session: Session, situation_id: int, now: datetime, *, correction: str | None = None
+) -> AssessmentOutcome:
     """Compute the situation's assessment and store a new version if the inputs changed.
 
     The same inputs give the same ``inputs_hash``, and then nothing new is stored: only the
-    latest version's ``last_checked_at`` moves. The caller commits.
+    latest version's ``last_checked_at`` moves. ``correction`` is the sentence that explains why
+    the inputs changed (spec B9): it becomes the new version's ``change_summary``. The caller
+    commits.
     """
     situation = session.get(Situation, situation_id)
     if situation is None:
@@ -278,7 +282,7 @@ def assess_situation(session: Session, situation_id: int, now: datetime) -> Asse
         period_label=computed.period_label,
         last_checked_at=now,
         valid_until=computed.valid_until,
-        change_summary=_change_summary(latest, computed),
+        change_summary=correction or _change_summary(latest, computed),
         withheld_reasons=[],
         supersedes_id=latest.id if latest else None,
     )
@@ -300,27 +304,39 @@ def assess_situation(session: Session, situation_id: int, now: datetime) -> Asse
 
 
 def request_assessments(
-    session: Session, touched: Iterable[tuple[str, int]], document_id: int
+    session: Session,
+    touched: Iterable[tuple[str, int]],
+    document_id: int,
+    superseded: Iterable[int] = (),
 ) -> list[int]:
     """Create missing situations for new or changed values and queue an ``assess_situation`` job
     for each. ``touched`` holds (item code, place id) pairs. A changed state value also changes
     the national situation's aggregates, so the country pair is added for every state pair.
 
+    ``superseded`` holds ids of measurements that restated values replaced. A situation whose
+    current version used one of them gets a correction (spec B9) instead of a plain
+    re-assessment.
+
     Jobs are deduplicated per situation and source document, so importing the same document twice
     queues nothing new.
     """
+    from africasignal.publish.invalidation import plan_corrections, queue_correction
+
     pairs = set(touched)
     country = session.scalars(select(Place.id).where(Place.code == "NG")).one_or_none()
     if country is not None:
         pairs |= {(item, country) for item, _ in pairs}
+    superseded = set(superseded)
+    corrections = plan_corrections(session, "measurement", superseded) if superseded else {}
     job_ids: list[int] = []
     for situation in ensure_situations(session, pairs):
-        job_id = queue.enqueue(
-            session,
-            "assess_situation",
-            {"situation_id": situation.id},
-            dedupe_key=f"assess_situation:{situation.id}:{document_id}",
-        )
+        key = f"assess_situation:{situation.id}:{document_id}"
+        if situation.id in corrections:
+            job_id = queue_correction(session, situation.id, corrections[situation.id], key)
+        else:
+            job_id = queue.enqueue(
+                session, "assess_situation", {"situation_id": situation.id}, dedupe_key=key
+            )
         if job_id is not None:
             job_ids.append(job_id)
     return job_ids

@@ -66,7 +66,7 @@ def import_nbs_file(ctx: JobContext) -> None:
         vintage=vintage,
         expected_month=title_month(title) if title else None,
     )
-    queued = request_assessments(session, result.touched, document.id)
+    queued = request_assessments(session, result.touched, document.id, result.superseded)
     if upload_key != document.storage_key:
         store.delete(upload_key)  # the evidence copy lives under its own hash-based key
     log.info(

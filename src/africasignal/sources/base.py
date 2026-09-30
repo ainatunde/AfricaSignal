@@ -28,6 +28,8 @@ class ProcessResult:
     notes: list[str] = field(default_factory=list)
     # (item code, place id) pairs whose values changed: their situations need re-assessing
     touched: set[tuple[str, int]] = field(default_factory=set)
+    # ids of measurements replaced by restated values: assessments using them are corrected
+    superseded: set[int] = field(default_factory=set)
 
 
 @dataclass(frozen=True)

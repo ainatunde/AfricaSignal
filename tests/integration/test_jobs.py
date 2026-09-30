@@ -45,6 +45,13 @@ def _enqueue(factory: sessionmaker[Session], kind: str = "test", **kw: object) -
     return job_id
 
 
+@pytest.fixture(autouse=True)
+def no_real_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Importing a handler module (other test modules do) registers it for good. These tests
+    decide which kinds have a handler, so start each from an empty registry."""
+    monkeypatch.setattr(handlers, "HANDLERS", {})
+
+
 def _register(monkeypatch: pytest.MonkeyPatch, kind: str, fn: handlers.Handler) -> None:
     monkeypatch.setitem(handlers.HANDLERS, kind, fn)
 

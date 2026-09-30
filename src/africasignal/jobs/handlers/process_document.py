@@ -47,7 +47,7 @@ def process_document(ctx: JobContext) -> None:
     except Exception as exc:
         record_failure(session, source.id, f"{type(exc).__name__}: {exc}")
         raise
-    queued = request_assessments(session, result.touched, document.id)
+    queued = request_assessments(session, result.touched, document.id, result.superseded)
     log.info(
         "processed %s: %d measurements, %d claims, %d assessments queued",
         payload["url"],
