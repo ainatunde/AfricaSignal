@@ -54,6 +54,8 @@ def capture(
     url: str,
     *,
     fetch: Fetcher = fetch_document,
+    published_at: datetime | None = None,
+    title: str | None = None,
     now: datetime | None = None,
 ) -> EvidenceDocument:
     """Fetch ``url`` for ``source`` and return its evidence record.
@@ -70,13 +72,48 @@ def capture(
     if not result.success:
         raise CaptureError(result.error or f"fetch of {url} returned HTTP {result.status_code}")
 
-    content = result.content
+    return record_document(
+        session,
+        store,
+        source,
+        permission,
+        url=url,
+        final_url=result.url,
+        content=result.content,
+        content_type=result.headers.get("content-type"),
+        published_at=published_at,
+        title=title,
+        now=now,
+    )
+
+
+def record_document(
+    session: Session,
+    store: ObjectStore,
+    source: Source,
+    permission: SourcePermission,
+    *,
+    url: str,
+    content: bytes,
+    content_type: str | None = None,
+    final_url: str | None = None,
+    published_at: datetime | None = None,
+    title: str | None = None,
+    now: datetime | None = None,
+) -> EvidenceDocument:
+    """Store ``content`` and record it as evidence for ``source``.
+
+    Shared by ``capture`` (bytes just fetched) and by operator uploads (bytes the operator
+    supplies with the URL they came from). Identical content at the same canonical URL returns the
+    existing row; changed content creates a new one. ``published_at`` and ``title`` fill in what
+    the file itself does not say (a spreadsheet has neither). The caller commits.
+    """
     sha = hashlib.sha256(content).hexdigest()
-    mime = detect_mime(result.headers.get("content-type"), content, result.url)
+    mime = detect_mime(content_type, content, final_url or url)
     extracted: ExtractedText = extract_text(content, mime)
 
     html = content.decode("utf-8", errors="replace") if mime in HTML_MIMES else None
-    canonical = canonicalise(result.url, html)
+    canonical = canonicalise(final_url or url, html)
 
     existing = session.scalars(
         select(EvidenceDocument).where(
@@ -98,11 +135,11 @@ def capture(
         url=url,
         canonical_url=canonical,
         retrieved_at=retrieved_at,
-        published_at=extracted.published_at,
+        published_at=published_at or extracted.published_at,
         content_sha256=sha,
         storage_key=key,
         mime=mime,
-        title=extracted.title,
+        title=title or extracted.title,
         text_content=extracted.text if permission.may_store_full_text else None,
         excerpt=_excerpt(extracted.text, permission),
         simhash=simhash(extracted.text) if extracted.text else None,

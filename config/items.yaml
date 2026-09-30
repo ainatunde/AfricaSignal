@@ -1,9 +1,27 @@
 # Tracked items, units, materiality thresholds and possible price drivers (spec B6.3, B6.8, B8.2).
 #
-# STATUS: `nbs_labels` are provisional. They are the row names as I understand NBS publishes them
-# but no NBS file could be fetched to check them. Ticket AS-010 must confirm or correct every
-# label against saved fixtures of the real Excel files before any parser depends on them.
+# The `nbs` mapping of every item was checked against real NBS files (see tests/fixtures/nbs/,
+# manifest.json). What the files actually look like, which differs from the plan's assumptions:
+#   - Fuel and gas publications (pms, ago, dpk, lpg) are state tables: one row per state plus a
+#     national row, columns for the same month last year, the previous month and the reference
+#     month. A publication can hold several blocks (lpg: 5kg and 12.5kg; dpk: litre and gallon),
+#     so an item names a publication and a block, not a row label.
+#   - The food workbook has NATIONAL averages only, one row per item (the state grid is not in
+#     the file; only the highest and lowest state are named as text). Food items therefore name
+#     the exact row label.
+# Units: NBS states the unit in its summary text for petrol, diesel, kerosene, cooking gas and for
+# the beans and local rice rows ("1kg ... sold loose"). The garri and maize rows say "sold loose"
+# only; NGN/kg is presumed for them (`unit_confirmed: false`) and should be checked before those
+# two items are shown to the public.
 # Materiality defaults to |month-on-month| >= 5 % or |year-on-year| >= 20 %.
+
+# How each NBS publication is found in the eLibrary listing (title) and read (layout).
+nbs_publications:
+  - {code: pms,  layout: state_table, title_pattern: '^Premium Motor Spirit \(Petrol\) Price Watch'}
+  - {code: ago,  layout: zoned_table, title_pattern: '^Automotive Gas Oil \(Diesel\) Price Watch'}
+  - {code: dpk,  layout: two_blocks,  title_pattern: '^(National )?Household Kerosene Price Watch'}
+  - {code: lpg,  layout: two_blocks,  title_pattern: '^Liquefied Petroleum Gas \(Cooking Gas\) Price Watch'}
+  - {code: food, layout: national_items, title_pattern: '^Selected Food Prices? Watch'}
 
 keywords:
   energy: [petrol, PMS, fuel price, pump price, diesel, AGO, kerosene, DPK, cooking gas, LPG,
@@ -16,7 +34,7 @@ items:
     label: petrol (PMS)
     topic: energy
     unit: NGN/litre
-    nbs_labels: ["Premium Motor Spirit (Petrol) price watch", "PMS"]
+    nbs: {publication: pms}
     factors:
       - {code: crude_price, label: Crude oil price, keywords: ["crude oil", "crude price", "brent"]}
       - {code: exchange_rate, label: Exchange rate, keywords: ["exchange rate", "naira", "forex", "dollar"]}
@@ -27,7 +45,7 @@ items:
     label: diesel (AGO)
     topic: energy
     unit: NGN/litre
-    nbs_labels: ["Automotive Gas Oil (Diesel) price watch", "AGO"]
+    nbs: {publication: ago}
     factors:
       - {code: crude_price, label: Crude oil price, keywords: ["crude oil", "crude price", "brent"]}
       - {code: exchange_rate, label: Exchange rate, keywords: ["exchange rate", "naira", "forex", "dollar"]}
@@ -37,16 +55,25 @@ items:
     label: household kerosene (DPK)
     topic: energy
     unit: NGN/litre
-    nbs_labels: ["Household Kerosene price watch", "DPK"]
+    nbs: {publication: dpk, block: LITRE}
     factors:
       - {code: crude_price, label: Crude oil price, keywords: ["crude oil", "crude price", "brent"]}
       - {code: supply_disruption, label: Supply disruption, keywords: ["supply", "scarcity", "depot"]}
+
+  - code: lpg_5kg
+    label: cooking gas (5 kg refill)
+    topic: energy
+    unit: NGN/5kg
+    nbs: {publication: lpg, block: 5KG}
+    factors:
+      - {code: exchange_rate, label: Exchange rate, keywords: ["exchange rate", "naira", "forex", "dollar"]}
+      - {code: import_supply, label: Import and supply, keywords: ["import", "vessel", "supply", "scarcity"]}
 
   - code: lpg_12_5kg
     label: cooking gas (12.5 kg refill)
     topic: energy
     unit: NGN/12.5kg
-    nbs_labels: ["Liquefied Petroleum Gas (Cooking Gas) price watch", "LPG 12.5kg"]
+    nbs: {publication: lpg, block: 12.5KG}
     factors:
       - {code: exchange_rate, label: Exchange rate, keywords: ["exchange rate", "naira", "forex", "dollar"]}
       - {code: import_supply, label: Import and supply, keywords: ["import", "vessel", "supply", "scarcity"]}
@@ -55,7 +82,7 @@ items:
     label: local rice (1 kg)
     topic: food
     unit: NGN/kg
-    nbs_labels: ["Rice local sold loose"]
+    nbs: {publication: food, labels: ["Rice local sold loose"]}
     factors:
       - {code: transport_costs, label: Transport costs, keywords: ["transport", "fuel price", "haulage"]}
       - {code: import_policy, label: Import policy, keywords: ["import duty", "import ban", "tariff", "border"]}
@@ -65,7 +92,7 @@ items:
     label: white garri (1 kg)
     topic: food
     unit: NGN/kg
-    nbs_labels: ["Garri white sold loose"]
+    nbs: {publication: food, labels: ["Gari white,sold loose"], unit_confirmed: false}
     factors:
       - {code: transport_costs, label: Transport costs, keywords: ["transport", "fuel price", "haulage"]}
       - {code: insecurity, label: Insecurity affecting farming, keywords: ["insecurity", "banditry", "farmers"]}
@@ -74,7 +101,7 @@ items:
     label: brown beans (1 kg)
     topic: food
     unit: NGN/kg
-    nbs_labels: ["Beans brown sold loose"]
+    nbs: {publication: food, labels: ["Beans brown,sold loose"]}
     factors:
       - {code: transport_costs, label: Transport costs, keywords: ["transport", "fuel price", "haulage"]}
       - {code: season, label: Harvest and season, keywords: ["harvest", "lean season", "rainfall", "flood"]}
@@ -83,7 +110,7 @@ items:
     label: white maize grain (1 kg)
     topic: food
     unit: NGN/kg
-    nbs_labels: ["Maize grain white sold loose"]
+    nbs: {publication: food, labels: ["Maize grain white sold loose"], unit_confirmed: false}
     factors:
       - {code: season, label: Harvest and season, keywords: ["harvest", "lean season", "rainfall", "flood"]}
       - {code: insecurity, label: Insecurity affecting farming, keywords: ["insecurity", "banditry", "farmers"]}

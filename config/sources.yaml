@@ -15,7 +15,11 @@
   kind: official_statistics
   adapter: nbs
   owner: National Bureau of Statistics
-  home_url: https://nigerianstat.gov.ng/elibrary    # verify
+  # Verified 2026-09-30: the page is one HTML table of every NBS release (1695 rows); each price
+  # watch links to a report page whose "Download Tables" link is the Excel file. robots.txt
+  # does not exist (404). NBS terms of use were NOT reviewed: an operator must do that before
+  # approving the permission. On that date the newest price watch listed was October 2024.
+  home_url: https://nigerianstat.gov.ng/elibrary
   schedule_minutes: 1440
   max_requests_per_hour: 30
   coverage_note: Monthly price-watch publications (food, PMS, AGO, DPK, LPG), state by state.

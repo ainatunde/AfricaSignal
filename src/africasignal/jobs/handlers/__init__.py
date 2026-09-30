@@ -41,4 +41,9 @@ def get_handler(kind: str) -> Handler | None:
 def load_all() -> None:
     """Import every handler module so its ``@register`` runs. Called by the worker and the
     scheduler at startup."""
-    from africasignal.jobs.handlers import fetch_source  # noqa: F401
+    from africasignal.jobs.handlers import (  # noqa: F401
+        fetch_source,
+        import_nbs_file,
+        process_document,
+    )
+    from africasignal.sources import nbs  # noqa: F401  (registers the NBS adapter)

@@ -1,0 +1,111 @@
+{
+  "description": "Real NBS price-watch workbooks used as parser fixtures. Files are unmodified copies of what nigerianstat.gov.ng served. Retrieved with the AfricaSignalBot user agent, one request every 4 seconds.",
+  "publisher": "National Bureau of Statistics, Nigeria",
+  "rights_note": "Public government statistics, attributed to NBS (see source rights_basis in config/sources.yaml). NBS terms of use were not reviewed when these were saved; an operator must review them before the source permission is approved.",
+  "retrieved_on": "2026-09-30",
+  "listing_page": "https://nigerianstat.gov.ng/elibrary",
+  "files": [
+    {
+      "file": "FUEL_SEPT_2024_REPORT.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/FUEL_SEPT_2024_REPORT.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241571",
+      "listing_title": "Premium Motor Spirit (Petrol) Price Watch (September 2024)",
+      "listing_release_date": "Thu Oct 17 2024",
+      "bytes": 18558,
+      "sha256": "c78a001d57d78f973e181a17867fadcb5eacb889f07ae2be833bfc620afd38d4"
+    },
+    {
+      "file": "DIESEL_SEPT_2024_REPORT.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/DIESEL_SEPT_2024_REPORT.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241572",
+      "listing_title": "Automotive Gas Oil (Diesel) Price Watch (September 2024)",
+      "listing_release_date": "Thu Oct 17 2024",
+      "bytes": 15173,
+      "sha256": "2a3739336a218105579db9637f70677afb8aaa4f57dba47ba668e2e5ef0d0c05"
+    },
+    {
+      "file": "HOUSEHOLD_KEROSENE_SEPT_2024.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/HOUSEHOLD_KEROSENE_SEPT_2024.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241573",
+      "listing_title": "National Household Kerosene Price Watch (September 2024)",
+      "listing_release_date": "Thu Oct 17 2024",
+      "bytes": 18045,
+      "sha256": "209ae789627db74011045f93d3d397d44de853dae00c132c026fc152466acca7"
+    },
+    {
+      "file": "GAS_PRICE_WATCH_SEPT_2024.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/GAS_PRICE_WATCH_SEPT_2024.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241574",
+      "listing_title": "Liquefied Petroleum Gas (Cooking Gas) Price Watch (September 2024)",
+      "listing_release_date": "Thu Oct 17 2024",
+      "bytes": 19777,
+      "sha256": "91eeff1476b2c1747e3fc362adc1b09fb65cbaf28ecdddf6c2c1802531e2a65c"
+    },
+    {
+      "file": "selected_food_sept_2024.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/selected_food_sept_2024.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241575",
+      "listing_title": "Selected Food Prices Watch (September 2024)",
+      "listing_release_date": "Wed Oct 23 2024",
+      "bytes": 23034,
+      "sha256": "bd1d0f9e2dd71cb4c1cb5862d0dd8153bb6bdee343e9e8d97217192d307867bf"
+    },
+    {
+      "file": "PMS_OCT_2024_REPORT.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/PMS_OCT_2024_REPORT.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241584",
+      "listing_title": "Premium Motor Spirit (Petrol) Price Watch (October 2024)",
+      "listing_release_date": "Tue Nov 19 2024",
+      "bytes": 23364,
+      "sha256": "d42c469b1eff4ed605027084d819aba25d21bd94da6064eb2055b2e12b5036e2"
+    },
+    {
+      "file": "DIESEL_OCT_2024_REPORT.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/DIESEL_OCT_2024_REPORT.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241585",
+      "listing_title": "Automotive Gas Oil (Diesel) Price Watch (October 2024)",
+      "listing_release_date": "Tue Nov 19 2024",
+      "bytes": 15080,
+      "sha256": "a5d4e57eb8dcc7e59d0b7c64cb6121eca7c6b1cff7c904d57195ed0a5b75a155"
+    },
+    {
+      "file": "HOUSEHOLD_KEROSENE_OCT_2024.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/HOUSEHOLD_KEROSENE_OCT_2024.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241586",
+      "listing_title": "National Household Kerosene Price Watch (October 2024)",
+      "listing_release_date": "Tue Nov 19 2024",
+      "bytes": 17786,
+      "sha256": "311c7a2d0c2fe4f6794d865a92462f56256a9dbd0c0debb2d47e5791df690542"
+    },
+    {
+      "file": "GAS_PRICE_WATCH_OCT_2024.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/GAS_PRICE_WATCH_OCT_2024.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241587",
+      "listing_title": "Liquefied Petroleum Gas (Cooking Gas) Price Watch (October 2024)",
+      "listing_release_date": "Tue Nov 19 2024",
+      "bytes": 19637,
+      "sha256": "5af16f988ab1f2c94bf8b8ec93b8dc18470c83ef7b55fa3567dc7104c5797b78"
+    },
+    {
+      "file": "selected_food_oct_2024.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/selected_food_oct_2024.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241592",
+      "listing_title": "Selected Food Prices Watch (October 2024)",
+      "listing_release_date": "Sun Nov 24 2024",
+      "bytes": 23080,
+      "sha256": "d692fa2b610fca7ed965627930892e82c0b470e1c038f500cf96c6f250a92da1"
+    }
+  ],
+  "excerpts": [
+    {
+      "file": "elibrary_listing_rows.html",
+      "source_url": "https://nigerianstat.gov.ng/elibrary",
+      "note": "Table rows copied verbatim from the listing page; the page holds 1695 rows."
+    },
+    {
+      "file": "report_page_download_links.html",
+      "source_url": "https://nigerianstat.gov.ng/elibrary/read/1241584",
+      "note": "The 'Download Report' (PDF) and 'Download Tables' (Excel) links of one report page."
+    }
+  ]
+}
