@@ -60,6 +60,28 @@ def set_disabled(email: str, disabled: bool) -> int:
     return 0
 
 
+def revoke_sessions(email: str) -> int:
+    """End every console session of an operator (a suspected stolen cookie)."""
+    with session_scope() as session:
+        operator = session.scalars(
+            select(Operator).where(Operator.email == operators.normalise_email(email))
+        ).first()
+        if operator is None:
+            print(f"error: no operator with the email {email}", file=sys.stderr)
+            return 1
+        operators.revoke_sessions(session, operator)
+    print(f"Ended every console session of {email}.")
+    return 0
+
+
+def unlock(email: str) -> int:
+    """Clear an operator's recorded failed sign-ins so they can try again at once."""
+    with session_scope() as session:
+        cleared = operators.unlock(session, email)
+    print(f"Cleared {cleared} failed sign-in(s) for {email}.")
+    return 0
+
+
 def get_setting(key: str, reveal: bool) -> int:
     """Print one effective setting for scripts on the host. Secrets need ``--reveal``."""
     from africasignal import settings_store
@@ -114,6 +136,8 @@ def main(argv: list[str] | None = None) -> int:
     for name, help_text in (
         ("disable-operator", "block sign-in"),
         ("enable-operator", "allow sign-in"),
+        ("revoke-sessions", "end every console session of the operator"),
+        ("unlock-operator", "clear the operator's recorded failed sign-ins"),
     ):
         cmd = sub.add_parser(name, help=help_text)
         cmd.add_argument("--email", required=True)
@@ -131,6 +155,10 @@ def main(argv: list[str] | None = None) -> int:
         return get_setting(args.key, args.reveal)
     if args.command == "create-operator":
         return create_operator(args.email, args.role)
+    if args.command == "revoke-sessions":
+        return revoke_sessions(args.email)
+    if args.command == "unlock-operator":
+        return unlock(args.email)
     return set_disabled(args.email, args.command == "disable-operator")
 
 

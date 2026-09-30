@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from africasignal.models import AssessmentVersion, Place
 from africasignal.web import queries
+from africasignal.web.client_address import client_address
 from africasignal.web.ratelimit import RateLimiter
 from africasignal.web.session_dep import get_db
 
@@ -28,8 +29,7 @@ DEFAULT_LIMIT, MAX_LIMIT = 50, 200
 
 
 def limit_requests(request: Request, response: Response) -> None:
-    client = request.client.host if request.client else "unknown"
-    allowed, retry_after = rate_limiter.check(client)
+    allowed, retry_after = rate_limiter.check(client_address(request))
     if not allowed:
         raise HTTPException(
             status_code=429,

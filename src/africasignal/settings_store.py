@@ -140,6 +140,19 @@ _DEFS = (
         choices=("no", "yes"),
     ),
     SettingDef(
+        "trusted_proxy_hops",
+        "Proxies in front of the site",
+        "site",
+        "int",
+        "How many reverse proxies or CDNs sit between readers and this app, each adding the "
+        "address it saw to X-Forwarded-For. 0 (the default) uses the connecting address, which is "
+        "right with no proxy. Set it so the rate limits see readers, not the proxy. Leave 0 when "
+        "the proxy runs on the same machine and uvicorn already handles it.",
+        default="0",
+        minimum=0,
+        maximum=5,
+    ),
+    SettingDef(
         "email_provider",
         "Email provider",
         "email",

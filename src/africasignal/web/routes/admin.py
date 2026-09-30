@@ -24,6 +24,7 @@ from africasignal.models import AuditLog, Operator, Setting, Source, SourcePermi
 from africasignal.publish import versions
 from africasignal.sources import console
 from africasignal.sources.console import ConsoleError, PermissionInput
+from africasignal.web.client_address import client_address
 from africasignal.web.deps import (
     ABSOLUTE_SECONDS,
     COOKIE_NAME,
@@ -32,6 +33,7 @@ from africasignal.web.deps import (
     CurrentOperator,
     DbSession,
     cookie_secure,
+    decode_session,
     new_session_cookie,
     refreshed_cookie,
 )
@@ -131,7 +133,9 @@ def login(
 ) -> Response:
     if len(email) > 320 or len(password) > 1024 or len(code) > 16:
         return _page(request, "admin/login.html", None, 401, error=_FAILED)
-    result = operators.authenticate(db, email, password, code)
+    result = operators.authenticate(
+        db, email, password, code, client=operators.client_key(client_address(request))
+    )
     if result.throttled:
         return _page(
             request,
@@ -161,7 +165,14 @@ _FAILED = "Sign-in failed. Check your email, password and code."
 
 
 @router.post("/logout")
-def logout() -> Response:
+def logout(request: Request, db: DbSession) -> Response:
+    """Sign out. The epoch is raised, so every copy of this operator's cookie stops working, not
+    just the one in this browser (a stolen cookie is ended too)."""
+    data = decode_session(request.cookies.get(COOKIE_NAME))
+    operator = db.get(Operator, data.operator_id) if data else None
+    if operator is not None and data is not None and (operator.session_epoch or 0) == data.epoch:
+        operators.revoke_sessions(db, operator)
+        audit.record(db, operator, "operator.sign_out", "operator", operator.id)
     response = RedirectResponse("/admin/login?notice=signed_out", status_code=303)
     response.delete_cookie(COOKIE_NAME, path="/admin")
     return _finish(response)

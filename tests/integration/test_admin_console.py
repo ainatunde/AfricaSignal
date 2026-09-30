@@ -27,12 +27,6 @@ PASSWORD = "correct horse battery staple"
 ORIGIN = {"Origin": "http://testserver"}
 
 
-@pytest.fixture(autouse=True)
-def _clean_state() -> None:
-    operators._last_step.clear()
-    operators.throttle._failures.clear()
-
-
 @pytest.fixture
 def client(session: Session) -> Iterator[TestClient]:
     app = create_app()
@@ -122,7 +116,7 @@ def test_wrong_totp_code_is_refused(client: TestClient, session: Session) -> Non
     assert response.status_code == 401  # type: ignore[attr-defined]
     assert COOKIE_NAME not in client.cookies
     assert client.get("/admin/sources").status_code == 303
-    assert audit_actions(session) == []
+    assert audit_actions(session) == ["operator.sign_in_failed"]
 
 
 def test_wrong_password_is_refused_with_the_same_message_as_wrong_code(
@@ -178,7 +172,7 @@ def test_repeated_failures_lock_the_email_out_even_with_good_credentials(
     client: TestClient, session: Session
 ) -> None:
     account = make_operator(session)
-    for _ in range(operators.throttle.max_failures):
+    for _ in range(operators.CLIENT_MAX_FAILURES):
         assert sign_in(client, account, password="wrong password here").status_code == 401  # type: ignore[attr-defined]
     response = sign_in(client, account)
     assert response.status_code == 429  # type: ignore[attr-defined]

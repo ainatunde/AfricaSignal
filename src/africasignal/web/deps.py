@@ -1,11 +1,11 @@
 """Shared web dependencies: the database session and the operator session cookie.
 
 The console session is a signed, stateless cookie: ``base64url(json).base64url(hmac-sha256)``. It
-holds the operator id, when the session began, when it was last used, and a short fingerprint of the
-operator's password hash. Every request re-reads the operator, so disabling an operator or changing
-their password ends their sessions at once; an idle session lapses after ``IDLE_SECONDS`` and any
-session after ``ABSOLUTE_SECONDS``. Signing out clears the cookie but cannot recall a copy of it
-that was already stolen: the expiry and the fingerprint are the limits (noted for AS-042).
+holds the operator id, when the session began, when it was last used, a short fingerprint of the
+operator's password hash and the operator's session epoch. Every request re-reads the operator, so
+disabling an operator, changing their password, or signing out (which raises the epoch) ends all
+of their sessions at once, including a copy of the cookie that was stolen; an idle session lapses
+after ``IDLE_SECONDS`` and any session after ``ABSOLUTE_SECONDS``.
 """
 
 from __future__ import annotations
@@ -64,12 +64,19 @@ class SessionData:
     started: int
     seen: int
     fp: str
+    epoch: int
 
 
 def encode_session(data: SessionData) -> str:
     body = _b64(
         json.dumps(
-            {"op": data.operator_id, "iat": data.started, "seen": data.seen, "fp": data.fp},
+            {
+                "op": data.operator_id,
+                "iat": data.started,
+                "seen": data.seen,
+                "fp": data.fp,
+                "ep": data.epoch,
+            },
             separators=(",", ":"),
         ).encode()
     )
@@ -85,7 +92,9 @@ def decode_session(value: str | None, now: float | None = None) -> SessionData |
         return None
     try:
         raw = json.loads(_unb64(body))
-        data = SessionData(int(raw["op"]), int(raw["iat"]), int(raw["seen"]), str(raw["fp"]))
+        data = SessionData(
+            int(raw["op"]), int(raw["iat"]), int(raw["seen"]), str(raw["fp"]), int(raw["ep"])
+        )
     except (ValueError, KeyError, TypeError):
         return None
     now = time.time() if now is None else now
@@ -96,13 +105,15 @@ def decode_session(value: str | None, now: float | None = None) -> SessionData |
 
 def new_session_cookie(operator: Operator, now: float | None = None) -> str:
     now = int(time.time() if now is None else now)
-    return encode_session(SessionData(operator.id, now, now, fingerprint(operator)))
+    return encode_session(
+        SessionData(operator.id, now, now, fingerprint(operator), operator.session_epoch or 0)
+    )
 
 
 def refreshed_cookie(data: SessionData, now: float | None = None) -> str:
     """The same session with ``seen`` moved to now, so activity keeps it alive."""
     now = int(time.time() if now is None else now)
-    return encode_session(SessionData(data.operator_id, data.started, now, data.fp))
+    return encode_session(SessionData(data.operator_id, data.started, now, data.fp, data.epoch))
 
 
 def cookie_secure() -> bool:
@@ -136,6 +147,7 @@ def current_operator(request: Request, db: DbSession) -> Authenticated:
         operator is None
         or operator.disabled_at is not None
         or not hmac.compare_digest(fingerprint(operator), data.fp)
+        or (operator.session_epoch or 0) != data.epoch
     ):
         raise _to_login()
     return Authenticated(operator, data)

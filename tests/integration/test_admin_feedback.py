@@ -23,12 +23,6 @@ PASSWORD = "correct horse battery staple"
 ORIGIN = {"Origin": "http://testserver"}
 
 
-@pytest.fixture(autouse=True)
-def _clean_state() -> None:
-    operators._last_step.clear()
-    operators.throttle._failures.clear()
-
-
 @pytest.fixture
 def client(session: Session) -> Iterator[TestClient]:
     app = create_app()

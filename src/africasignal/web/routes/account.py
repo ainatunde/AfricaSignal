@@ -26,6 +26,7 @@ from africasignal.publish import accounts, login_tokens, tokens
 from africasignal.publish.email_render import UNSUBSCRIBE_PURPOSE
 from africasignal.web import queries
 from africasignal.web.analytics import SESSION_COOKIE
+from africasignal.web.client_address import client_address
 from africasignal.web.ratelimit import RateLimiter
 from africasignal.web.render import badge, render
 from africasignal.web.user_dep import (
@@ -64,7 +65,7 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{20,100}")
 
 
 def _client(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    return client_address(request)
 
 
 def _page(

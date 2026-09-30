@@ -25,6 +25,7 @@ from africasignal.net.netutil import USER_AGENT
 from africasignal.web import queries
 from africasignal.web.cache import TTLCache
 from africasignal.web.chart import line_chart_svg
+from africasignal.web.client_address import client_address
 from africasignal.web.ratelimit import RateLimiter
 from africasignal.web.render import (
     BADGES,
@@ -205,9 +206,7 @@ class Coordinates(BaseModel):
 def locate_place(body: Coordinates, request: Request, db: Db) -> JSONResponse:
     """Turn a position into the LGA and state that contain it. Writes nothing and logs nothing:
     the coordinates live in this function's arguments and one query, then are gone."""
-    allowed, retry_after = locate_limiter.check(
-        request.client.host if request.client else "unknown"
-    )
+    allowed, retry_after = locate_limiter.check(client_address(request))
     if not allowed:
         return JSONResponse(
             {"detail": "Too many requests."},

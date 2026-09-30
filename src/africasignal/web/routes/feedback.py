@@ -28,6 +28,7 @@ from africasignal.publish import login_tokens, tokens
 from africasignal.publish.email_render import DIGEST_OPEN_PURPOSE
 from africasignal.web import queries
 from africasignal.web.analytics import set_anon_cookie
+from africasignal.web.client_address import client_address
 from africasignal.web.ratelimit import RateLimiter
 from africasignal.web.render import render
 from africasignal.web.user_dep import CurrentUser, Db, now, private_headers
@@ -51,7 +52,7 @@ _PIXEL = bytes.fromhex(
 
 
 def _client(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
+    return client_address(request)
 
 
 def _visitor(request: Request) -> tuple[str, bool]:
