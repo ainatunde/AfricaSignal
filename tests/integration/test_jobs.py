@@ -409,6 +409,18 @@ def test_kinds_without_a_handler_are_not_enqueued(
     assert _kinds(factory) == []
 
 
+def test_check_backups_is_enqueued_once_an_hour(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _register(monkeypatch, "check_backups", lambda ctx: None)
+    t = datetime(2026, 10, 7, 10, 3, 10, tzinfo=UTC)
+    _tick(factory, t)
+    _tick(factory, t.replace(minute=50))
+    assert _kinds(factory) == ["check_backups"]
+    _tick(factory, t.replace(hour=11))
+    assert _kinds(factory) == ["check_backups", "check_backups"]
+
+
 def test_periodic_jobs_are_deduplicated_per_slot(
     factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:

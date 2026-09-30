@@ -119,7 +119,8 @@ class Operator(CreatedMixin, Base):
 class AuditLog(CreatedMixin, Base):
     __tablename__ = "audit_log"
 
-    operator_id: Mapped[int] = mapped_column(ForeignKey("operator.id"), nullable=False)
+    # Empty for a change the system made itself (a job raising an alert); see audit.record_system.
+    operator_id: Mapped[int | None] = mapped_column(ForeignKey("operator.id"))
     action: Mapped[str] = mapped_column(Text, nullable=False)
     target_kind: Mapped[str] = mapped_column(Text, nullable=False)
     target_id: Mapped[int | None] = mapped_column(BigInteger)

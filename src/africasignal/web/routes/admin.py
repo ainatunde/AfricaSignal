@@ -376,7 +376,7 @@ def resume_source(
 def audit_log(request: Request, auth: CurrentOperator, db: DbSession) -> Response:
     rows = db.execute(
         select(AuditLog, Operator.email)
-        .join(Operator, Operator.id == AuditLog.operator_id)
+        .outerjoin(Operator, Operator.id == AuditLog.operator_id)  # system rows have no operator
         .order_by(AuditLog.id.desc())
         .limit(200)
     ).all()

@@ -80,6 +80,8 @@ bucket settings to back up to a local directory, and `OPS_USE_CONSOLE_SETTINGS=0
 ## 3. Daily and weekly checks
 
 - The heartbeat service is green. If it alerts, see section 6.
+- The audit log (console, **Audit log**) has no open `alert.opened` for `backup_stale` or
+  `restore_drill_failed` (section 7).
 - `docker compose --profile backup logs --tail 50 backup` ends with `backup ok: ... N dump(s) kept`.
 - Weekly: `restore.sh --list` shows a dump from each of the last 7 nights and sizes that do not shrink
   suddenly.
@@ -128,13 +130,81 @@ restore --list
 
 ### 4.2 Restore a single table or recent data
 
-Restore into a scratch database (4.3, step 2), then copy what you need with `psql` or
+Restore into a scratch database (4.3.3, step 2), then copy what you need with `psql` or
 `pg_dump --table ... | psql`. Do not restore over the live database for a partial loss.
 
-### 4.3 Restore drill (staging)
+### 4.3 Restore drill
 
-Purpose: prove the backups can be restored, on a host that is not production, and time it. Needed
-before launch (AS-041, AS-043) and then every quarter.
+Purpose: prove the backups can be restored, and time it. Needed before launch (AS-041, AS-043) and
+then every quarter. There are two parts: an automated drill that needs only a PostgreSQL with PostGIS
+(below), and a manual drill on a staging host with the real bucket (4.3.2), which is what AS-041 is
+accepted on.
+
+#### 4.3.1 Automated drill (`scripts/restore-drill.sh`)
+
+The script takes a fresh backup of a database with `scripts/backup.sh`, restores it with
+`scripts/restore.sh` into a scratch database on the same server (`<name>_drill_<timestamp>`), and
+compares the two. It fails with a non-zero exit and the reason when any of these differ:
+
+- the set of tables, and every table's row count (a source that is being written to during the drill
+  may move within the range seen before and after the dump, not outside it);
+- the alembic version and the list of PostgreSQL extensions, and PostGIS must answer `postgis_version()`;
+- the content (an md5 over every row) of `source`, `evidence_document`, `measurement`,
+  `assessment_version` and `place`, when the source did not change while the dump ran;
+- an id sequence behind its table's highest id (the restored database could not take inserts).
+
+It then drops the scratch database (`--keep` keeps it) and records the result in the source database
+(`ops.restore_drill_status`), where the `check_backups` job (section 7) turns a failure into an alert.
+The scratch database is created with the source's own credentials, so the role needs `CREATEDB`.
+
+Run it in any of these places; none needs a staging host or a bucket:
+
+```sh
+# CI: the "Restore drill" step of .github/workflows/ci.yml does this on every pull request, on the
+# migrated and seeded schema. The fault-injection tests are tests/ops/test_restore_drill.py.
+
+# Docker Compose (the database from the compose file; dumps go to a throwaway directory):
+docker compose --profile drill run --rm restore-drill
+
+# A developer machine with PostgreSQL 16 + PostGIS, rclone and openssl installed:
+BACKUP_DIR=/tmp/drill-backups OPS_USE_CONSOLE_SETTINGS=0 \
+  scripts/restore-drill.sh --source-url postgresql://africasignal:africasignal@localhost:5432/africasignal
+```
+
+Good output ends with `restore drill ok: africasignal-<stamp>.dump restored in <n>s, <n> table(s)
+compared, schema <version>`. Anything else is a failed drill: the line starting `MISMATCH:` or `ERROR:`
+says what. A drill that has never been run against the real bucket proves the tooling, not the
+backups.
+
+#### 4.3.2 Drill on a staging host, with the real bucket (still to do)
+
+There is no staging host and no backup bucket yet (plan decisions D4 and D5), so this has not been
+done. When both exist:
+
+1. Give the staging host the same `BACKUP_S3_*` settings and `BACKUP_PASSPHRASE_FILE` as production (or a
+   bucket holding a copy of production's dumps), and the staging database's `DATABASE_URL`. Use a
+   scratch bucket for `RESTORE_S3_*`, never the app's bucket.
+2. Run the automated drill against staging's own database, to prove the tooling end to end with the
+   real bucket and encryption (an empty `DRILL_BACKUP_DIR` means "use the bucket, not a local
+   directory"):
+
+   ```sh
+   DRILL_BACKUP_DIR= docker compose --profile drill run --rm restore-drill
+   ```
+
+3. Run it against the newest real backup, and check that sampled evidence objects exist in the
+   scratch bucket:
+
+   ```sh
+   DRILL_BACKUP_DIR= docker compose --profile drill run --rm restore-drill --latest --verify-objects 20
+   ```
+
+   `--latest` can only compare what a backup hours old allows: it restores, the schema version is
+   present, every table the source has is present (when the schema versions match), key tables are
+   not empty when the source's are, and row counts are printed rather than compared.
+4. Do the manual look below, for the parts a script cannot judge, and fill in the drill record.
+
+#### 4.3.3 Manual steps on staging
 
 1. On staging, make sure a recent backup exists: run a backup by hand (section 2, step 4) and note the
    time.
@@ -170,7 +240,8 @@ before launch (AS-041, AS-043) and then every quarter.
 
 | Date | Backup used | Operator | Restore time | Result | Notes |
 |---|---|---|---|---|---|
-| | | | | **No drill has been done yet.** | The scripts were tested against a local PostgreSQL 16 with PostGIS and an S3-compatible test server, but not on a staging host (no staging host or backup bucket exists yet; plan decisions D4 and D5). AS-041 is accepted only when the first row is filled in. |
+| 2026-09-30 | fresh backup, local directory | automated (`restore-drill.sh`), PostgreSQL 16 + PostGIS on a developer machine | 2 s | Passed: 30 tables, counts and content equal, sequences ok | Proves the scripts and the schema. Not a staging drill: no bucket, no encryption, no second app copy. |
+| | | | | **No drill on a staging host has been done yet.** | No staging host or backup bucket exists (plan decisions D4 and D5). AS-041 is accepted only when a row for the staging drill (4.3.2 and 4.3.3) is filled in. |
 
 ## 5. Logs
 
@@ -205,9 +276,37 @@ target, so fix it the same day.
 
 ## 7. Monitoring and alerts
 
+### 7.1 Backup and restore-drill alerts (automated)
+
+The scheduler runs `check_backups` every hour. `backup.sh` and `restore-drill.sh` leave their last
+result in the app database (settings `ops.backup_status` and `ops.restore_drill_status`; set
+`OPS_RECORD_STATUS=0` to stop that). The job raises:
+
+| Alert | When | Clears when |
+|---|---|---|
+| `backup_stale` | The last successful backup is older than **Settings > Backup storage > Alert when the last backup is older than** (default 36 hours), or, outside development, none has been recorded in that long since the job first ran. | A backup succeeds. |
+| `restore_drill_failed` | The last restore drill did not pass (the alert text says why). | A later drill passes. |
+
+Where to see them: the console's **Audit log** has an `alert.opened` row (operator "system") when an
+alert opens and `alert.resolved` when it clears, and the app logs an `ALERT ... still open` error line
+every hour while it stays open. The current state is the `ops.alert.backup_stale` and
+`ops.alert.restore_drill_failed` rows of the `setting` table:
+
+```sql
+SELECT key, value->>'state' AS state, value->>'opened_at' AS opened, value->>'summary' AS summary
+FROM setting WHERE key LIKE 'ops.alert.%';
+```
+
+Nothing is sent to anyone: no operator notification channel exists yet (email goes only to readers).
+Until one does, watch the log or the audit log, and keep the external heartbeat service (section 2) as
+the thing that actually wakes a person. A backup job that is down and cannot even record its own
+failure shows up here as `backup_stale` once the limit passes.
+
+### 7.2 Uptime and other alerts (manual)
+
 The plan (AS-041) asks for an uptime check on `/healthz` and email alerts when a source is failing,
-jobs are dead, or the LLM budget is 80 % spent. **This change does not automate those; it only ships
-the backup scripts and this runbook.** Until they exist, do the following.
+jobs are dead, or the LLM budget is 80 % spent. **Those are not automated yet** (only the backup alerts
+above are). Until they exist, do the following.
 
 - **Uptime:** point an external monitor (UptimeRobot, Better Stack or similar) at
   `https://<domain>/healthz` with a 1-minute interval and email alerts. The body must contain

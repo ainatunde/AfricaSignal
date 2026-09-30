@@ -1,4 +1,4 @@
-# Shared helpers for scripts/backup.sh and scripts/restore.sh. Source this file; do not run it.
+# Shared helpers for scripts/backup.sh, restore.sh and restore-drill.sh. Source this file; do not run it.
 # shellcheck shell=bash
 
 log() {
@@ -11,6 +11,7 @@ log() {
 }
 
 die() {
+  OPS_LAST_ERROR="$*"
   log "ERROR: $*"
   exit 1
 }
@@ -157,4 +158,38 @@ passphrase_init() {
     BACKUP_PASSPHRASE_FILE="$WORKDIR/passphrase"
     printf '%s\n' "$BACKUP_PASSPHRASE" >"$BACKUP_PASSPHRASE_FILE"
   fi
+}
+
+# ---- status the app reads to raise alerts -------------------------------------------------------
+# backup.sh and restore-drill.sh leave a small JSON record in the `setting` table of the app's
+# database, under `ops.backup_status` and `ops.restore_drill_status`. The scheduler's
+# `check_backups` job (src/africasignal/backup_alerts.py) reads them and alerts when the last
+# successful backup is too old or the last drill failed. Recording is best effort: it never fails
+# the script that calls it (a failed backup must still exit with its own error), and it is skipped
+# without a word when there is no database or no `setting` table yet.
+
+# json_str TEXT: TEXT as a JSON string literal, control characters dropped, cut to 300 characters.
+json_str() {
+  local text
+  text="$(printf '%s' "$1" | tr -d '\000-\037' | cut -c1-300 | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+  printf '"%s"' "$text"
+}
+
+# record_ops_status KEY JSON_OBJECT: merge JSON_OBJECT into setting row KEY. Uses
+# OPS_STATUS_DATABASE_URL, else DATABASE_URL. Set OPS_RECORD_STATUS=0 to turn it off.
+record_ops_status() {
+  local key="$1" patch="$2" url err
+  [ "${OPS_RECORD_STATUS:-1}" != 0 ] || return 0
+  url="${OPS_STATUS_DATABASE_URL:-${DATABASE_URL:-}}"
+  [ -n "$url" ] && command -v psql >/dev/null 2>&1 || return 0
+  url="$(libpq_url "$url")"
+  [ "$(psql "$url" -Atq -c "SELECT to_regclass('public.setting') IS NOT NULL" 2>/dev/null || true)" = t ] || return 0
+  if ! err="$(psql "$url" -v ON_ERROR_STOP=1 -Atq -v key="$key" -v patch="$patch" 2>&1 >/dev/null <<'SQL'
+INSERT INTO setting (key, value) VALUES (:'key', :'patch'::jsonb)
+ON CONFLICT (key) DO UPDATE SET value = setting.value || EXCLUDED.value, updated_at = now();
+SQL
+  )"; then
+    log "warning: could not record $key: $(printf '%s' "$err" | tail -n 1 | cut -c1-160)"
+  fi
+  return 0
 }

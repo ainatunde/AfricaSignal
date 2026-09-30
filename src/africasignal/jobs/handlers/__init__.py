@@ -43,6 +43,7 @@ def load_all() -> None:
     scheduler at startup."""
     from africasignal.jobs.handlers import (  # noqa: F401
         assess_situation,
+        check_backups,
         dispatch_outbox,
         expire_assessments,
         extract_claims,

@@ -70,6 +70,7 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
         ("release_held_versions", f"release_held_versions:{_slot(now, 1)}"),
         ("dispatch_outbox", f"dispatch_outbox:{_slot(now, 1)}"),
         ("prune_events", f"prune_events:{_slot(now, 24 * 60)}"),  # retention: 13 months
+        ("check_backups", f"check_backups:{_slot(now, 60)}"),  # stale backup, failed drill alerts
     ]
     # 4. Weekly digest: Monday from 07:00 Africa/Lagos, deduplicated per ISO week.
     lagos = now.astimezone(LAGOS)

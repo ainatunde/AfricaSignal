@@ -156,6 +156,16 @@ _DEFS = (
         minimum=1,
         maximum=3650,
     ),
+    SettingDef(
+        "backup_max_age_hours",
+        "Alert when the last backup is older than (hours)",
+        "backup",
+        "int",
+        "A nightly backup plus a margin. Older than this raises an alert in the audit log.",
+        default="36",
+        minimum=1,
+        maximum=720,
+    ),
 )
 
 REGISTRY: dict[str, SettingDef] = {d.key: d for d in _DEFS}

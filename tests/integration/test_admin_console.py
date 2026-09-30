@@ -116,6 +116,19 @@ def test_sign_in_with_password_and_code(client: TestClient, session: Session) ->
     assert "sign_in" in audit_actions(session)[0]
 
 
+def test_audit_page_shows_rows_the_system_wrote_as_system(
+    client: TestClient, session: Session
+) -> None:
+    from africasignal import audit
+
+    account = make_operator(session)
+    signed_in(client, account)
+    audit.record_system(session, "alert.opened", "alert", after={"code": "backup_stale"})
+    page = client.get("/admin/audit")
+    assert page.status_code == 200
+    assert "alert.opened" in page.text and "system" in page.text
+
+
 def test_wrong_totp_code_is_refused(client: TestClient, session: Session) -> None:
     account = make_operator(session)
     response = sign_in(client, account, code="000000" if account.code() != "000000" else "000001")
