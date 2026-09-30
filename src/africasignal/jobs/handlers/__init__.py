@@ -45,6 +45,7 @@ def load_all() -> None:
         assess_situation,
         dispatch_outbox,
         expire_assessments,
+        extract_claims,
         fetch_source,
         import_nbs_file,
         invalidate,
@@ -52,6 +53,7 @@ def load_all() -> None:
         process_document,
         prune_events,
         release_held_versions,
+        resolve_places,
         weekly_digest,
     )
     from africasignal.sources import nbs  # noqa: F401  (registers the NBS adapter)
