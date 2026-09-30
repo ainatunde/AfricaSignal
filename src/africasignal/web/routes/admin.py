@@ -19,7 +19,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from africasignal import audit, operators
+from africasignal import audit, operators, settings_store
 from africasignal.models import AuditLog, Operator, Source, SourcePermission
 from africasignal.sources import console
 from africasignal.sources.console import ConsoleError, PermissionInput
@@ -53,6 +53,8 @@ NOTICES = {
     "paused": "Source paused.",
     "resumed": "Source resumed.",
     "signed_out": "You have signed out.",
+    "saved": "Settings saved.",
+    "unchanged": "Nothing to change.",
 }
 
 _SECURITY_HEADERS = {
@@ -379,3 +381,86 @@ def audit_log(request: Request, auth: CurrentOperator, db: DbSession) -> Respons
         .limit(200)
     ).all()
     return _page(request, "admin/audit.html", auth, rows=rows)
+
+
+# --- settings -----------------------------------------------------------------------------------
+
+SOURCE_LABELS = {
+    "console": "Set here",
+    "environment": "From environment variable",
+    "default": "Default",
+    "unset": "Not set",
+    "unreadable": "Saved value unreadable: enter it again",
+}
+
+
+def _settings_page(
+    request: Request,
+    db: Session,
+    auth: Authenticated,
+    status_code: int = 200,
+    error: str | None = None,
+    submitted: dict[str, str] | None = None,
+) -> Response:
+    groups = []
+    for group_id, title in settings_store.GROUPS:
+        fields = []
+        for key in settings_store.group_keys(group_id):
+            defn = settings_store.definition(key)
+            resolved = settings_store.resolve(db, key)
+            value = "" if defn.secret else (resolved.value or "")
+            if submitted is not None and key in submitted and not defn.secret:
+                value = submitted[key]
+            fields.append(
+                {
+                    "defn": defn,
+                    "value": value,
+                    "source": SOURCE_LABELS[resolved.source],
+                    "source_id": resolved.source,
+                    "configured": resolved.value is not None,
+                    "has_console_value": resolved.source == "console",
+                }
+            )
+        groups.append({"id": group_id, "title": title, "fields": fields})
+    return _page(
+        request,
+        "admin/settings.html",
+        auth,
+        status_code,
+        groups=groups,
+        missing=settings_store.missing_expected(db),
+        error=error,
+    )
+
+
+@router.get("/settings")
+def settings_view(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    return _settings_page(request, db, auth)
+
+
+@router.post("/settings/{group}")
+async def settings_save(
+    group: str, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    if group not in dict(settings_store.GROUPS):
+        raise HTTPException(status_code=404, detail="No such settings group")
+    form = await request.form()
+    submitted = {k: v for k, v in form.items() if isinstance(v, str)}
+    changes: dict[str, str | None] = {}
+    for key in settings_store.group_keys(group):
+        defn = settings_store.definition(key)
+        value = submitted.get(key, "").strip()
+        if submitted.get(f"clear__{key}") == "on":
+            changes[key] = None
+        elif defn.secret:
+            if value:  # a blank secret field means "leave it as it is"
+                changes[key] = value
+        elif value == "":
+            changes[key] = None
+        elif value != (settings_store.resolve(db, key).value or ""):
+            changes[key] = value  # the field is pre-filled, so only a real edit counts
+    try:
+        changed = settings_store.apply_changes(db, auth.operator, changes)
+    except settings_store.SettingError as exc:
+        return _settings_page(request, db, auth, 400, error=str(exc), submitted=submitted)
+    return _redirect(f"/admin/settings?notice={'saved' if changed else 'unchanged'}", auth)

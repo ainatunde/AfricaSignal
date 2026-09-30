@@ -1,0 +1,35 @@
+{% extends "admin/base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<p class="muted">A value saved here wins over the environment variable of the same name in capitals; clear it to fall back. Secrets are encrypted and never shown again: leave a secret field empty to keep the saved one. Every change is in the <a href="/admin/audit">audit log</a>.</p>
+<p class="muted">Not configurable here, because they are needed to start or protect the app: <code>DATABASE_URL</code>, <code>SECRET_KEY</code>, <code>ENV</code>, <code>ADMIN_TRUSTED_ORIGINS</code>.</p>
+
+{% if missing %}
+<p class="notice" style="border-left-color: var(--warn)" role="status">Not configured yet: {% for d in missing %}{{ d.label }} ({{ d.group }}){% if not loop.last %}, {% endif %}{% endfor %}.</p>
+{% endif %}
+
+{% for group in groups %}
+<h2 id="{{ group.id }}">{{ group.title }}</h2>
+<form method="post" action="/admin/settings/{{ group.id }}" autocomplete="off">
+  {% for f in group.fields %}
+  {% set d = f.defn %}
+  <label for="f-{{ d.key }}">{{ d.label }}
+    <span class="muted">· {% if d.secret and f.configured %}configured{% else %}{{ f.source }}{% endif %}{% if d.secret and f.configured and f.source_id != 'console' %} ({{ f.source|lower }}){% endif %}</span></label>
+  {% if d.kind == "choice" %}
+  <select id="f-{{ d.key }}" name="{{ d.key }}">
+    <option value="" {{ 'selected' if not f.value }}>Not set</option>
+    {% for c in d.choices %}<option value="{{ c }}" {{ 'selected' if f.value == c }}>{{ c }}</option>{% endfor %}
+  </select>
+  {% elif d.secret %}
+  <input id="f-{{ d.key }}" name="{{ d.key }}" type="password" autocomplete="new-password" placeholder="{{ 'Leave empty to keep the saved key' if f.configured else 'Paste the key' }}" maxlength="500">
+  {% else %}
+  <input id="f-{{ d.key }}" name="{{ d.key }}" type="text" value="{{ f.value }}" maxlength="500" {% if d.default %}placeholder="{{ d.default }}"{% endif %}>
+  {% endif %}
+  {% if d.help %}<span class="muted">{{ d.help }}</span><br>{% endif %}
+  {% if f.has_console_value %}<label class="inline"><input type="checkbox" name="clear__{{ d.key }}" value="on"> Clear the saved value {% if d.secret %}(removes the key){% else %}(falls back to the environment variable or default){% endif %}</label>{% endif %}
+  {% endfor %}
+  <p><button type="submit">Save {{ group.title|lower }}</button></p>
+</form>
+{% endfor %}
+{% endblock %}

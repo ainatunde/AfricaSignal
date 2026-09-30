@@ -35,6 +35,7 @@
   {% if operator %}
   <nav aria-label="Console">
     <a href="/admin/sources">Sources</a>
+    {% if operator.role == "admin" %}<a href="/admin/settings">Settings</a>{% endif %}
     <a href="/admin/audit">Audit log</a>
   </nav>
   <span class="muted">{{ operator.email }} ({{ operator.role }})</span>

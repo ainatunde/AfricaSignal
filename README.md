@@ -44,8 +44,10 @@ python -m africasignal.admin disable-operator --email you@example.org   # or ena
 operators can view everything and pause a source. Every change writes an `audit_log` row (see
 `/admin/audit`). Behind a TLS-terminating proxy, set `ADMIN_TRUSTED_ORIGINS` to the public origin
 (for example `https://console.example.org`) so form posts pass the origin check. `SECRET_KEY`
-signs the session cookie and encrypts TOTP secrets, so changing it signs everyone out and makes
-stored TOTP secrets unreadable (recreate operators).
+signs the session cookie and encrypts TOTP secrets and the secrets saved under Settings, so
+changing it signs everyone out and makes all of those unreadable (recreate operators, re-enter the
+secrets). Scripts on the host can read a setting with
+`python -m africasignal.admin get-setting backup_s3_bucket` (add `--reveal` for a secret).
 
 ## Load places
 
@@ -59,9 +61,12 @@ pinned by SHA-256 in `src/africasignal/places/load.py`. Extra names live in
 
 ## Configuration
 
-Set through environment variables (see `src/africasignal/config.py`). With `ENV=staging` or
-`ENV=production`, startup fails with `RuntimeError` if `DATABASE_URL`, `S3_*`, `ANTHROPIC_API_KEY`,
-`EMAIL_*` or `SECRET_KEY` is missing.
+Only `DATABASE_URL` and `SECRET_KEY` must be environment variables (with `ENV=staging` or
+`ENV=production`, startup fails with `RuntimeError` if either is missing). Everything else an
+operator can set in the console under **Settings** (Anthropic key, public address, email provider
+and sender, evidence and backup storage); an environment variable of the same name in capitals
+(`ANTHROPIC_API_KEY`, `PUBLIC_BASE_URL`, `S3_BUCKET`, ...) is used when nothing is saved there.
+See `src/africasignal/settings_store.py` for the list.
 
 ## NBS price data
 
