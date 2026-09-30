@@ -60,7 +60,10 @@ class Outlet:
                 content=self.feed,
             )
         entry = next(e for e in self.entries if e["url"] == url)
-        page = ARTICLE.format(title=entry["title"], body=SENTENCE * 6)
+        # each story has its own words, or reporting-origin clustering would (rightly) treat the
+        # four as copies of one wire story
+        body = SENTENCE + " ".join(f"{entry['title']} ({i}) {entry['url']}." for i in range(12))
+        page = ARTICLE.format(title=entry["title"], body=body)
         return FetchResult(
             url=url,
             status_code=200,

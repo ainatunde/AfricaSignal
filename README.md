@@ -69,7 +69,20 @@ followers and the monthly infrastructure bill.
 
 The email provider, sender, API key and public address are read from the console **Settings** page
 on every use (environment variables are the fallback). With no provider configured, development
-logs mail and every other environment leaves it waiting in the outbox.
+logs mail and every other environment leaves it waiting in the outbox. `console` (logs only) and
+`fake` are for development and tests; Postmark and Resend are implemented and have only been tested
+against a mocked transport.
+
+## How the collectors feed the assessments
+
+`fetch_source` (NBS, NERC, NNPC, news feeds) and `gdelt_poll` (GDELT finds articles; only approved
+outlets are fetched) capture evidence. Each captured document gets a reporting origin
+(`evidence/origins.py`: one origin per wire story, official documents never merged), and news
+articles and NERC orders are queued for claim extraction (`extract.jobs.enqueue_extraction`). The
+`extract_claims` job asks the language model for claims, then checks any electricity tariff it
+returned against the figures the code reads from the document (`reconcile_tariff_claims`), and
+queues `resolve_places`. NNPC price announcements are read by code only. Publishing a version queues
+`notify_followers` once (`publish/hooks.py`; registered when the worker loads its handlers).
 
 ## Load places
 
@@ -103,12 +116,6 @@ Real files from both are saved in `tests/fixtures/nbs` with their URLs, dates an
 (vintages, restatements, the range-check queue) are described at the top of `sources/nbs.py`.
 Assessments (`publish/situations.py`) are computed in `assess/price_change.py` and are stored as
 drafts until the publication policy decides them.
-
-Email: the provider is chosen behind `publish/email.py`. `console` (logs only) and `fake` are
-accepted for development and tests; Postmark and Resend are implemented and have only been tested
-against a mocked transport. The provider, API key, sender and public address are saved in the
-operator console (Settings) and read on each use, so a change applies on the next send; the
-`EMAIL_*` and `PUBLIC_BASE_URL` environment variables are only the fallback.
 
 ## Backups
 

@@ -135,10 +135,13 @@ CORRECTION_HEADINGS = {
 }
 
 
+DEV_BASE_URL = "http://localhost:8000"
+
+
 def base_url(base: str | None = None) -> str:
     """The site's address for links in emails. ``base`` is the value read from the console
-    settings (``resolve_base_url``); without it the environment's ``PUBLIC_BASE_URL`` is used."""
-    return (base or get_settings().public_base_url).rstrip("/")
+    settings (``resolve_base_url``); without it the development address is used."""
+    return (base or DEV_BASE_URL).rstrip("/")
 
 
 def resolve_base_url(session: Session) -> str:

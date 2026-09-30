@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from africasignal.evidence import ocr as ocr_module
 from africasignal.evidence.capture import capture
 from africasignal.evidence.ocr import OcrResult, OcrUnavailable
-from africasignal.models import Claim, EvidenceDocument, ReportingOrigin, Source
+from africasignal.models import Claim, EvidenceDocument, Job, ReportingOrigin, Source
 from africasignal.sources import nerc
 from africasignal.sources.nerc import (
     EXTRACTOR_VERSION,
@@ -255,6 +255,8 @@ def test_a_plain_order_is_read_from_its_text_layer_and_makes_no_tariff_claims(
     assert result.claims == 0
     assert "read by text layer" in result.notes
     assert any("not a DisCo tariff order" in n for n in result.notes)
+    queued = session.scalars(select(Job).where(Job.kind == "extract_claims")).all()
+    assert [j.payload for j in queued] == [{"document_id": doc.id}]  # the model reads its policy
     assert doc.text_content and "ORDER NO: NERC/2026/062A" in doc.text_content
 
 

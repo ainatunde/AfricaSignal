@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from africasignal.evidence.capture import record_document
 from africasignal.jobs import handlers, queue
+from africasignal.jobs.handlers import JobContext
 from africasignal.jobs.handlers import gdelt_fetch_article as fetch_article_handler
 from africasignal.jobs.handlers import gdelt_poll as poll_handler
 from africasignal.jobs.worker import Worker
@@ -592,7 +593,18 @@ def factory(engine: Engine) -> Iterator[sessionmaker[Session]]:
 
 
 @pytest.fixture
-def wired(monkeypatch: pytest.MonkeyPatch, net: Network, store: S3Store) -> None:
+def extracted() -> list[int]:
+    return []
+
+
+@pytest.fixture
+def wired(
+    monkeypatch: pytest.MonkeyPatch, net: Network, store: S3Store, extracted: list[int]
+) -> None:
+    def extract_claims(ctx: JobContext) -> None:  # the real one needs a language model
+        extracted.append(ctx.job.payload["document_id"])
+
+    monkeypatch.setitem(handlers.HANDLERS, "extract_claims", extract_claims)
     monkeypatch.setitem(handlers.HANDLERS, "gdelt_poll", poll_handler.gdelt_poll)
     monkeypatch.setitem(
         handlers.HANDLERS, "gdelt_fetch_article", fetch_article_handler.gdelt_fetch_article
@@ -616,7 +628,7 @@ def states(factory: sessionmaker[Session]) -> dict[tuple[str, str], int]:
 
 @pytest.mark.usefixtures("wired")
 def test_the_poll_job_discovers_then_the_article_job_captures(
-    factory: sessionmaker[Session], net: Network
+    factory: sessionmaker[Session], net: Network, extracted: list[int]
 ) -> None:
     with factory() as s:
         add_gdelt(s)
@@ -649,9 +661,15 @@ def test_the_poll_job_discovers_then_the_article_job_captures(
             )
         ).all()
         assert len(linked) >= 2 and set(linked) == {document.id}  # every event row is linked
+        assert document.origin_id is not None  # the article job gives it a reporting origin
+        assert extracted == [document.id]  # and queues claim extraction, once
     # The fixture has a second premiumtimesng.com URL; the fake network answers 404 for it, which
     # ends that job quietly.
-    assert states(factory) == {("gdelt_poll", "done"): 1, ("gdelt_fetch_article", "done"): 2}
+    assert states(factory) == {
+        ("gdelt_poll", "done"): 1,
+        ("gdelt_fetch_article", "done"): 2,
+        ("extract_claims", "done"): 1,
+    }
 
 
 @pytest.mark.usefixtures("wired")
@@ -690,7 +708,7 @@ def test_a_failing_poll_marks_the_source_and_is_retried(
 
 @pytest.mark.usefixtures("wired")
 def test_the_article_job_captures_an_on_topic_page(
-    factory: sessionmaker[Session], net: Network
+    factory: sessionmaker[Session], net: Network, extracted: list[int]
 ) -> None:
     with factory() as s:
         outlet = add_outlet(s, "punch", "https://punchng.com")
@@ -708,4 +726,5 @@ def test_the_article_job_captures_an_on_topic_page(
     with factory() as s:
         document = s.scalars(select(EvidenceDocument)).one()
         assert document.canonical_url == url.rstrip("/") and document.source_id == outlet_id
-    assert states(factory) == {("gdelt_fetch_article", "done"): 1}
+        assert extracted == [document.id]
+    assert states(factory) == {("gdelt_fetch_article", "done"): 1, ("extract_claims", "done"): 1}

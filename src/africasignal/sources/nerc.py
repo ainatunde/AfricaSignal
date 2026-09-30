@@ -36,6 +36,7 @@ from africasignal.catalog import load_policies
 from africasignal.evidence.ocr import has_text_layer, ocr_pdf
 from africasignal.evidence.simhash import simhash
 from africasignal.evidence.text import extract_text
+from africasignal.extract.jobs import enqueue_extraction
 from africasignal.models import Claim, EvidenceDocument, ReportingOrigin, Source
 from africasignal.net.fetch import FetchResult, fetch_document
 from africasignal.sources.base import (
@@ -210,6 +211,9 @@ class NercAdapter:
             text, doubtful, method = ocr.text, ocr.doubtful_lines, f"OCR ({ocr.pages} pages)"
             self._keep_text(ctx.session, doc, text)
         result.notes.append(f"read by {method}")
+        # Plain orders have policy statements only the model reads; on a tariff schedule the model's
+        # figures are checked against the code's (``reconcile_tariff_claims``, run by the job).
+        enqueue_extraction(ctx.session, doc.id)
 
         code = disco_code(doc.title, doc.url)
         if code is None:

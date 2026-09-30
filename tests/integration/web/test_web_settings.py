@@ -22,7 +22,7 @@ def _situation(session: Session) -> None:
 
 def test_share_links_use_the_address_from_the_console(client: TestClient, session: Session) -> None:
     page = client.get("/s/price-pms", headers=BROWSER).text
-    assert 'data-share="http://localhost:8000/s/price-pms?ref=share"' in page  # development default
+    assert 'data-share="/s/price-pms?ref=share"' in page  # nothing set: the link stays relative
 
     operator = operators.create_operator(
         session, "ops@example.org", "correct horse battery", "admin"

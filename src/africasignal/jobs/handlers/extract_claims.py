@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from africasignal.evidence.capture import load_text
 from africasignal.extract.claims import (
@@ -18,26 +17,16 @@ from africasignal.extract.claims import (
     keyword_hits,
     store_claims,
 )
+from africasignal.extract.jobs import enqueue_extraction  # noqa: F401  (re-exported)
 from africasignal.jobs.handlers import JobContext, register
 from africasignal.jobs.handlers.resolve_places import enqueue_place_resolution
-from africasignal.jobs.queue import enqueue
 from africasignal.llm import BudgetExhausted, build_adapter
 from africasignal.llm.budget import defer_until_next_day
 from africasignal.models import Claim, EvidenceDocument
+from africasignal.sources.nerc import reconcile_tariff_claims
 from africasignal.storage import get_store
 
 log = logging.getLogger("africasignal.extract_claims")
-
-
-def enqueue_extraction(session: Session, document_id: int) -> int | None:
-    """Queue extraction of a document. The same document under the same prompt and model is queued
-    at most once, so nothing is extracted twice."""
-    return enqueue(
-        session,
-        "extract_claims",
-        {"document_id": document_id},
-        dedupe_key=f"extract_claims:{document_id}:{extractor_version()}",
-    )
 
 
 @register("extract_claims")
@@ -87,6 +76,7 @@ def extract_claims_job(ctx: JobContext) -> None:
         return
 
     claims = store_claims(session, document, extraction, version)
+    reconcile_tariff_claims(session, document, text)  # code, not the model, decides a tariff
     valid = [c for c in claims if c.valid]
     if any(c.place_candidates for c in valid):
         enqueue_place_resolution(session, document_id, version)

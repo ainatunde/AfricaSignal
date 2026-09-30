@@ -28,13 +28,12 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import feedparser
-from sqlalchemy import select
-from sqlalchemy.orm import Session
 
 from africasignal.catalog import load_items
+from africasignal.evidence.origins import assign_origin
 from africasignal.evidence.urls import canonicalise
-from africasignal.jobs import queue
-from africasignal.models import EvidenceDocument, ReportingOrigin, Source
+from africasignal.extract.jobs import enqueue_extraction
+from africasignal.models import EvidenceDocument, Source
 from africasignal.net.fetch import FetchResult, fetch_document
 from africasignal.sources.base import (
     AdapterContext,
@@ -48,7 +47,6 @@ log = logging.getLogger("africasignal.sources.rss")
 FEED_MAX_BYTES = 5_000_000
 # A feed is a window on the newest stories; one far larger than this is not a news feed.
 MAX_ITEMS = 200
-EXTRACT_CLAIMS_JOB = "extract_claims"
 
 # An unterminated tag or entity at the end is what a cut-off summary leaves behind.
 _TAGS = re.compile(r"<[^>]*(?:>|$)")
@@ -181,44 +179,6 @@ def select_items(
     return items, not_matching, off_site
 
 
-# --- origin -----------------------------------------------------------------------------------
-
-
-def _assign_origin(session: Session, doc: EvidenceDocument, source: Source) -> ReportingOrigin:
-    """Give ``doc`` a reporting origin: that of an earlier capture of the same canonical URL (a
-    GDELT discovery, say), or a new ``outlet_report``. Simhash clustering of syndicated copies is
-    the job of ``evidence.origins`` (AS-025)."""
-    if doc.origin_id is not None:
-        existing = session.get(ReportingOrigin, doc.origin_id)
-        if existing is not None:
-            return existing
-    same_url = session.scalars(
-        select(EvidenceDocument)
-        .where(
-            EvidenceDocument.canonical_url == doc.canonical_url,
-            EvidenceDocument.origin_id.is_not(None),
-            EvidenceDocument.id != doc.id,
-        )
-        .order_by(EvidenceDocument.id)
-        .limit(1)
-    ).first()
-    if same_url is not None and same_url.origin_id is not None:
-        origin = session.get(ReportingOrigin, same_url.origin_id)
-        if origin is not None:
-            doc.origin_id = origin.id
-            return origin
-    when = doc.published_at or doc.retrieved_at
-    origin = ReportingOrigin(
-        kind="outlet_report",
-        label=f"{source.name} report, {when.day} {when:%b %Y}",
-        first_seen_at=doc.retrieved_at,
-    )
-    session.add(origin)
-    session.flush()
-    doc.origin_id = origin.id
-    return origin
-
-
 # --- adapter ----------------------------------------------------------------------------------
 
 
@@ -260,19 +220,10 @@ class RssAdapter:
         return items
 
     def process(self, doc: EvidenceDocument, ctx: AdapterContext) -> ProcessResult:
-        source = ctx.session.get(Source, doc.source_id)
-        if source is None:
-            raise FeedError(f"document {doc.id} has no source")
-        origin = _assign_origin(ctx.session, doc, source)
+        origin = assign_origin(ctx.session, doc)  # already set by process_document; idempotent
         result = ProcessResult()
-        queued = queue.enqueue(
-            ctx.session,
-            EXTRACT_CLAIMS_JOB,
-            {"document_id": doc.id},
-            dedupe_key=f"{EXTRACT_CLAIMS_JOB}:{doc.id}",
-        )
-        if queued is not None:
-            result.notes.append(f"queued {EXTRACT_CLAIMS_JOB} for document {doc.id}")
+        if enqueue_extraction(ctx.session, doc.id) is not None:
+            result.notes.append(f"queued claim extraction for document {doc.id}")
         result.notes.append(f"reporting origin {origin.id} ({origin.kind})")
         return result
 

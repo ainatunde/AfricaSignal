@@ -200,6 +200,26 @@ def test_the_handler_stores_claims_and_queues_place_resolution(
     assert job.payload == {"document_id": document.id}
 
 
+def test_tariff_claims_are_reconciled_with_the_document_after_storing(
+    session: Session, document: EvidenceDocument, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """NERC's ``reconcile_tariff_claims`` runs in the job, on the claims just stored, with the same
+    text the model read."""
+    seen: list[tuple[int, str, int]] = []
+
+    def spy(session_: Session, doc: EvidenceDocument, text: str) -> int:
+        stored = session_.scalar(
+            select(func.count()).select_from(Claim).where(Claim.evidence_document_id == doc.id)
+        )
+        seen.append((doc.id, text, stored or 0))
+        return 0
+
+    use(monkeypatch, FakeProvider([reply_from_recording(SYNTHETIC)]))
+    monkeypatch.setattr(extract_module, "reconcile_tariff_claims", spy)
+    run_job(session, "extract_claims", {"document_id": document.id})
+    assert seen == [(document.id, document.text_content, 6)]
+
+
 def test_the_same_document_is_not_extracted_twice(
     session: Session, document: EvidenceDocument, monkeypatch: pytest.MonkeyPatch
 ) -> None:
