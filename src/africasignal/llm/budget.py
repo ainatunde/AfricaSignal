@@ -96,16 +96,18 @@ def defer_until_next_day(
     payload: dict[str, Any],
     *,
     dedupe_key: str,
+    retry_at: datetime | None = None,
     now: datetime | None = None,
 ) -> int | None:
     """Hand a job's work to a fresh job that runs at the start of the next budget day.
 
     Call it from a handler that caught ``BudgetExhausted`` and then return normally: the current
     job completes, and the new one carries the same payload, so nothing is lost and no attempt is
-    used up. The new job's dedupe key is ``dedupe_key`` plus the day it is deferred to, so the
-    same work is deferred at most once per day. Returns the new job id, or ``None`` when that job
-    already exists.
+    used up. Pass ``BudgetExhausted.retry_at`` as ``retry_at``; without it the job runs at the
+    start of the budget day after ``now``. The new job's dedupe key is ``dedupe_key`` plus the day
+    it is deferred to, so the same work is deferred at most once per day. Returns the new job id,
+    or ``None`` when that job already exists.
     """
-    run_at = next_budget_day_start(now or datetime.now(UTC))
+    run_at = retry_at or next_budget_day_start(now or datetime.now(UTC))
     day = run_at.astimezone(LAGOS).date().isoformat()
     return enqueue(session, kind, payload, dedupe_key=f"{dedupe_key}:after:{day}", run_at=run_at)

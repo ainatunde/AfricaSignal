@@ -43,8 +43,10 @@ def load_all() -> None:
     scheduler at startup."""
     from africasignal.jobs.handlers import (  # noqa: F401
         assess_situation,
+        extract_claims,
         fetch_source,
         import_nbs_file,
         process_document,
+        resolve_places,
     )
     from africasignal.sources import nbs  # noqa: F401  (registers the NBS adapter)
