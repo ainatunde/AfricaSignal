@@ -77,6 +77,7 @@ GROUPS: tuple[tuple[str, str], ...] = (
     ("email", "Email"),
     ("storage", "Evidence storage"),
     ("backup", "Backup storage"),
+    ("privacy", "Privacy and retention"),
 )
 
 _DEFS = (
@@ -184,6 +185,18 @@ _DEFS = (
         default="30",
         minimum=1,
         maximum=3650,
+    ),
+    SettingDef(
+        "feedback_retention_months",
+        "Months to keep feedback text",
+        "privacy",
+        "int",
+        "After this many months a daily job removes the text, typed contact email, visitor code "
+        "and account link from feedback and error reports. The row stays, so vote counts and "
+        "what was corrected are kept. The privacy notice shows this number.",
+        default="24",
+        minimum=1,
+        maximum=120,
     ),
 )
 

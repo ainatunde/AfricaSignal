@@ -1,0 +1,19 @@
+{% extends "admin/base.html" %}
+{% block title %}Publication{% endblock %}
+{% block content %}
+<h1>Publication</h1>
+{% if suspended %}
+<p class="error" role="status"><strong>Publication is suspended</strong>{% if since %} since {{ since|when }}{% endif %}.</p>
+<p>While suspended: new assessments are withheld instead of published, correction emails already queued are held until you resume, this week's digest is skipped (not delayed), and every public page shows an “Updates are paused” banner. Sign-in emails still go out. Public pages are cached for up to five minutes, so the banner can take that long to reach every reader. Data collection carries on, and nothing already collected is lost.</p>
+<form method="post" action="/admin/publication/resume">
+  <button type="submit">Resume publication</button>
+</form>
+{% else %}
+<p class="notice" role="status"><strong>Publication is running.</strong></p>
+<p>The kill switch stops what readers would see change: new assessments are withheld instead of published, correction and weekly emails are held or skipped, and every public page shows an “Updates are paused” banner. Sign-in emails still go out. Use it when something published is wrong and cannot be fixed quickly, or before a risky change. Data collection carries on.</p>
+<form method="post" action="/admin/publication/suspend">
+  <button type="submit">Suspend publication</button>
+</form>
+{% endif %}
+<p class="muted">Only administrators can change this. Every change is in the <a href="/admin/audit">audit log</a>.</p>
+{% endblock %}

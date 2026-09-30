@@ -90,17 +90,18 @@
   <thead><tr><th scope="col">What</th><th scope="col">How long</th></tr></thead>
   <tbody>
     <tr><td>Page-view and other event records</td><td>{{ event_retention }}, then deleted automatically. If you delete your account, your account number is removed from them straight away.</td></tr>
-    <tr><td>Account, follows, choices, notifications, sign-in and session records</td><td>Until you delete your account, which removes them immediately.</td></tr>
-    <tr><td>Feedback and error reports</td><td>We keep them so we can show what was corrected. When you delete your account they are cut loose from it and your address is removed from the text. Reports sent without an account stay until you ask us to remove personal details from them. {{ todo("a fixed retention period for feedback, for example 24 months") }}</td></tr>
+    <tr><td>Account, follows, choices and notifications</td><td>Until you delete your account, which removes them immediately. An address that was entered but never confirmed with the sign-in link is deleted {{ unverified_days }} days later.</td></tr>
+    <tr><td>Sign-in link and session records</td><td>Deleted {{ login_record_days }} days after the link or session stops working, or when you delete your account, whichever is first.</td></tr>
+    <tr><td>Feedback and error reports</td><td>{{ feedback_months }} months. After that the text, any email address you typed, your visitor code and the link to your account are removed, and only the yes or no, the date and whether the report led to a correction are kept. When you delete your account, your reports are cut loose from it straight away and your address is removed from the text.</td></tr>
     <tr><td>Cookies in your browser</td><td>As listed above. You can delete them at any time in your browser.</td></tr>
-    <tr><td>Backups</td><td>{% if backup_days %}We keep database backups for {{ backup_days }} days.{% else %}We keep database backups for a limited period.{% endif %} Something you delete from the live site can remain in a backup until that backup expires. Backups are used only to recover from a failure. {{ todo("how deletions are applied again if a backup is ever restored") }}</td></tr>
+    <tr><td>Backups</td><td>{% if backup_days %}We keep database backups for {{ backup_days }} days.{% else %}We keep database backups for a limited period.{% endif %} Something you delete from the live site can remain in a backup until that backup expires. Backups are used only to recover from a failure. If a backup is ever restored, the accounts that were deleted after it was taken are deleted again before the site is switched back on. For that we keep a scrambled fingerprint of each deleted address (not the address itself) for {{ ledger_days }} days, which is as long as a backup that could hold the account exists.</td></tr>
   </tbody>
 </table>
 
 <h2>Your rights</h2>
 <p>Under the Nigeria Data Protection Act you can ask us to tell you what we hold about you, give you a copy, correct it, delete it, restrict or object to how we use it, and withdraw consent. Most of this you can do yourself:</p>
 <ul>
-  <li><strong>Copy of your data:</strong> on the <a href="/account">account page</a>, “Download everything we hold about you”. It covers your account, choices, follows, notifications and feedback. It does not list page-view records, because those are tied to a random code rather than to you.</li>
+  <li><strong>Copy of your data:</strong> on the <a href="/account">account page</a>, “Download everything we hold about you”. It covers your account, choices, follows, notifications, feedback and the page-view records that were recorded while you were signed in. Page views from before you signed in carry only a visitor code and cannot be tied to you, so they are not included.</li>
   <li><strong>Delete your account:</strong> on the same page. It is immediate.</li>
   <li><strong>Stop the weekly email:</strong> the link in any email, or the account page.</li>
   <li><strong>Anything else</strong>, including removing your email address or personal details from a report you sent, or help if you cannot sign in: write to {{ contact() }}. We aim to answer within {{ request_days }} days. {{ todo("counsel to confirm the response time and any identity checks before acting on a request") }}</li>

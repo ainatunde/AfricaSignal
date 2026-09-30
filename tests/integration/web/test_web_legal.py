@@ -115,6 +115,35 @@ def test_the_privacy_page_states_the_retention_the_code_applies(
     assert "backups for 14 days" in words(client.get("/privacy", headers=BROWSER).text)
 
 
+def test_the_privacy_page_states_the_retention_jobs_the_code_runs(
+    client: TestClient,
+    session: Session,
+    admin,  # type: ignore[no-untyped-def]
+) -> None:
+    from africasignal.publish import deletions, retention
+
+    text = words(client.get("/privacy", headers=BROWSER).text)
+    assert f"{retention.feedback_retention_months(session)} months" in text  # default 24
+    assert f"deleted {retention.UNVERIFIED_ACCOUNT_TTL.days} days later" in text
+    assert f"Deleted {retention.TOKEN_GRACE.days} days after the link or session stops" in text
+    assert f"for {30 + deletions.LEDGER_MARGIN.days} days" in text  # the ledger, default backups
+    assert "page-view records that were recorded while you were signed in" in text
+
+    settings_store.set_value(session, admin, "feedback_retention_months", "12")
+    settings_store.set_value(session, admin, "backup_retain_days", "14")
+    text = words(client.get("/privacy", headers=BROWSER).text)
+    assert "12 months. After that the text" in text
+    assert f"for {14 + deletions.LEDGER_MARGIN.days} days" in text
+
+
+def test_the_privacy_page_no_longer_carries_the_open_items_the_code_now_answers(
+    client: TestClient,
+) -> None:
+    page = client.get("/privacy", headers=BROWSER).text
+    assert "fixed retention period for feedback" not in page
+    assert "how deletions are applied again" not in page
+
+
 def test_the_privacy_page_names_the_email_provider_once_chosen(
     client: TestClient,
     session: Session,

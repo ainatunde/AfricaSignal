@@ -78,3 +78,18 @@ class Notification(CreatedMixin, Base):
     dedupe_key: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class AccountDeletion(CreatedMixin, Base):
+    """A ledger of accounts their holders deleted, so a restored backup can delete them again.
+
+    Holds a keyed fingerprint of the address (HMAC-SHA256 under a key derived from ``SECRET_KEY``),
+    never the address. Rows are kept only as long as a backup that still holds the account could
+    be restored. ``mirrored_at`` is set once the entry is also in object storage, which a database
+    restore does not roll back."""
+
+    __tablename__ = "account_deletion"
+
+    email_hmac: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+    deleted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    mirrored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

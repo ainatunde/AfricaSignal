@@ -22,6 +22,7 @@ from africasignal.models.ops import (
 from africasignal.models.places import Place, PlaceAlias
 from africasignal.models.sources import Source, SourcePermission
 from africasignal.models.users import (
+    AccountDeletion,
     AppUser,
     Follow,
     LoginToken,
@@ -31,6 +32,7 @@ from africasignal.models.users import (
 )
 
 __all__ = [
+    "AccountDeletion",
     "AppUser",
     "AssessmentInput",
     "AssessmentVersion",

@@ -5,7 +5,7 @@ commit to the caller."""
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import delete, func, select, update
@@ -24,7 +24,7 @@ from africasignal.models import (
     Situation,
     UserSession,
 )
-from africasignal.publish import tokens
+from africasignal.publish import deletions, tokens
 from africasignal.publish.email_render import UNSUBSCRIBE_PURPOSE
 
 REMOVED = "[removed]"
@@ -100,13 +100,11 @@ def unsubscribe(session: Session, token: str) -> bool:
     return True
 
 
-def delete_account(session: Session, user_id: int) -> bool:
+def erase_user(session: Session, user: AppUser) -> None:
     """Hard-delete the user and everything tied to them. Feedback is kept but anonymised: it is
     unlinked from the user, the typed contact email is removed, and the address is removed from
-    the free text. Returns False when the user does not exist."""
-    user = session.get(AppUser, user_id)
-    if user is None:
-        return False
+    the free text. Does not write to the deletion ledger."""
+    user_id = user.id
     email = user.email
     session.execute(delete(Notification).where(Notification.user_id == user_id))
     session.execute(delete(Follow).where(Follow.user_id == user_id))
@@ -128,6 +126,17 @@ def delete_account(session: Session, user_id: int) -> bool:
     )
     session.delete(user)
     session.flush()
+
+
+def delete_account(session: Session, user_id: int, now: datetime | None = None) -> bool:
+    """The account holder's own deletion: erase the user (see ``erase_user``) and note it in the
+    deletion ledger, so a restored backup can delete the account again. Returns False when the
+    user does not exist."""
+    user = session.get(AppUser, user_id)
+    if user is None:
+        return False
+    deletions.record(session, user.email, now or datetime.now(UTC))
+    erase_user(session, user)
     return True
 
 
@@ -148,6 +157,13 @@ def export_account(session: Session, user_id: int) -> dict[str, Any] | None:
     ).all()
     feedback = session.scalars(
         select(Feedback).where(Feedback.user_id == user_id).order_by(Feedback.id)
+    ).all()
+
+    events = session.execute(
+        select(Event.ts, Event.name, Situation.slug, Event.ref, Event.anon_id, Event.props)
+        .outerjoin(Situation, Situation.id == Event.situation_id)
+        .where(Event.user_id == user_id)
+        .order_by(Event.ts, Event.id)
     ).all()
 
     def iso(value: datetime | None) -> str | None:
@@ -175,6 +191,26 @@ def export_account(session: Session, user_id: int) -> dict[str, Any] | None:
             for n in notifications
         ],
         "feedback": [
-            {"kind": f.kind, "text": f.text, "created_at": iso(f.created_at)} for f in feedback
+            {
+                "kind": f.kind,
+                "text": f.text,
+                "contact_email": f.contact_email,
+                "visitor_code": f.anon_id,
+                "created_at": iso(f.created_at),
+            }
+            for f in feedback
+        ],
+        # Page views and other events recorded while signed in (they carry the account number).
+        # Each also carries the random visitor code of the browser it came from.
+        "events": [
+            {
+                "time": iso(ts),
+                "event": name,
+                "situation": slug,
+                "came_from": ref,
+                "details": props,
+                "visitor_code": anon_id,
+            }
+            for ts, name, slug, ref, anon_id, props in events
         ],
     }

@@ -20,7 +20,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from africasignal import audit, operators, settings_store
-from africasignal.models import AuditLog, Operator, Source, SourcePermission
+from africasignal.models import AuditLog, Operator, Setting, Source, SourcePermission
+from africasignal.publish import versions
 from africasignal.sources import console
 from africasignal.sources.console import ConsoleError, PermissionInput
 from africasignal.web.deps import (
@@ -55,6 +56,8 @@ NOTICES = {
     "signed_out": "You have signed out.",
     "saved": "Settings saved.",
     "unchanged": "Nothing to change.",
+    "suspended": "Publication suspended. Nothing new is published and no notification goes out.",
+    "resumed_publication": "Publication resumed.",
 }
 
 _SECURITY_HEADERS = {
@@ -464,3 +467,41 @@ async def settings_save(
     except settings_store.SettingError as exc:
         return _settings_page(request, db, auth, 400, error=str(exc), submitted=submitted)
     return _redirect(f"/admin/settings?notice={'saved' if changed else 'unchanged'}", auth)
+
+
+# --- publication kill switch --------------------------------------------------------------------
+
+
+@router.get("/publication")
+def publication_view(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    return _page(
+        request,
+        "admin/publication.html",
+        auth,
+        suspended=versions.publication_suspended(db),
+        since=db.scalar(select(Setting.updated_at).where(Setting.key == versions.SUSPENDED_KEY)),
+    )
+
+
+@router.post("/publication/{action}")
+def publication_switch(action: str, auth: AdminOperator, db: DbSession) -> Response:
+    """Suspend or resume publication (plan B12, rule R1). Admin only; audited in the same
+    transaction. Repeating the current state changes nothing and writes no audit row."""
+    if action not in ("suspend", "resume"):
+        raise HTTPException(status_code=404, detail="No such action")
+    suspend = action == "suspend"
+    if versions.publication_suspended(db) == suspend:
+        return _redirect("/admin/publication?notice=unchanged", auth)
+    versions.set_publication_suspended(db, suspend, datetime.now(UTC))
+    audit.record(
+        db,
+        auth.operator,
+        "publication.suspend" if suspend else "publication.resume",
+        "setting:publication_suspended",
+        None,
+        before={"publication_suspended": not suspend},
+        after={"publication_suspended": suspend},
+    )
+    return _redirect(
+        f"/admin/publication?notice={'suspended' if suspend else 'resumed_publication'}", auth
+    )
