@@ -34,7 +34,7 @@ from africasignal.catalog import NbsPublication
 ZONES = frozenset(
     {"north central", "north east", "north west", "south east", "south south", "south west"}
 )
-NATIONAL_LABELS = frozenset({"national", "average"})
+NATIONAL_LABELS = frozenset({"national", "average", "grand total"})
 _MONTHS = {
     m: i
     for i, m in enumerate(
@@ -43,7 +43,6 @@ _MONTHS = {
 }
 HEADER_SEARCH_ROWS = 40
 TWO_PLACES = Decimal("0.01")
-NAME_COLUMN = 0  # state and item names are read from the first column of every block row
 
 Column = Literal["year_ago", "previous", "reference"]
 COLUMNS: tuple[Column, Column, Column] = ("year_ago", "previous", "reference")
@@ -137,14 +136,20 @@ def _cell(rows: list[tuple[Any, ...]], r: int, c: int) -> Any:
 
 def _block_name(rows: list[tuple[Any, ...]], header: int, start: int) -> str | None:
     """The block a value run belongs to ("5KG"): text in the row above the header, over the
-    block's name column. A row of month headers above is another header, not a block name."""
-    name = _text(_cell(rows, header - 1, start - 1)) if header > 0 else None
-    if name is None or _month_of(_cell(rows, header - 1, start)) is not None:
+    block's name column (2024 files) or over its first value column (2026 files). A row of month
+    headers above is another header, not a block name."""
+    if header == 0 or _month_of(_cell(rows, header - 1, start)) is not None:
         return None
-    return name.upper()
+    for col in (start - 1, start):
+        name = _text(_cell(rows, header - 1, col))
+        if name is not None:
+            return name.upper()
+    return None
 
 
-def _read_table(sheet: str, rows: list[tuple[Any, ...]], header: int, start: int) -> ParsedTable:
+def _read_table(
+    sheet: str, rows: list[tuple[Any, ...]], header: int, start: int, name_col: int
+) -> ParsedTable:
     year_ago, previous, reference = (_month_of(_cell(rows, header, start + k)) for k in range(3))
     if year_ago is None or previous is None or reference is None:
         raise NbsParseError(f"{sheet}: header at row {header + 1} has no month columns")
@@ -167,12 +172,12 @@ def _read_table(sheet: str, rows: list[tuple[Any, ...]], header: int, start: int
         values: dict[Column, Decimal | None] = {
             col: _decimal(_cell(rows, r, start + k)) for k, col in enumerate(COLUMNS)
         }
-        name = _text(_cell(rows, r, NAME_COLUMN))
+        name = _text(_cell(rows, r, name_col))
         if name is None:
             if table.rows and all(v is None for v in values.values()):
                 break  # the blank row that ends the table
             continue
-        if start - 1 != NAME_COLUMN:
+        if start - 1 != name_col:
             other = _text(_cell(rows, r, start - 1))
             if other is not None and other.lower() != name.lower():
                 table.warnings.append(
@@ -203,10 +208,10 @@ def _wanted(
     label = (_text(_cell(rows, header, start - 1)) or "").lower()
     has_block = _block_name(rows, header, start) is not None
     match publication.layout:
-        case "state_table":  # petrol: the header cell above the names says "State"
-            return label == "state"
-        case "zoned_table":  # diesel: no header label and no block name
-            return label == "" and not has_block
+        case "state_table":  # petrol: the header cell above the names says "State(s)"
+            return label in ("state", "states")
+        case "zoned_table":  # diesel: no header label (2024) or "STATES" (2026), no block name
+            return label in ("", "states") and not has_block
         case "two_blocks":  # kerosene, cooking gas: a block name sits above the header
             return has_block
         case "national_items":  # food: the header cell says "Items Label"
@@ -233,7 +238,7 @@ def parse_workbook(content: bytes, publication: NbsPublication) -> ParsedWorkboo
             continue
         header, starts = found
         tables += [
-            _read_table(ws.title, rows, header, start)
+            _read_table(ws.title, rows, header, start, starts[0] - 1)
             for start in starts
             if _wanted(publication, rows, header, start)
         ]

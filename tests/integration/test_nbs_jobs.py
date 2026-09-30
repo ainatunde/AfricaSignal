@@ -187,10 +187,13 @@ def test_fetching_the_source_imports_every_release_in_the_window_and_then_goes_q
         versions = s.scalars(select(AssessmentVersion)).all()
     assert len(versions) == 5 * 38 + 4  # one per situation: the repeat jobs changed nothing
     # The data is from 2024; the worker runs on the real clock, so every assessment is
-    # "insufficient evidence" and a draft until the publication policy (AS-012) decides.
+    # "insufficient evidence", which the publication policy (R3) publishes as a dated card.
     assert {(v.status, v.evidence_state, v.severity) for v in versions} == {
-        ("draft", "insufficient", "none")
+        ("published", "insufficient", "none")
     }
+    with factory() as s:
+        current = s.scalars(select(Situation.current_version_id)).all()
+    assert all(c is not None for c in current) and len(current) == 5 * 38 + 4
     src = _source(factory, source_id)
     assert src.health == "healthy" and src.last_success_at is not None and src.last_error is None
     with factory() as s:
