@@ -14,7 +14,9 @@ def _script() -> ScriptDirectory:
 
 def test_exactly_one_alembic_head() -> None:
     heads = _script().get_heads()
-    assert len(heads) == 1, f"more than one Alembic head: {sorted(heads)}; re-chain the newest migration"
+    assert len(heads) == 1, (
+        f"more than one Alembic head: {sorted(heads)}; re-chain the newest migration"
+    )
 
 
 def test_history_is_one_unbranched_chain_from_the_base() -> None:

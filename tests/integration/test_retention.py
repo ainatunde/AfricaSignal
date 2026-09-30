@@ -57,12 +57,18 @@ def job_handlers(monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
     so ``load_all`` registers it for real."""
     name = "africasignal.jobs.handlers.apply_retention"
     monkeypatch.setattr(handlers, "HANDLERS", {})
-    sys.modules.pop(name, None)
+    original = sys.modules.pop(name, None)
     module = importlib.import_module(name)
     yield module
+    # Put back whatever was there: when an earlier test already ran ``load_all``, the real
+    # registry holds this module's handlers, and importing it again would register them twice.
     sys.modules.pop(name, None)
-    if hasattr(handlers, "apply_retention"):
-        delattr(handlers, "apply_retention")
+    if original is None:
+        if hasattr(handlers, "apply_retention"):
+            delattr(handlers, "apply_retention")
+    else:
+        sys.modules[name] = original
+        handlers.apply_retention = original  # type: ignore[attr-defined]
 
 
 def count(session: Session, model: type) -> int:

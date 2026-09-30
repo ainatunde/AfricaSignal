@@ -18,7 +18,6 @@ from africasignal.web.routes import public
 from africasignal.web.session_dep import get_db as public_get_db
 from tests.integration.test_admin_console import (  # noqa: F401  (fixtures and helpers)
     ORIGIN,
-    _clean_state,
     audit_actions,
     make_operator,
     signed_in,
