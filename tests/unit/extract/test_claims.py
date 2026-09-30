@@ -105,3 +105,13 @@ def test_the_user_message_fences_the_document_with_a_marker_it_cannot_contain() 
 def test_the_extractor_version_names_the_prompt_and_the_model() -> None:
     assert extractor_version("m1") == "claim_extract_v1+m1"
     assert extractor_version().startswith("claim_extract_v1+")
+
+
+def test_prompt_asks_to_keep_the_effective_date_words_in_the_passage() -> None:
+    """The validator rejects a future date on a passage without future wording (validate.py),
+    so the prompt must ask the model to keep "takes effect on ..." with the rate."""
+    from africasignal.llm.prompt_loader import load_prompt
+
+    prompt = load_prompt("claim_extract_v1")
+    assert "takes effect on" in prompt
+    assert "keep the words that give that date inside the passage" in prompt

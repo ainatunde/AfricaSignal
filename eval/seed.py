@@ -855,7 +855,8 @@ def build_t2() -> list[dict[str, Any]]:
     t2("t2-no-claims", IKEJA, [], expect_none=True, tags=["empty"])
     t2("t2-model-value-not-in-passage", IKEJA, [o(IKEJA, 209.50, "2025-09-01", "2025-08-20", value_override=215.00, valid=False, reason="value_not_in_passage")], expect_none=True, tags=["hallucination"])
     t2("t2-hallucinated-passage", IKEJA, [o(IKEJA, 209.50, "2025-09-01", "2025-08-20", valid=False, reason="passage_not_found", passage="a Band A tariff of N300.00/kWh from next week")], expect_none=True, tags=["hallucination"])
-    t2("t2-future-date-without-effective-words", IKEJA, [o(IKEJA, 209.50, "2025-09-01", "2025-08-20", valid=False, reason="future_date", passage="a Band A tariff of N209.50/kWh")], expect_none=True, tags=["dates", "validation_strictness"])
+    # The prompt asks the model to keep the effective-date words in the passage; if it does not, the validator (kept strict) drops the order.
+    t2("t2-model-drops-effective-date-words", IKEJA, [o(IKEJA, 209.50, "2025-09-01", "2025-08-20", valid=False, reason="future_date", passage="a Band A tariff of N209.50/kWh")], expect_none=True, tags=["dates", "validation_strictness", "prompt_keeps_effective_words"])
     t2("t2-tariff-not-read-by-code", IKEJA, [o(IKEJA, 209.50, "2025-09-01", "2025-08-20", valid=False, reason="tariff_value_mismatch",
                                                phrasing="Band A customers will pay 209.50 naira per kilowatt hour", passage="Band A customers will pay 209.50 naira per kilowatt hour")],
        expect_none=True, tags=["hallucination", "tariff_reconcile"])
