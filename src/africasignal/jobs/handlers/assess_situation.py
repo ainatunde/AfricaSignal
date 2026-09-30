@@ -12,6 +12,7 @@ import logging
 from datetime import UTC, datetime
 
 from africasignal.jobs.handlers import JobContext, register
+from africasignal.jobs.handlers.explain_version import enqueue_explanation
 from africasignal.models import Situation
 from africasignal.publish.invalidation import withdraw_situation
 from africasignal.publish.situations import assess_situation as assess
@@ -34,6 +35,12 @@ def assess_situation(ctx: JobContext) -> None:
             now,
             kind="correction" if correction else "new_version",
         )
+        if (
+            decision is not None
+            and decision.status in ("published", "held")
+            and outcome.version.evidence_state != "insufficient"
+        ):
+            enqueue_explanation(ctx.session, outcome.version.id)  # AS-028; the facts are live first
     elif outcome.outcome == "skipped" and correction:
         situation = ctx.session.get(Situation, situation_id)
         if situation is not None and withdraw_situation(ctx.session, situation, now):
