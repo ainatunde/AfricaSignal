@@ -52,6 +52,8 @@ def fetch_source(ctx: JobContext) -> None:
             payload["title"] = item.title
         if item.published_at:
             payload["published_at"] = item.published_at.isoformat()
+        if item.byline:
+            payload["byline"] = item.byline
         queue.enqueue(
             session,
             "process_document",

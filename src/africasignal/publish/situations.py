@@ -15,14 +15,19 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 
-from sqlalchemy import ColumnElement, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
-from africasignal.assess.corroboration import ClaimPoint
+from africasignal.assess.corroboration import (
+    MIN_OUTLET_AGE_DAYS,
+    NEWS_SOURCE_KINDS,
+    ClaimPoint,
+    link_keys,
+)
 from africasignal.assess.price_change import (
     TEMPLATE_VERSION,
     FactorSpec,
@@ -48,7 +53,9 @@ from africasignal.models import (
     Series,
     Situation,
     Source,
+    SourcePermission,
 )
+from africasignal.sources.permissions import current_permission
 
 log = logging.getLogger("africasignal.publish.situations")
 
@@ -146,7 +153,32 @@ def place_and_descendants(session: Session, place: Place) -> set[int]:
     return found
 
 
-def load_claim_points(session: Session, *conditions: ColumnElement[bool]) -> list[ClaimPoint]:
+def source_is_trusted(session: Session, source: Source, now: datetime) -> bool:
+    """Whether claims from ``source`` may corroborate or dispute anything (security review S-08).
+
+    The source must be active with an approved permission to collect. A news outlet must also have
+    been under approval for ``MIN_OUTLET_AGE_DAYS``, counted from its first approval, so that a
+    batch of newly registered sites cannot earn an "independent report" badge by being approved
+    together. Official sources are vetted one by one and have no waiting period.
+    """
+    permission = current_permission(session, source.id)
+    if not source.active or permission is None or not permission.may_collect:
+        return False
+    if source.kind not in NEWS_SOURCE_KINDS:
+        return True
+    first = session.scalar(
+        select(func.min(SourcePermission.approved_at)).where(
+            SourcePermission.source_id == source.id,
+            SourcePermission.may_collect.is_(True),
+            SourcePermission.approved_at.is_not(None),
+        )
+    )
+    return first is not None and now - first >= timedelta(days=MIN_OUTLET_AGE_DAYS)
+
+
+def load_claim_points(
+    session: Session, now: datetime, *conditions: ColumnElement[bool]
+) -> list[ClaimPoint]:
     """Valid claims on active documents that meet ``conditions``, with what evidence rules need
     to know about each claim's document, origin and source."""
     rows = session.execute(
@@ -156,7 +188,11 @@ def load_claim_points(session: Session, *conditions: ColumnElement[bool]) -> lis
         .outerjoin(ReportingOrigin, ReportingOrigin.id == EvidenceDocument.origin_id)
         .where(Claim.valid.is_(True), EvidenceDocument.status == "active", *conditions)
         .order_by(Claim.id)
-    )
+    ).all()
+    trust: dict[int, bool] = {}
+    for _, _, source, _ in rows:
+        if source.id not in trust:
+            trust[source.id] = source_is_trusted(session, source, now)
     return [
         ClaimPoint(
             claim_id=claim.id,
@@ -174,6 +210,12 @@ def load_claim_points(session: Session, *conditions: ColumnElement[bool]) -> lis
             occurred_to=claim.occurred_to,
             time_precision=claim.time_precision,
             published_at=document.published_at or document.retrieved_at,
+            trusted=trust[source.id],
+            link_keys=link_keys(
+                urls=(document.canonical_url, source.home_url, source.feed_url),
+                owner=source.owner,
+                byline=document.byline,
+            ),
         )
         for claim, document, source, origin_label in rows
     ]
@@ -307,6 +349,7 @@ def load_inputs(session: Session, situation: Situation, now: datetime) -> PriceI
     claim_places = place_and_descendants(session, place) if place.kind == "state" else {place.id}
     claims = load_claim_points(
         session,
+        now,
         Claim.item_code == item.code,
         Claim.claim_type.in_(("price_statement", "other")),
         Claim.place_id.in_(claim_places),

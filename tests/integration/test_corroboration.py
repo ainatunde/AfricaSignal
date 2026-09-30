@@ -25,6 +25,7 @@ from africasignal.models import (
     Place,
     Situation,
     Source,
+    SourcePermission,
 )
 from africasignal.publish.claim_assessments import request_claim_assessments
 from africasignal.publish.invalidation import plan_corrections
@@ -33,11 +34,18 @@ from africasignal.publish.versions import apply_policy, release_held
 from africasignal.sources.base import ADAPTERS, ProcessResult
 from africasignal.storage import S3Store
 from tests.integration.nbs_support import add_places, add_source, import_bytes, make_store
-from tests.integration.test_origins import WIRE_STORY, _doc, _source
+from tests.integration.outlet_support import approved_source
+from tests.integration.test_origins import WIRE_STORY, _doc
 
 PMS_SEP, PMS_OCT = "FUEL_SEPT_2024_REPORT.xlsx", "PMS_OCT_2024_REPORT.xlsx"
 WHEN = datetime(2024, 11, 25, 12, tzinfo=UTC)  # a week after the October 2024 petrol release
+NOW = WHEN  # sources are vetted relative to this clock
 PUBLISHED = datetime(2024, 11, 12, 9, tzinfo=UTC)
+
+
+def vetted(session: Session, slug: str, **kwargs: Any) -> Source:
+    """A source approved long enough before the assessment clock to be trusted."""
+    return approved_source(session, slug, now=WHEN, **kwargs)
 
 
 @pytest.fixture
@@ -62,7 +70,7 @@ def lagos(session: Session, store: S3Store, places: dict[str, int]) -> Situation
 
 @pytest.fixture
 def outlet(session: Session) -> Source:
-    return _source(session, "punch")
+    return vetted(session, "punch")
 
 
 def _situation(session: Session, code: str) -> Situation:
@@ -191,7 +199,7 @@ def test_invalid_claims_and_withdrawn_documents_do_not_count(
 def test_syndicated_copies_are_one_origin(
     session: Session, lagos: Situation, places: dict[str, int]
 ) -> None:
-    sources = [_source(session, slug) for slug in ("punch", "vanguard", "thisday")]
+    sources = [vetted(session, slug) for slug in ("punch", "vanguard", "thisday")]
     for source in sources:
         news(session, source, places["NG-LA"], text=WIRE_STORY + " (Reuters)")
     version = assess(session, lagos)
@@ -235,7 +243,7 @@ def test_a_news_claim_that_is_a_month_stale_does_not_corroborate(
 def test_a_regulator_saying_the_opposite_disputes(
     session: Session, lagos: Situation, places: dict[str, int]
 ) -> None:
-    nmdpra = _source(session, "nmdpra", kind="regulator")
+    nmdpra = vetted(session, "nmdpra", kind="regulator")
     claim = news(session, nmdpra, places["NG-LA"], direction="down", text="Prices fell in Lagos.")
     version = assess(session, lagos)
     assert version.evidence_state == "disputed"
@@ -381,3 +389,172 @@ def test_process_document_queues_assessments_for_claims_an_adapter_made(
     )
     process_document_module.process_document(ctx)  # type: ignore[arg-type]
     assert [j.payload["situation_id"] for j in _jobs(session)] == [lagos.id]
+
+
+# --- look-alike sources (security review S-08) -------------------------------------------------
+
+
+def _count(version: AssessmentVersion) -> int:
+    fact = next(f for f in version.facts if f["label"] == "Independent reports")
+    return int(fact["value"])
+
+
+def _wire(n: int) -> str:
+    return f"{WIRE_STORY} Variant {n}: " + " ".join(f"w{n}x{i}" for i in range(80))
+
+
+def test_a_swarm_of_unapproved_sites_does_not_corroborate(
+    session: Session, lagos: Situation, places: dict[str, int]
+) -> None:
+    for i in range(12):
+        fake = vetted(session, f"fake{i}", approved_days_ago=None)  # nobody approved it
+        news(session, fake, places["NG-LA"], text=_wire(i))
+    version = assess(session, lagos)
+    assert version.evidence_state == "reported"
+    assert inputs_of(session, version, "claim") == set()
+
+
+def test_sites_approved_only_just_now_do_not_corroborate_until_they_have_aged(
+    session: Session, lagos: Situation, places: dict[str, int]
+) -> None:
+    for i in range(5):
+        news(
+            session,
+            vetted(session, f"new{i}", approved_days_ago=29),
+            places["NG-LA"],
+            text=_wire(i),
+        )
+    assert assess(session, lagos).evidence_state == "reported"
+    news(session, vetted(session, "aged", approved_days_ago=30), places["NG-LA"], text=_wire(99))
+    assert assess(session, lagos).evidence_state == "corroborated"
+
+
+def test_the_age_counts_from_the_first_approval_not_the_latest(
+    session: Session, lagos: Situation, places: dict[str, int]
+) -> None:
+    source = vetted(session, "veteran", approved_days_ago=200)
+    session.add(  # re-approved yesterday after a terms review
+        SourcePermission(
+            source_id=source.id,
+            version=2,
+            may_collect=True,
+            may_store_full_text=False,
+            may_republish_numbers=True,
+            approved_at=WHEN - timedelta(days=1),
+        )
+    )
+    session.flush()
+    news(session, source, places["NG-LA"])
+    assert assess(session, lagos).evidence_state == "corroborated"
+
+
+def test_a_source_whose_permission_was_withdrawn_or_that_is_inactive_stops_counting(
+    session: Session, lagos: Situation, places: dict[str, int]
+) -> None:
+    source = vetted(session, "punch")
+    news(session, source, places["NG-LA"])
+    assert assess(session, lagos).evidence_state == "corroborated"
+
+    session.add(
+        SourcePermission(
+            source_id=source.id,
+            version=2,
+            may_collect=False,
+            may_store_full_text=False,
+            may_republish_numbers=False,
+            approved_at=WHEN,
+        )
+    )
+    session.flush()
+    assert assess(session, lagos).evidence_state == "reported"
+
+    source.active = False
+    session.flush()
+    assert assess(session, lagos).evidence_state == "reported"
+
+
+def test_a_domain_gdelt_merely_pointed_to_does_not_corroborate(
+    session: Session, lagos: Situation, places: dict[str, int]
+) -> None:
+    gdelt = vetted(session, "gdelt", kind="aggregator", adapter="gdelt")
+    news(session, gdelt, places["NG-LA"])
+    assert assess(session, lagos).evidence_state == "reported"
+
+
+def test_approved_outlets_with_one_owner_count_once(
+    session: Session, lagos: Situation, places: dict[str, int]
+) -> None:
+    for i in range(6):
+        outlet_ = vetted(session, f"brand{i}", owner="Shell Media Nigeria Ltd")
+        news(session, outlet_, places["NG-LA"], text=_wire(i))
+    version = assess(session, lagos)
+    assert version.evidence_state == "corroborated" and _count(version) == 1
+
+
+def test_approved_outlets_on_one_registered_domain_count_once(
+    session: Session, lagos: Situation, places: dict[str, int]
+) -> None:
+    for i in range(6):
+        doc = _doc(
+            session,
+            vetted(session, f"section{i}"),
+            _wire(i),
+            url=f"https://section{i}.samesite.example/story",
+            when=PUBLISHED,
+        )
+        news(session, vetted(session, f"x{i}"), places["NG-LA"], doc=doc)
+    version = assess(session, lagos)
+    assert version.evidence_state == "corroborated" and _count(version) == 1
+
+
+def test_outlets_sharing_a_byline_count_once_but_generic_bylines_do_not_link(
+    session: Session, lagos: Situation, places: dict[str, int]
+) -> None:
+    for i in range(4):
+        doc = _doc(session, vetted(session, f"bl{i}"), _wire(i), when=PUBLISHED)
+        doc.byline = "By Jane Doe" if i < 3 else "Staff"
+        news(session, vetted(session, f"c{i}"), places["NG-LA"], doc=doc)
+    assert _count(assess(session, lagos)) == 2  # Jane Doe's three copies, and one more
+
+
+def test_genuinely_separate_approved_outlets_count_separately_and_are_named(
+    session: Session, lagos: Situation, places: dict[str, int]
+) -> None:
+    for slug, owner in (("punch", "Punch Nigeria Ltd"), ("vanguard", "Vanguard Media Ltd")):
+        news(session, vetted(session, slug, owner=owner), places["NG-LA"], text=_wire(len(slug)))
+    version = assess(session, lagos)
+    fact = next(f for f in version.facts if f["label"] == "Independent reports")
+    assert fact["value"] == 2 and fact["outlets"] == ["Punch", "Vanguard"]
+    assert fact["source_label"] == "Punch, Vanguard"
+
+
+def test_an_unapproved_site_cannot_support_a_factor_or_plant_one_in_its_summary(
+    session: Session, lagos: Situation, places: dict[str, int]
+) -> None:
+    fake = vetted(session, "fake", approved_days_ago=None)
+    news(session, fake, places["NG-LA"], claim_text="The exchange rate pushed up the pump price.")
+    assert {f["status"] for f in assess(session, lagos).possible_factors} == {"not_checked"}
+
+    real = vetted(session, "real")
+    claim = news(session, real, places["NG-LA"], text=WIRE_STORY + " real")
+    claim.text = "Crude oil and the exchange rate explain it."  # the model's summary, not the page
+    session.flush()
+    assert {f["status"] for f in assess(session, lagos).possible_factors} == {"not_checked"}
+
+
+def test_an_unapproved_regulator_look_alike_cannot_dispute(
+    session: Session, lagos: Situation, places: dict[str, int]
+) -> None:
+    fake = vetted(session, "nmdpra-official", kind="regulator", approved_days_ago=None)
+    news(session, fake, places["NG-LA"], direction="down", text="Prices fell in Lagos.")
+    assert assess(session, lagos).evidence_state == "reported"
+
+
+def test_trust_is_judged_on_the_clock_of_the_assessment(
+    session: Session, lagos: Situation, places: dict[str, int]
+) -> None:
+    news(session, vetted(session, "punch", approved_days_ago=40), places["NG-LA"])
+    early = assess_situation(session, lagos.id, WHEN - timedelta(days=20)).version
+    assert early is not None and early.evidence_state == "reported"  # approved only 20 days before
+    late = assess_situation(session, lagos.id, WHEN).version
+    assert late is not None and late.evidence_state == "corroborated"

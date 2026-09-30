@@ -104,6 +104,7 @@ def load_policy_inputs(
         return None
     claims = load_claim_points(
         session,
+        now,
         Claim.policy_series == series.code,
         Claim.claim_type == "policy_statement",
     )

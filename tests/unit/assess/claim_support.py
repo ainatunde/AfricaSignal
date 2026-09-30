@@ -31,6 +31,8 @@ def claim(**overrides: Any) -> ClaimPoint:
         "occurred_to": date(2024, 10, 31),
         "time_precision": "month",
         "published_at": datetime(2024, 11, 12, 9, 0, tzinfo=UTC),
+        "trusted": True,
+        "link_keys": frozenset({f"domain:outlet{n}.example"}),  # each outlet has its own site
     }
     fields.update(overrides)
     if isinstance(fields["stated_value"], str):

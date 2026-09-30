@@ -36,6 +36,9 @@ class EvidenceDocument(CreatedMixin, Base):
     storage_key: Mapped[str] = mapped_column(Text, nullable=False)  # relative object key
     mime: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str | None] = mapped_column(Text)
+    # Author or wire credit as the feed gave it (untrusted text, capped). Used only to tell whether
+    # two outlets are one voice (AS-027, security review S-08).
+    byline: Mapped[str | None] = mapped_column(Text)
     text_content: Mapped[str | None] = mapped_column(Text)
     excerpt: Mapped[str | None] = mapped_column(Text)
     language: Mapped[str] = mapped_column(Text, nullable=False, server_default="en")

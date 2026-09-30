@@ -41,7 +41,7 @@ def test_a_news_claim_in_the_same_direction_from_another_origin_corroborates() -
     result = assess(news)
     assert result.evidence_state == "corroborated"
     fact = next(f for f in result.facts if f["label"] == "Independent reports")
-    assert fact["value"] == 1 and fact["unit"] == "reporting origins"
+    assert fact["value"] == 1 and fact["unit"] == "independent outlets"
     assert fact["evidence_ids"] == [news.evidence_document_id]
     assert fact["place_code"] == "NG-LA"  # the situation's scope, whatever place the claim named
     assert ("claim", news.claim_id) in result.inputs

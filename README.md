@@ -94,6 +94,14 @@ takes its rate from primary documents and is `corroborated` by news that the rat
 or `disputed` by a later suspension. The shared rules (news, official, windows, origins) are in
 `assess/corroboration.py`.
 
+Only sources an operator vetted can corroborate or dispute (security review S-08): the source must
+be active with an approved permission, and a news outlet must have been approved for at least 30
+days (counted from its first approval). Aggregators such as GDELT never count. Outlets count as one
+voice when they share a reporting origin, a registered domain, an owner or a byline (`byline` is
+stored from RSS feeds; generic credits such as "Staff" link nothing). Wording checks read the
+validated `passage`, never the model-written claim text. The outlets behind a figure are named in
+its facts.
+
 ## Load places
 
 ```sh

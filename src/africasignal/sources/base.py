@@ -19,6 +19,7 @@ class DiscoveredItem:
     url: str
     title: str | None = None
     published_at: datetime | None = None
+    byline: str | None = None  # author or wire credit the listing gives, if any
 
 
 @dataclass

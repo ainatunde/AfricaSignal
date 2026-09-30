@@ -44,6 +44,7 @@ def process_document(ctx: JobContext) -> None:
             payload["url"],
             published_at=published_at,
             title=payload.get("title"),
+            byline=payload.get("byline"),
         )
         assign_origin(session, document)
         result = adapter.process(document, AdapterContext(session=session, store=store))

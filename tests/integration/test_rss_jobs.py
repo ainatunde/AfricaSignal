@@ -209,6 +209,18 @@ def test_captured_news_keeps_no_full_text_and_only_a_short_excerpt(
         assert d.simhash is not None
 
 
+def test_the_feeds_author_is_kept_as_the_documents_byline(
+    factory: sessionmaker[Session], outlet: Outlet
+) -> None:
+    _fetch_source(factory, _setup(factory))
+    _drain(factory)
+    feed_bylines = {e["url"]: e["byline"] for e in outlet.entries}
+    with factory() as s:
+        docs = s.scalars(select(EvidenceDocument)).all()
+    assert docs and all(d.byline for d in docs)
+    assert {d.byline for d in docs} <= {b for b in feed_bylines.values() if b}
+
+
 def test_each_article_gets_an_outlet_report_origin(factory: sessionmaker[Session]) -> None:
     _fetch_source(factory, _setup(factory))
     _drain(factory)
