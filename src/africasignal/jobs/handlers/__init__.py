@@ -56,4 +56,7 @@ def load_all() -> None:
         resolve_places,
         weekly_digest,
     )
-    from africasignal.sources import nbs  # noqa: F401  (registers the NBS adapter)
+    from africasignal.sources import (
+        nbs,  # noqa: F401  (registers the NBS adapter)
+        rss,  # noqa: F401  (registers the RSS adapter)
+    )

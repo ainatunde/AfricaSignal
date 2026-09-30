@@ -7,7 +7,7 @@ notes on robots.txt and terms of use.
 | Directory | What | Adapter |
 |---|---|---|
 | `nbs/` | NBS price-watch workbooks (eLibrary, 2024) and ZIP-extracted workbooks (microdata catalog, 2026) | AS-010 (done) |
-| `rss/` | 8 Nigerian news feeds | AS-023 |
+| `rss/` | 8 Nigerian news feeds | AS-023 (done) |
 | `gdelt/` | `lastupdate.txt`, Events, Mentions, GKG rows | AS-024 |
 | `nerc/` | the orders listing and two PDFs | AS-026 |
 | `nmdpra/` | the site's JavaScript shell (nothing readable without JS) | AS-026 |
