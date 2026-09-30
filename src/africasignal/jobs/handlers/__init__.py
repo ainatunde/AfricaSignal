@@ -45,6 +45,7 @@ def load_all() -> None:
         assess_situation,
         dispatch_outbox,
         expire_assessments,
+        explain_version,
         extract_claims,
         fetch_source,
         gdelt_fetch_article,
