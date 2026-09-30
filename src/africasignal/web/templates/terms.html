@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% from "_legal.html" import draft_banner, contact, operator, todo with context %}
+{% block title %}Terms of use · AfricaSignal{% endblock %}
+{% block head %}{% if not reviewed %}<meta name="robots" content="noindex, nofollow">{% endif %}{% endblock %}
+{% block content %}
+<h1>Terms of use</h1>
+{{ draft_banner("page") }}
+<p class="lead">AfricaSignal is a free service that shows what has changed in prices and policies that affect household budgets in Nigeria, with the evidence and its limits stated. By using it you agree to these terms. If you do not agree, please do not use it.</p>
+
+<h2>Who we are</h2>
+<p>AfricaSignal is run by {{ operator() }}. You can contact us at {{ contact() }}. How we handle your information is in the <a href="/privacy">privacy notice</a>.</p>
+
+<h2>What AfricaSignal is, and is not</h2>
+<ul>
+  <li>AfricaSignal reports figures and statements from public sources such as the National Bureau of Statistics and regulators, and says how well each is supported. It is information, not financial, legal, investment or other professional advice. Please do not rely on it alone to make a decision that matters.</li>
+  <li>A figure is often an average for a state or the country. It may differ from what you pay in your area. Each page says what a figure covers and which period it is for.</li>
+  <li>Figures can be late, revised or wrong at the source. We check and correct as described in <a href="/about/method">how assessments work</a> and the <a href="/corrections">correction policy</a>, but we cannot promise that everything is complete, current or error-free. The page shows when it was last checked and until when we consider it current.</li>
+  <li>Updates can be paused, for example while we check something. The site says when they are.</li>
+</ul>
+
+<h2>Using the site</h2>
+<ul>
+  <li>You may read, share and link to any page. When you share a figure, please keep its scope, period and source with it, and link back to the page so people can see the evidence and any later correction.</li>
+  <li>Please do not: try to break, overload or get around the protections of the site; use it to break the law; send us harmful code; pretend to be someone else; or collect other readers&rsquo; information.</li>
+  <li>Automated access is welcome at a sensible pace. The public data interface at <code>/v1</code> allows 60 requests a minute per client, and may refuse more. Please identify your software in its user agent. Our own crawler is described on the <a href="/about/bot">crawler page</a>.</li>
+</ul>
+
+<h2>Accounts</h2>
+<ul>
+  <li>You sign in with a link sent to your email address. Only use an address you control, and keep the link private. Anyone who has a working link can use your account.</li>
+  <li>You can delete your account whenever you like on the <a href="/account">account page</a>. We may close an account that is used to abuse the service.</li>
+  <li>The weekly email is optional and off until you turn it on.</li>
+</ul>
+
+<h2>Feedback you send</h2>
+<p>When you send a report or comment, you let us read it, use it to correct or improve the service, and keep it as a record of what was corrected. Please do not include anything unlawful, or personal details about other people. We do not publish your report or your name.</p>
+
+<h2>Content and ownership</h2>
+<ul>
+  <li>The figures, quotations and documents we show come from their original publishers, who keep their rights. We show short excerpts and links so you can go to the source, and we keep copies of source documents as evidence of what we relied on. We follow each source&rsquo;s terms as far as we know them, and will remove material if a rights holder reasonably asks (see the <a href="/corrections">takedown policy</a>).</li>
+  <li>The AfricaSignal software, design, wording and the way we organise and assess information belong to {{ operator() }} or its licensors. {{ todo("the licence, if any, under which readers may reuse AfricaSignal's own assessments and data, for example a Creative Commons licence, and who owns the code") }}</li>
+</ul>
+
+<h2>Links to other sites</h2>
+<p>We link to sources and news reports. We do not control those sites and are not responsible for what they say or how they treat your information.</p>
+
+<h2>No warranty and limits on our responsibility</h2>
+<p>AfricaSignal is provided as it is and as available, free of charge. To the extent the law allows, we give no promise that it will be uninterrupted, accurate or fit for a particular purpose, and we are not responsible for losses that come from relying on it. Nothing here limits any right you have that cannot be limited by law, or responsibility that cannot be excluded by law. {{ todo("counsel to settle the wording and the limits of liability under Nigerian law, including consumer protection rules") }}</p>
+
+<h2>Changes and ending</h2>
+<p>We may change the service or these terms. If we change the terms in a way that matters we will say so at the top of this page and, for account holders, by email. Using the site after a change means you accept it. We may suspend or end the service; if we do, we will say so on the site where we can.</p>
+
+<h2>Law and disputes</h2>
+<p>These terms are governed by the laws of the Federal Republic of Nigeria. {{ todo("counsel to confirm the governing law, the courts or dispute process, and the operator's registered address") }}</p>
+{% endblock %}

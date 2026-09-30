@@ -110,6 +110,35 @@ _DEFS = (
         expected=True,
     ),
     SettingDef(
+        "operator_name",
+        "Operator name",
+        "site",
+        "text",
+        "Who runs the site, as the privacy notice and terms should name them: a person or a "
+        "registered company.",
+        expected=True,
+    ),
+    SettingDef(
+        "contact_email",
+        "Contact address",
+        "site",
+        "email",
+        "Where readers send privacy requests, corrections and takedown requests. Shown on the "
+        "privacy notice, the terms and the correction policy, and on the crawler page unless "
+        "BOT_CONTACT_EMAIL is set.",
+        expected=True,
+    ),
+    SettingDef(
+        "legal_review_confirmed",
+        "Legal pages reviewed",
+        "site",
+        "choice",
+        "Choose yes only after a lawyer has reviewed the privacy notice, the terms and the "
+        "correction policy. Until then each page carries a banner saying it is a draft.",
+        default="no",
+        choices=("no", "yes"),
+    ),
+    SettingDef(
         "email_provider",
         "Email provider",
         "email",

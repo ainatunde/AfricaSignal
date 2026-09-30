@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from africasignal import settings_store
 from africasignal.config import get_settings
 from africasignal.models import Place
 from africasignal.net.netutil import USER_AGENT
@@ -354,7 +355,7 @@ def method_page(request: Request, db: Db) -> Response:
 
 @router.get("/about/bot", response_class=HTMLResponse)
 def bot_page(request: Request, db: Db) -> Response:
-    contact = os.environ.get("BOT_CONTACT_EMAIL", "")
+    contact = os.environ.get("BOT_CONTACT_EMAIL") or settings_store.get(db, "contact_email") or ""
     context = _ctx(db, "", user_agent=USER_AGENT, contact=contact)
     return render(request, "bot.html", context, cache_seconds=300)
 
