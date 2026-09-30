@@ -10,6 +10,7 @@ from africasignal.assess.explain import (
     BANNED_WORDS,
     MAX_WORDS,
     ExplainInput,
+    clean_text,
     numbers_written,
     permitted_places,
     system_prompt,
@@ -229,3 +230,85 @@ def test_an_empty_or_multi_paragraph_answer_is_rejected() -> None:
 def test_all_problems_are_reported_together() -> None:
     found = problems("Prices will rise 9.1% in Kano.")
     assert len(found) == 3
+
+
+# --- bypasses: the checks read the text as a person would -------------------------------------
+
+ZWSP, SHY, ZWJ, BIDI = "​", "­", "‍", "‮"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "This is caused  by the exchange rate.",  # two spaces
+        "This is caused\tby the exchange rate.",  # a tab
+        "This is caused\nby the exchange rate.",  # a line break
+        "This is caused by the exchange rate.",  # no-break space
+        "This is caused by the exchange rate.",  # em space
+        "This is caused by the exchange rate.".replace(" by", f"{ZWSP} by"),  # zero-width space
+        f"This is ca{SHY}used by the exchange rate.",  # soft hyphen inside a word
+        f"This is c{ZWJ}aused by the exchange rate.",  # zero-width joiner
+        f"This is caused{BIDI} by the exchange rate.",  # a bidi control character
+        "This is CAUSED BY the exchange rate.",  # capitals
+        "This is ｃａｕｓｅｄ ｂｙ the exchange rate.",  # full-width letters (NFKC)
+        "This is caused-by the exchange rate.",  # a hyphen instead of a space
+        "This is caused‑by the exchange rate.",  # a non-breaking hyphen
+    ],
+)
+def test_a_banned_phrase_cannot_be_hidden_by_spacing_or_invisible_characters(text: str) -> None:
+    assert any("caused by" in p for p in problems(text)), repr(text)
+
+
+@pytest.mark.parametrize(
+    "text", [f"It w{ZWSP}ill rise.", f"It wi{SHY}ll rise.", "It  WILL rise.", "It ｗｉｌｌ rise."]
+)
+def test_single_banned_words_are_also_normalised(text: str) -> None:
+    assert any('"will"' in p for p in problems(text)), repr(text)
+
+
+def test_full_width_and_zero_width_digits_cannot_hide_a_wrong_number() -> None:
+    assert any("number 99.9 " in p for p in problems("Prices rose ９９.９% this month."))
+    assert any("number 99 " in p for p in problems(f"Prices rose 9{ZWSP}9% this month."))
+    assert problems("Prices rose ８.０% this month.") == []  # full-width, but the right number
+
+
+def test_arabic_indic_digits_are_numbers_too() -> None:
+    assert any("number" in p for p in problems("Prices rose ٩٩% this month."))
+
+
+def test_number_words_are_found_through_spacing_and_width_tricks() -> None:
+    assert any('"half"' in p for p in problems(f"Prices rose by ha{ZWSP}lf as much."))
+    assert any('"twenty"' in p for p in problems("Prices rose by ｔｗｅｎｔｙ naira."))
+
+
+def test_a_place_name_cannot_be_hidden_by_spacing() -> None:
+    assert any("Kano" in p for p in problems(f"Prices in Ka{ZWSP}no fell."))
+    assert any("Lagos Island" in p for p in problems("Prices in Lagos   Island fell."))
+
+
+def test_markup_cannot_be_hidden_by_full_width_characters() -> None:
+    assert any("plain text" in p for p in problems("＜b＞Prices＜/b＞ rose."))
+    assert any("plain text" in p for p in problems("See ｈｔｔｐｓ://example.com."))
+
+
+@pytest.mark.parametrize("word", ["will", "caused by", "confirmed"])
+def test_look_alike_letters_from_other_alphabets_are_refused(word: str) -> None:
+    # a Cyrillic "а" or "е" reads as Latin to a person but is not the banned word to a regex
+    disguised = word.replace("a", "а").replace("e", "е").replace("i", "і")
+    found = problems(f"It is {disguised} by the rate.")
+    assert any("unexpected characters" in p for p in found), found
+
+
+def test_the_naira_sign_and_typographic_punctuation_are_still_fine() -> None:
+    assert problems("NBS’s figure – “₦1,080.95” – is an average…") == []
+
+
+def test_spacing_is_tidied_but_a_normal_paragraph_is_unchanged() -> None:
+    assert clean_text(OK) == OK
+    assert clean_text(f"  Prices{ZWSP}  rose  by\n8.0%.  ") == "Prices rose by 8.0%."
+    assert clean_text("One.\n\n\nTwo.") == "One.\n\nTwo."
+    assert problems(f"{OK}\n  \n{OK}") == ["It must be one paragraph."]
+
+
+def test_a_blank_line_made_of_spaces_is_still_two_paragraphs() -> None:
+    assert problems("Prices rose.\n \t \nThey may differ.") == ["It must be one paragraph."]

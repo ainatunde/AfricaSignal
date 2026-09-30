@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -184,40 +185,77 @@ def permitted_places(data: ExplainInput) -> set[str]:
     return in_input | set(data.parent_places)
 
 
-def validate_explanation(text: str, data: ExplainInput) -> list[str]:
-    """Why ``text`` may not be published, as messages the model can act on. Empty = it passes."""
-    problems: list[str] = []
-    stripped = text.strip()
-    if not stripped:
-        return ["The explanation is empty."]
+# Characters other than ASCII that an explanation may contain: the naira sign and typographic
+# punctuation. Anything else (Cyrillic or Greek look-alikes, for example) could be used to spell a
+# banned word or place name in a way the checks do not see.
+_EXTRA_ALLOWED = frozenset("₦£°’‘“”–—…")
 
-    words = len(stripped.split())
+
+def clean_text(text: str) -> str:
+    """The text as the validator reads it, and as it is stored: Unicode NFKC (full-width digits
+    and letters become plain ones, a no-break space becomes a space), invisible format characters
+    removed (zero-width spaces and joiners, soft hyphens, bidi marks), runs of spaces and line
+    breaks inside a paragraph collapsed to one space. A blank line between paragraphs is kept so
+    the one-paragraph rule can see it."""
+    text = unicodedata.normalize("NFKC", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    paragraphs = [" ".join(p.split()) for p in re.split(r"\n[^\S\n]*\n\s*", text.strip())]
+    return "\n\n".join(p for p in paragraphs if p)
+
+
+def _phrase_pattern(phrase: str) -> re.Pattern[str]:
+    """A banned phrase, matched whole, however its words are separated (spaces, hyphens)."""
+    words = r"[\s\-\u2010-\u2015]+".join(re.escape(w) for w in phrase.split())
+    return re.compile(rf"(?<!\w){words}(?!\w)", re.IGNORECASE)
+
+
+_BANNED_PATTERNS = {phrase: _phrase_pattern(phrase) for phrase in BANNED_WORDS}
+
+
+def validate_explanation(text: str, data: ExplainInput) -> list[str]:
+    """Why ``text`` may not be published, as messages the model can act on. Empty = it passes.
+    The checks run on ``clean_text(text)``, so spacing, invisible characters and full-width forms
+    cannot hide a number, a place or a banned phrase."""
+    problems: list[str] = []
+    cleaned = clean_text(text)
+    if not cleaned:
+        return ["The explanation is empty."]
+    flat = " ".join(cleaned.split())  # one line: what the word, number and place checks read
+
+    words = len(flat.split())
     if words > MAX_WORDS:
         problems.append(f"It has {words} words; the limit is {MAX_WORDS}.")
-    if "\n\n" in stripped:
+    if "\n\n" in cleaned:
         problems.append("It must be one paragraph.")
-    if _MARKUP.search(stripped):
+    if _MARKUP.search(flat):
         problems.append("It must be plain text: no links, markup or @ signs.")
+    odd = sorted({ch for ch in flat if ord(ch) > 127 and ch not in _EXTRA_ALLOWED})
+    if odd:
+        problems.append(
+            "It contains unexpected characters ("
+            + " ".join(f"U+{ord(ch):04X}" for ch in odd[:5])
+            + "); use plain English letters."
+        )
 
     allowed = permitted_numbers(data)
-    bad_numbers = [n for n in dict.fromkeys(numbers_written(stripped)) if n not in allowed]
+    bad_numbers = [n for n in dict.fromkeys(numbers_written(flat)) if n not in allowed]
     for number in bad_numbers:
         problems.append(
             f"The number {number} is not a figure in the facts (or is rounded differently)."
         )
-    for word in dict.fromkeys(m.group(1).lower() for m in _NUMBER_WORD.finditer(stripped)):
+    for word in dict.fromkeys(m.group(1).lower() for m in _NUMBER_WORD.finditer(flat)):
         problems.append(
             f'The number word "{word}" is not allowed; use only figures from the facts.'
         )
 
     allowed_places = permitted_places(data)
-    outside = sorted(_mentions(stripped, data.known_places) - allowed_places)
+    outside = sorted(_mentions(flat, data.known_places) - allowed_places)
     for name in outside:
         problems.append(f"The place {name} is outside this situation's scope; do not mention it.")
 
     if not data.has_supported_factor:
-        for phrase in BANNED_WORDS:
-            if re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", stripped, re.IGNORECASE):
+        for phrase, pattern in _BANNED_PATTERNS.items():
+            if pattern.search(flat.casefold()):
                 problems.append(
                     f'The wording "{phrase}" states certainty or a cause, and no possible factor '
                     "is supported."
@@ -292,7 +330,7 @@ def generate_explanation(
             result.problems.append([str(exc)])
             return result
         else:
-            text = str(answer["explanation"]).strip()
+            text = clean_text(str(answer["explanation"]))  # what is checked is what is stored
             problems = validate_explanation(text, data)
             if not problems:
                 result.text = text

@@ -340,3 +340,13 @@ def test_an_insufficient_card_queues_nothing(
     finally:
         _Clock.moment = WHEN
     assert explain_jobs_queued(session) == 0
+
+
+def test_the_stored_paragraph_is_the_cleaned_one(
+    session: Session, store: S3Store, source: Source
+) -> None:
+    v = published(session, store, source)
+    messy = good_text(v).replace(" on average", "​  on average") + "​ "
+    provider = FakeProvider([answer(messy)])
+    assert explain_version(session, adapter_for(session, provider), v.id) == "explained"
+    assert v.explanation == good_text(v)
