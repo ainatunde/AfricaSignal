@@ -13,15 +13,22 @@
 # the beans and local rice rows ("1kg ... sold loose"). The garri and maize rows say "sold loose"
 # only; NGN/kg is presumed for them (`unit_confirmed: false`) and should be checked before those
 # two items are shown to the public.
+# The food basket was renamed between 2024 and 2026 (May 2026 has 42 rows with different labels),
+# so an item lists every label it has had. Labels are added only when the product is clearly the
+# same. Local rice is NOT mapped to a 2026 label: "Rice local sold loose" could be "Local Rice
+# (Broken)" or "Rice Local, short-Grained" and NBS does not say. Until someone decides, rice has
+# data to October 2024 only.
 # Materiality defaults to |month-on-month| >= 5 % or |year-on-year| >= 20 %.
 
-# How each NBS publication is found in the eLibrary listing (title) and read (layout).
+# How each NBS publication is found in the eLibrary listing (title), on the microdata catalog
+# (catalog page id) and read (layout). The eLibrary page stops at October 2024; the microdata
+# catalog carries the releases from 2025 on (verified 2026-09-30, newest May 2026).
 nbs_publications:
-  - {code: pms,  layout: state_table, title_pattern: '^Premium Motor Spirit \(Petrol\) Price Watch'}
-  - {code: ago,  layout: zoned_table, title_pattern: '^Automotive Gas Oil \(Diesel\) Price Watch'}
-  - {code: dpk,  layout: two_blocks,  title_pattern: '^(National )?Household Kerosene Price Watch'}
-  - {code: lpg,  layout: two_blocks,  title_pattern: '^Liquefied Petroleum Gas \(Cooking Gas\) Price Watch'}
-  - {code: food, layout: national_items, title_pattern: '^Selected Food Prices? Watch'}
+  - {code: pms,  layout: state_table, title_pattern: '^Premium Motor Spirit \(Petrol\) Price Watch', microdata_catalog_id: 157}
+  - {code: ago,  layout: zoned_table, title_pattern: '^Automotive Gas Oil \(Diesel\) Price Watch', microdata_catalog_id: 158}
+  - {code: dpk,  layout: two_blocks,  title_pattern: '^(National )?Household Kerosene Price Watch', microdata_catalog_id: 159}
+  - {code: lpg,  layout: two_blocks,  title_pattern: '^Liquefied Petroleum Gas \(Cooking Gas\) Price Watch', microdata_catalog_id: 160}
+  - {code: food, layout: national_items, title_pattern: '^Selected Food Prices? Watch', microdata_catalog_id: 162}
 
 keywords:
   energy: [petrol, PMS, fuel price, pump price, diesel, AGO, kerosene, DPK, cooking gas, LPG,
@@ -92,7 +99,7 @@ items:
     label: white garri (1 kg)
     topic: food
     unit: NGN/kg
-    nbs: {publication: food, labels: ["Gari white,sold loose"], unit_confirmed: false}
+    nbs: {publication: food, labels: ["Gari white,sold loose", "Garri white"], unit_confirmed: false}
     factors:
       - {code: transport_costs, label: Transport costs, keywords: ["transport", "fuel price", "haulage"]}
       - {code: insecurity, label: Insecurity affecting farming, keywords: ["insecurity", "banditry", "farmers"]}
@@ -101,7 +108,7 @@ items:
     label: brown beans (1 kg)
     topic: food
     unit: NGN/kg
-    nbs: {publication: food, labels: ["Beans brown,sold loose"]}
+    nbs: {publication: food, labels: ["Beans brown,sold loose", "Beans Brown"]}
     factors:
       - {code: transport_costs, label: Transport costs, keywords: ["transport", "fuel price", "haulage"]}
       - {code: season, label: Harvest and season, keywords: ["harvest", "lean season", "rainfall", "flood"]}
@@ -110,7 +117,7 @@ items:
     label: white maize grain (1 kg)
     topic: food
     unit: NGN/kg
-    nbs: {publication: food, labels: ["Maize grain white sold loose"], unit_confirmed: false}
+    nbs: {publication: food, labels: ["Maize grain white sold loose", "Maize (Corn) Grains (White) sold loose"], unit_confirmed: false}
     factors:
       - {code: season, label: Harvest and season, keywords: ["harvest", "lean season", "rainfall", "flood"]}
       - {code: insecurity, label: Insecurity affecting farming, keywords: ["insecurity", "banditry", "farmers"]}

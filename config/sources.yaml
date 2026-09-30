@@ -30,6 +30,27 @@
     may_republish_numbers: true
     rights_basis: "Public government statistics, attributed"
 
+- slug: nbs-microdata
+  name: National Bureau of Statistics (microdata catalog)
+  kind: official_statistics
+  adapter: nbs
+  owner: National Bureau of Statistics
+  # Verified 2026-09-30: the price watches from 2025 on are published here, not on the eLibrary
+  # page. Each publication has a catalog page (ids in config/items.yaml) listing downloads, newest
+  # first; a download is a ZIP holding a PDF report and an xlsx table. The newest release then was
+  # May 2026 (April 2026 for cooking gas). robots.txt does not exist (404). Terms of use were NOT
+  # reviewed: an operator must do that before approving the permission.
+  home_url: https://microdata.nigerianstat.gov.ng/index.php/catalog
+  schedule_minutes: 1440
+  max_requests_per_hour: 30
+  coverage_note: Monthly price-watch publications (food, PMS, AGO, DPK, LPG) from 2025 on.
+  permission:
+    may_collect: true
+    may_store_full_text: true
+    max_quote_chars: null
+    may_republish_numbers: true
+    rights_basis: "Public government statistics, attributed"
+
 - slug: nerc
   name: Nigerian Electricity Regulatory Commission
   kind: regulator

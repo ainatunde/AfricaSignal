@@ -44,3 +44,17 @@ pinned by SHA-256 in `src/africasignal/places/load.py`. Extra names live in
 Set through environment variables (see `src/africasignal/config.py`). With `ENV=staging` or
 `ENV=production`, startup fails with `RuntimeError` if `DATABASE_URL`, `S3_*`, `ANTHROPIC_API_KEY`,
 `EMAIL_*` or `SECRET_KEY` is missing.
+
+## NBS price data
+
+Two sources feed the same adapter (`config/sources.yaml`, both seeded unapproved):
+
+- `nbs-elibrary`: the eLibrary page. It lists releases up to **October 2024** only.
+- `nbs-microdata`: the NBS microdata catalog, which carries the price watches from 2025 on as ZIPs
+  (a PDF plus an xlsx). Newest on 2026-09-30: May 2026 (April 2026 for cooking gas).
+
+Real files from both are saved in `tests/fixtures/nbs` with their URLs, dates and checksums in
+`manifest.json`. The parser (`sources/nbs_workbook.py`) reads them as they are; the import rules
+(vintages, restatements, the range-check queue) are described at the top of `sources/nbs.py`.
+Assessments (`publish/situations.py`) are computed in `assess/price_change.py` and are stored as
+drafts until the publication policy decides them.

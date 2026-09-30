@@ -18,6 +18,7 @@ from tests.unit.sources.nbs_fixtures import edit, manifest, read
 
 D = Decimal
 SEP, OCT = date(2024, 9, 1), date(2024, 10, 1)
+APR26, MAY26 = date(2026, 4, 1), date(2026, 5, 1)
 
 # file name -> (publication, reference month)
 FILES = {
@@ -31,7 +32,14 @@ FILES = {
     "GAS_PRICE_WATCH_OCT_2024.xlsx": ("lpg", OCT),
     "selected_food_sept_2024.xlsx": ("food", SEP),
     "selected_food_oct_2024.xlsx": ("food", OCT),
+    # 2026 files come from the microdata catalog (different layouts in places)
+    "Fuel_MAY_2026.xlsx": ("pms", MAY26),
+    "DIESEL_MAY_2026.xlsx": ("ago", MAY26),
+    "HOUSEHOLD KEROSENE MAY 2026.xlsx": ("dpk", MAY26),
+    "GAS PRICE WATCH APRIL 2026_table.xlsx": ("lpg", APR26),
+    "selected food table May 26.xlsx": ("food", MAY26),
 }
+FOOD_ROWS = {"selected food table May 26.xlsx": 42}  # the basket was renamed and shrank
 STATE_TABLES = {"pms", "ago", "dpk", "lpg"}
 
 
@@ -45,7 +53,8 @@ def row(table: ParsedTable, name: str) -> TableRow:
 
 
 def test_every_saved_file_is_listed_here_and_in_the_manifest() -> None:
-    assert {f["file"] for f in manifest()["files"]} == set(FILES)
+    listed = manifest()["files"] + manifest()["microdata_files"]
+    assert {f["file"] for f in listed} == set(FILES)
 
 
 @pytest.mark.parametrize("name", FILES)
@@ -59,6 +68,7 @@ def test_reference_month_and_columns_are_read_from_the_headers(name: str) -> Non
             "previous": date(month.year, month.month - 1, 1),
             "reference": month,
         }
+        assert table.months["reference"] == month
 
 
 @pytest.mark.parametrize("name", [n for n, (p, _) in FILES.items() if p in STATE_TABLES])
@@ -75,8 +85,9 @@ def test_state_tables_have_37_states_and_a_national_row_and_no_zones(name: str) 
 @pytest.mark.parametrize("name", [n for n, (p, _) in FILES.items() if p == "food"])
 def test_food_workbook_is_national_items_only(name: str) -> None:
     (table,) = parse(name).tables
-    assert table.national is None and len(table.rows) == 43
-    assert len({r.name for r in table.rows}) == 43
+    expected = FOOD_ROWS.get(name, 43)
+    assert table.national is None and len(table.rows) == expected
+    assert len({r.name for r in table.rows}) == expected
 
 
 def test_petrol_october_2024() -> None:
@@ -220,3 +231,60 @@ def test_missing_values_stay_missing() -> None:
     edited = edit("PMS_OCT_2024_REPORT.xlsx", "Fuel_October 2024", {"D40": None})  # Lagos
     (table,) = parse_workbook(edited, load_items().publication("pms")).tables
     assert row(table, "Lagos").values["reference"] is None
+
+
+# --- the 2026 files from the microdata catalog -------------------------------------------------
+
+
+def test_petrol_may_2026_matches_the_figures_nbs_and_the_press_reported() -> None:
+    (table,) = parse("Fuel_MAY_2026.xlsx").tables
+    assert table.national is not None
+    # Press reports of the NBS release: petrol averaged N1,596.25 in May 2026, N1,532.93 in April.
+    assert table.national.values["reference"] == D("1596.25")
+    assert table.national.values["previous"] == D("1532.93")
+    assert row(table, "Lagos").values["reference"] == D("1561.22")
+
+
+def test_diesel_may_2026() -> None:
+    (table,) = parse("DIESEL_MAY_2026.xlsx").tables
+    assert row(table, "Lagos").values == {
+        "year_ago": D("1458.26"),
+        "previous": D("2293.27"),
+        "reference": D("3150.45"),
+    }
+    assert table.national is not None and table.national.values["reference"] == D("3277.47")
+
+
+def test_kerosene_may_2026_has_no_title_row_above_the_header() -> None:
+    parsed = parse("HOUSEHOLD KEROSENE MAY 2026.xlsx")
+    assert [t.block for t in parsed.tables] == ["LITRE", "GALLON"]
+    litre = parsed.table("LITRE")
+    assert litre is not None and litre.national is not None
+    assert row(litre, "Lagos").values["reference"] == D("3185.71")
+    assert litre.national.values["reference"] == D("2971.94")
+
+
+def test_cooking_gas_april_2026_uses_another_layout() -> None:
+    """Names sit in column C and again in column K, the block names ("5KG", "12.5KG") are over
+    the first value column, and the national row is called "Grand Total"."""
+    parsed = parse("GAS PRICE WATCH APRIL 2026_table.xlsx")
+    five, big = parsed.table("5KG"), parsed.table("12.5KG")
+    assert five and big and parsed.warnings == []
+    assert five.national is not None and five.national.name == "Grand Total"
+    assert five.national.values == {
+        "year_ago": D("7885.60"),
+        "previous": D("7655.73"),
+        "reference": D("8706.93"),
+    }
+    assert big.national is not None and big.national.values["reference"] == D("22382.20")
+    assert row(five, "Lagos").values["reference"] == D("9745.10")
+    assert row(big, "Lagos").values["reference"] == D("24362.75")
+    assert len(five.rows) == len(big.rows) == 37
+
+
+def test_food_may_2026_has_renamed_items() -> None:
+    (table,) = parse("selected food table May 26.xlsx").tables
+    names = {r.name for r in table.rows}
+    assert {"Beans Brown", "Garri white", "Maize (Corn) Grains (White) sold loose"} <= names
+    assert "Rice local sold loose" not in names  # the 2024 label is gone
+    assert row(table, "Beans Brown").values["reference"] == D("1344.93")

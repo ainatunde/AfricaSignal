@@ -19,7 +19,11 @@ def engine() -> Iterator[Engine]:
     cfg = alembic_config()
     command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")
-    yield get_engine()
+    engine = get_engine()
+    # Pooled connections remember the OIDs of the enum types of the previous module's schema;
+    # after the schema was dropped and recreated they fail with "cache lookup failed for type".
+    engine.dispose()
+    yield engine
     command.downgrade(cfg, "base")
 
 
