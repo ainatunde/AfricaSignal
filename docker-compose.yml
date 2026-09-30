@@ -107,6 +107,40 @@ services:
         condition: service_healthy
     logging: *default-logging
 
+  # Restore drill: take a backup of the running database, restore it into a scratch database next to
+  # it, compare the two, drop the scratch database, record the result. Not started by default:
+  #   docker compose --profile drill run --rm restore-drill
+  # It writes to a throwaway directory inside the container (DRILL_BACKUP_DIR), so it needs no bucket.
+  # To drill against the real backup bucket instead, set DRILL_BACKUP_DIR= (empty) and the BACKUP_S3_*
+  # values, and pass --latest to restore the newest existing backup. See docs/runbook.md, section 4.3.
+  restore-drill:
+    build:
+      context: .
+      dockerfile: docker/backup/Dockerfile
+    profiles: ["drill"]
+    entrypoint: ["/opt/africasignal/scripts/restore-drill.sh"]
+    environment:
+      ENV: ${ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://africasignal:africasignal@db:5432/africasignal}
+      SECRET_KEY: ${SECRET_KEY:-}
+      BACKUP_DIR: ${DRILL_BACKUP_DIR-/tmp/drill-backups}
+      BACKUP_S3_ENDPOINT_URL: ${BACKUP_S3_ENDPOINT_URL:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      BACKUP_S3_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-}
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:-}
+      RESTORE_S3_ENDPOINT_URL: ${RESTORE_S3_ENDPOINT_URL:-}
+      RESTORE_S3_BUCKET: ${RESTORE_S3_BUCKET:-}
+      RESTORE_S3_ACCESS_KEY_ID: ${RESTORE_S3_ACCESS_KEY_ID:-}
+      RESTORE_S3_SECRET_ACCESS_KEY: ${RESTORE_S3_SECRET_ACCESS_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    logging: *default-logging
+
   minio:
     image: minio/minio
     profiles: ["dev"]

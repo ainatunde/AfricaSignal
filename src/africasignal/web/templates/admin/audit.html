@@ -10,7 +10,7 @@
   {% for entry, email in rows %}
   <tr>
     <td>{{ entry.ts|when }}</td>
-    <td>{{ email }}</td>
+    <td>{{ email or "system" }}</td>
     <td>{{ entry.action }}</td>
     <td>{{ entry.target_kind }}{% if entry.target_id is not none %} #{{ entry.target_id }}{% endif %}</td>
     <td>{% if entry.before or entry.after %}<details><summary>before / after</summary>

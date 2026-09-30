@@ -39,4 +39,10 @@ jobs:
       - run: ruff format --check .
       - run: mypy src
       - run: pytest
+      # A real drill on the real schema: migrate, seed, back up, restore into a scratch database, compare.
+      - name: Restore drill
+        run: |
+          alembic upgrade head
+          python -m africasignal.sources.seed
+          BACKUP_DIR="$RUNNER_TEMP/drill-backups" OPS_USE_CONSOLE_SETTINGS=0 scripts/restore-drill.sh
       - run: pip-audit

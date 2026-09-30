@@ -1,3 +1,4 @@
+import pytest
 from sqlalchemy import Engine, inspect, text
 
 from africasignal.models import Base
@@ -53,3 +54,20 @@ def test_upgrade_from_an_empty_database_lands_on_the_single_head(engine: Engine)
         stored = set(conn.execute(text("SELECT version_num FROM alembic_version")).scalars())
     assert stored == set(heads)
     assert _user_tables(engine) == set(Base.metadata.tables)
+
+
+def test_downgrading_past_0030_refuses_while_system_audit_rows_exist(engine: Engine) -> None:
+    cfg = alembic_config()
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO audit_log (action, target_kind) VALUES ('alert.opened', 'alert')")
+        )
+    try:
+        with pytest.raises(RuntimeError, match="written by the system"):
+            command.downgrade(cfg, "0020")
+        assert count(engine, "SELECT count(*) FROM audit_log WHERE operator_id IS NULL") == 1
+    finally:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM audit_log WHERE operator_id IS NULL"))
+    command.downgrade(cfg, "0020")
+    command.upgrade(cfg, "head")

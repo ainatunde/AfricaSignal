@@ -16,7 +16,7 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 RUN pip install --no-cache-dir .
 
-COPY scripts/backup.sh scripts/restore.sh scripts/backup-daemon.sh /opt/africasignal/scripts/
+COPY scripts/backup.sh scripts/restore.sh scripts/restore-drill.sh scripts/backup-daemon.sh /opt/africasignal/scripts/
 COPY scripts/lib /opt/africasignal/scripts/lib
 
 RUN useradd --create-home app

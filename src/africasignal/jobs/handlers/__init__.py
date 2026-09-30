@@ -44,6 +44,7 @@ def load_all() -> None:
     from africasignal.jobs.handlers import (  # noqa: F401
         apply_retention,
         assess_situation,
+        check_backups,
         dispatch_outbox,
         expire_assessments,
         explain_version,

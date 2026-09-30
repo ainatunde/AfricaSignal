@@ -31,3 +31,26 @@ def record(
     session.add(row)
     session.flush()
     return row
+
+
+def record_system(
+    session: Session,
+    action: str,
+    target_kind: str,
+    target_id: int | None = None,
+    before: dict[str, Any] | None = None,
+    after: dict[str, Any] | None = None,
+) -> AuditLog:
+    """A row for something the system did on its own (no operator), for example a job opening an
+    alert. Shown as "system" in the console's audit log. Same rules: JSON only, no secrets."""
+    row = AuditLog(
+        operator_id=None,
+        action=action,
+        target_kind=target_kind,
+        target_id=target_id,
+        before=before,
+        after=after,
+    )
+    session.add(row)
+    session.flush()
+    return row

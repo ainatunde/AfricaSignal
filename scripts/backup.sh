@@ -25,6 +25,8 @@
 #   BACKUP_PASSPHRASE                the same, with the passphrase given directly (less safe than a file)
 #   BACKUP_HEARTBEAT_URL             healthchecks.io-style URL: pinged on start (/start), success, and failure (/fail)
 #   BACKUP_LOG_FILE                  also append log lines here
+#   OPS_RECORD_STATUS=0              do not leave the last success/failure in the app database
+#                                    (setting ops.backup_status, read by the check_backups alert job)
 #   S3_ENDPOINT_URL, S3_BUCKET, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY   the app's bucket, copied unless --no-objects
 #
 # Exit status is non-zero on any failure, and the failure heartbeat is sent, so a missed or
@@ -61,6 +63,7 @@ on_exit() {
   if [ "$status" -ne 0 ]; then
     log "backup FAILED (exit $status)"
     ping_heartbeat /fail
+    record_ops_status ops.backup_status "{\"last_failure_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"last_failure_reason\":$(json_str "${OPS_LAST_ERROR:-exit status $status}")}"
   fi
   [ -z "$WORKDIR" ] || rm -rf "$WORKDIR"
   exit "$status"
@@ -136,4 +139,5 @@ rclone delete "$BACKUP_ROOT/db" --min-age "${retain_days}d" --filter '+ africasi
 
 kept="$(rclone lsf --files-only "$BACKUP_ROOT/db" | grep -cE '\.(dump|dump\.enc)$' || true)"
 log "backup ok: $name, $kept dump(s) kept"
+record_ops_status ops.backup_status "{\"last_success_at\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"last_success_name\":$(json_str "$name"),\"last_success_bytes\":$size}"
 ping_heartbeat ""
