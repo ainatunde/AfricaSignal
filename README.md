@@ -29,6 +29,24 @@ pytest   # needs PostgreSQL 16 + PostGIS; set DATABASE_URL (default: localhost a
 source until an operator approves its permission. See the notes at the top of `config/*.yaml` for
 what is still unverified.
 
+## Operator console
+
+The console lives at `/admin` (password + authenticator code). There is no public sign-up: create
+the first operator on the host.
+
+```sh
+python -m africasignal.admin create-operator --email you@example.org --role admin
+# prompts for a password (12+ characters) and prints the TOTP secret once; add it to an authenticator app
+python -m africasignal.admin disable-operator --email you@example.org   # or enable-operator
+```
+
+`admin` operators approve source permissions, publish new versions and resume sources; `editor`
+operators can view everything and pause a source. Every change writes an `audit_log` row (see
+`/admin/audit`). Behind a TLS-terminating proxy, set `ADMIN_TRUSTED_ORIGINS` to the public origin
+(for example `https://console.example.org`) so form posts pass the origin check. `SECRET_KEY`
+signs the session cookie and encrypts TOTP secrets, so changing it signs everyone out and makes
+stored TOTP secrets unreadable (recreate operators).
+
 ## Load places
 
 ```sh

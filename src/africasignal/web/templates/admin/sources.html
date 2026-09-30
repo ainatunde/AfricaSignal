@@ -1,0 +1,35 @@
+{% extends "admin/base.html" %}
+{% block title %}Sources{% endblock %}
+{% block content %}
+<h1>Sources</h1>
+<p class="muted">A source is fetched only while it is active and its newest approved permission allows collection.</p>
+<div class="scroll">
+<table>
+  <caption class="muted" style="text-align:left">{{ rows|length }} sources</caption>
+  <thead><tr>
+    <th scope="col">Source</th><th scope="col">Adapter</th><th scope="col">Permission</th>
+    <th scope="col">Active</th><th scope="col">Health</th><th scope="col">Last success</th><th scope="col">Next due</th>
+  </tr></thead>
+  <tbody>
+  {% for row in rows %}
+  {% set s = row.source %}{% set st = row.state %}
+  <tr>
+    <td><a href="/admin/sources/{{ s.id }}">{{ s.name }}</a><br><span class="muted">{{ s.slug }}</span></td>
+    <td>{{ s.adapter }}</td>
+    <td>
+      <span class="{{ 'ok' if st.can_fetch else ('warn' if st.pending else 'bad') }}">{{ st.label }}</span>
+      {% if st.pending and st.in_force %}<br><span class="warn">v{{ st.pending.version }} awaiting approval</span>{% endif %}
+      {% if not st.can_fetch %}<br><span class="muted">cannot be fetched</span>{% endif %}
+    </td>
+    <td>{{ 'yes' if s.active else 'paused' }}</td>
+    <td>{{ s.health }}{% if s.consecutive_failures %} ({{ s.consecutive_failures }} failures){% endif %}</td>
+    <td>{{ s.last_success_at|when }}</td>
+    <td>{{ s.next_due_at|when }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7">No sources yet. Run <code>python -m africasignal.sources.seed</code>.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
