@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 
 from africasignal.evidence.capture import capture
+from africasignal.evidence.origins import assign_origin
 from africasignal.jobs.handlers import JobContext, register
 from africasignal.models import Source
 from africasignal.publish.situations import request_assessments
@@ -43,6 +44,7 @@ def process_document(ctx: JobContext) -> None:
             published_at=published_at,
             title=payload.get("title"),
         )
+        assign_origin(session, document)
         result = adapter.process(document, AdapterContext(session=session, store=store))
     except Exception as exc:
         record_failure(session, source.id, f"{type(exc).__name__}: {exc}")
