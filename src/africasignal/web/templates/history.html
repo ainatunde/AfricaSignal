@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% from "_badge.html" import badge as badge_tag %}
+{% block title %}History · {{ situation.title }} · AfricaSignal{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/s/{{ situation.slug }}">{{ situation.title }}</a></p>
+<h1>Version history</h1>
+<p>Every published version of this assessment, newest first. When a figure is corrected, the old version stays here with the reason.</p>
+<ol class="history" reversed>
+  {% for v, b, status in versions %}
+  <li>
+    <h2>Version {{ v.version }}{% if v.id == situation.current_version_id %} <span class="tag">Current</span>{% endif %}
+      {% if status == "superseded" %}<span class="tag tag-stale">Replaced</span>{% elif status == "withdrawn" %}<span class="tag tag-stale">Withdrawn</span>{% elif status == "stale" %}<span class="tag tag-stale">Out of date</span>{% endif %}</h2>
+    <p>{{ v.headline }}</p>
+    <p class="meta">{{ badge_tag(b) }} · {{ v.scope_label }} · {{ v.period_label }}{% if v.published_at %} · published {{ v.published_at|date }}{% endif %}</p>
+    {% if v.change_summary %}<p><strong>What changed:</strong> {{ v.change_summary }}</p>{% endif %}
+  </li>
+  {% else %}
+  <li>No published versions.</li>
+  {% endfor %}
+</ol>
+{% endblock %}

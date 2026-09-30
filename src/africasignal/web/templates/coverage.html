@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Coverage · AfricaSignal{% endblock %}
+{% block content %}
+<h1>Coverage</h1>
+<p>What we track, how far the data goes, and how healthy each source is. If a source stops updating, figures built on it become “out of date” automatically.</p>
+
+<h2>Items</h2>
+<table>
+  <thead><tr><th scope="col">Item</th><th scope="col">Topic</th><th scope="col">Latest period</th><th scope="col">Places with data</th><th scope="col">Published situations</th></tr></thead>
+  <tbody>
+  {% for i in data["items"] %}
+    <tr><th scope="row"><a href="/explore?topic={{ i.topic }}&amp;item={{ i.code }}">{{ i.label|ucfirst }}</a></th><td>{{ i.topic|capitalize }}</td><td>{{ i.latest_period or "No data yet" }}</td><td>{{ i.places_with_data }}</td><td>{{ i.situations }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2>Sources</h2>
+<table>
+  <thead><tr><th scope="col">Source</th><th scope="col">Health</th><th scope="col">Last successful check</th><th scope="col">Latest period</th></tr></thead>
+  <tbody>
+  {% for s in data["sources"] %}
+    <tr>
+      <th scope="row">{{ s.name }}{% if s.coverage_note %}<br><span class="muted">{{ s.coverage_note }}</span>{% endif %}</th>
+      <td><span class="health health-{{ s.health }}"><span aria-hidden="true">{{ "●" if s.health == "healthy" else "▲" if s.health == "degraded" else "✕" }}</span> {{ s.health|capitalize }}</span></td>
+      <td>{{ s.last_success_at|date if s.last_success_at else "Not yet" }}</td>
+      <td>{{ s.latest_period or "–" }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4">No sources are active yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

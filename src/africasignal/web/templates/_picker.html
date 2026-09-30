@@ -1,0 +1,30 @@
+<section aria-labelledby="h-pick" class="picker">
+  <h2 id="h-pick">Choose your place</h2>
+  <form method="get" action="/" role="search" class="search">
+    <label for="q">Search for a state, local government area or city</label>
+    <div class="row">
+      <input id="q" name="q" type="search" value="{{ q or '' }}" autocomplete="off" minlength="2" required>
+      <button type="submit">Search</button>
+    </div>
+  </form>
+  <p id="geo-wrap" hidden>
+    <button type="button" id="geo" class="secondary">Use my location</button>
+    <span id="geo-status" role="status" class="muted"></span>
+    <span class="help">Your position is used once to find your area and is not stored.</span>
+  </p>
+  {% if q %}
+    {% if results %}
+    <h3>Results for “{{ q }}”</h3>
+    <ul class="plain choices">
+      {% for p in results %}<li><a href="/?place={{ p.code }}">{{ p.name }}</a> <span class="muted">{{ kind_words[p.kind] }}{% if p.parent_name %}, {{ p.parent_name }}{% endif %}</span></li>{% endfor %}
+    </ul>
+    {% else %}
+    <p>No place found for “{{ q }}”. Try the state name, or choose below.</p>
+    {% endif %}
+  {% endif %}
+  <h3>Or choose a state</h3>
+  <ul class="plain states">
+    <li><a href="/?place=NG">All of Nigeria</a></li>
+    {% for s in state_list %}<li><a href="/?place={{ s.code }}">{{ s.name }}</a></li>{% endfor %}
+  </ul>
+</section>
