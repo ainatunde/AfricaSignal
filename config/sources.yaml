@@ -56,7 +56,12 @@
   kind: regulator
   adapter: nerc
   owner: Nigerian Electricity Regulatory Commission
-  home_url: https://nerc.gov.ng                      # verify
+  # Verified 2026-09-30: orders are listed at feed_url (57 pages, newest first), each entry with a PDF.
+  # The monthly DisCo tariff schedules ("IE MYTO SEPTEMBER 2026") are PDFs with no text layer, so
+  # pdfplumber cannot read the tariffs: OCR is needed. Plain orders do have text. robots.txt only
+  # disallows /wp-admin/. No terms page found. See tests/fixtures/nerc/manifest.json.
+  home_url: https://nerc.gov.ng
+  feed_url: https://nerc.gov.ng/resource-category/orders/
   schedule_minutes: 360
   max_requests_per_hour: 30
   coverage_note: Tariff orders and supplementary orders.
@@ -72,7 +77,11 @@
   kind: regulator
   adapter: price_announcement
   owner: NMDPRA
-  home_url: https://nmdpra.gov.ng                    # verify
+  # Verified 2026-09-30: the site is a Blazor WebAssembly app; its pages carry no content without
+  # running JavaScript, so this source cannot be read by the static adapters of release 1.
+  # Inactive until a route (the API behind the site, or another publication) is found.
+  home_url: https://nmdpra.gov.ng
+  active: false
   schedule_minutes: 360
   max_requests_per_hour: 30
   coverage_note: Price and policy announcements for petroleum products.
@@ -88,7 +97,12 @@
   kind: company
   adapter: price_announcement
   owner: NNPC Limited
-  home_url: https://nnpcgroup.com                    # verify
+  # Verified 2026-09-30: /insights is filled in by the browser from the CMS API in feed_url (Strapi
+  # JSON; ?sort=publishedAt:desc&pagination[pageSize]=10 gives the newest). The 10 newest posts are
+  # corporate press releases and reports with no fuel price announcements. Terms allow personal,
+  # non-commercial use only. See tests/fixtures/nnpc/manifest.json.
+  home_url: https://nnpcgroup.com
+  feed_url: https://fde-nnpc-web-cms-prod-dwfrd0hraahrbhhg.a02.azurefd.net/api/posts
   schedule_minutes: 360
   max_requests_per_hour: 30
   coverage_note: Company price announcements and press releases.
@@ -105,7 +119,10 @@
   adapter: gdelt
   owner: The GDELT Project
   home_url: https://www.gdeltproject.org
-  feed_url: http://data.gdeltproject.org/gdeltv2/lastupdate.txt
+  # Verified 2026-09-30: the http:// URL redirects (301) to https://, and lastupdate.txt itself still
+  # lists http:// file URLs that redirect the same way. Use https. No robots.txt (404). Terms: open
+  # for any use with a citation of the GDELT Project (see tests/fixtures/gdelt/manifest.json).
+  feed_url: https://data.gdeltproject.org/gdeltv2/lastupdate.txt
   schedule_minutes: 15
   max_requests_per_hour: 30
   coverage_note: Used to discover news URLs only; never shown as evidence itself. Polled by the gdelt_poll job, not fetch_source.
@@ -116,14 +133,15 @@
     may_republish_numbers: false
     rights_basis: "GDELT is open with citation; only URLs and event metadata are used"
 
-# News outlets to evaluate for RSS (plan B6.1). Feed URLs are unverified, so each is inactive
-# until someone confirms a working feed, checks robots.txt and terms, and sets `feed_url`.
+# News outlets for RSS (plan B6.1). Feeds were checked on 2026-09-30 (see tests/fixtures/rss). Each
+# stays inactive until an operator has reviewed the outlet's terms and approved the permission.
 - slug: punch-rss
   name: Punch
   kind: news_outlet
   adapter: rss
-  home_url: https://punchng.com                      # verify
-  feed_url: null                                     # verify
+  home_url: https://punchng.com
+  # Verified 2026-09-30 (redirects to https://rss.punchng.com/v1/category/latest_news; 30 items). Stays inactive until terms are reviewed.
+  feed_url: https://punchng.com/feed/
   active: false
   schedule_minutes: 30
   max_requests_per_hour: 60
@@ -138,8 +156,9 @@
   name: Premium Times
   kind: news_outlet
   adapter: rss
-  home_url: https://www.premiumtimesng.com           # verify
-  feed_url: null                                     # verify
+  home_url: https://www.premiumtimesng.com
+  # Verified 2026-09-30 (robots crawl-delay 10; terms: personal, non-commercial use, no republication without consent). Stays inactive until terms are reviewed.
+  feed_url: https://www.premiumtimesng.com/feed
   active: false
   schedule_minutes: 30
   max_requests_per_hour: 60
@@ -149,8 +168,9 @@
   name: BusinessDay
   kind: news_outlet
   adapter: rss
-  home_url: https://businessday.ng                   # verify
-  feed_url: null                                     # verify
+  home_url: https://businessday.ng
+  # Verified 2026-09-30 (5 items; copyright page: no copying or reproduction without permission). Stays inactive until terms are reviewed.
+  feed_url: https://businessday.ng/feed/
   active: false
   schedule_minutes: 30
   max_requests_per_hour: 60
@@ -160,8 +180,9 @@
   name: Channels TV
   kind: news_outlet
   adapter: rss
-  home_url: https://www.channelstv.com               # verify
-  feed_url: null                                     # verify
+  home_url: https://www.channelstv.com
+  # Verified 2026-09-30 (robots crawl-delay 30). Stays inactive until terms are reviewed.
+  feed_url: https://www.channelstv.com/feed/
   active: false
   schedule_minutes: 30
   max_requests_per_hour: 60
@@ -171,8 +192,9 @@
   name: Vanguard
   kind: news_outlet
   adapter: rss
-  home_url: https://www.vanguardngr.com              # verify
-  feed_url: null                                     # verify
+  home_url: https://www.vanguardngr.com
+  # Verified 2026-09-30 (robots crawl-delay 10 for /feed/). Stays inactive until terms are reviewed.
+  feed_url: https://www.vanguardngr.com/feed/
   active: false
   schedule_minutes: 30
   max_requests_per_hour: 60
@@ -182,8 +204,9 @@
   name: TheCable
   kind: news_outlet
   adapter: rss
-  home_url: https://www.thecable.ng                  # verify
-  feed_url: null                                     # verify
+  home_url: https://www.thecable.ng
+  # Checked 2026-09-30: /feed/ answers HTTP 403 with a Cloudflare bot challenge. Not bypassed.
+  feed_url: null
   active: false
   schedule_minutes: 30
   max_requests_per_hour: 60
@@ -193,8 +216,9 @@
   name: Nairametrics
   kind: news_outlet
   adapter: rss
-  home_url: https://nairametrics.com                 # verify
-  feed_url: null                                     # verify
+  home_url: https://nairametrics.com
+  # Verified 2026-09-30 (20 items). Stays inactive until terms are reviewed.
+  feed_url: https://nairametrics.com/feed/
   active: false
   schedule_minutes: 30
   max_requests_per_hour: 60
@@ -204,8 +228,9 @@
   name: The Guardian Nigeria
   kind: news_outlet
   adapter: rss
-  home_url: https://guardian.ng                      # verify
-  feed_url: null                                     # verify
+  home_url: https://guardian.ng
+  # Checked 2026-09-30: /feed/ answers HTTP 403 with a Cloudflare bot challenge. Not bypassed.
+  feed_url: null
   active: false
   schedule_minutes: 30
   max_requests_per_hour: 60
@@ -215,8 +240,9 @@
   name: Daily Trust
   kind: news_outlet
   adapter: rss
-  home_url: https://dailytrust.com                   # verify
-  feed_url: null                                     # verify
+  home_url: https://dailytrust.com
+  # Verified 2026-09-30 (14 items). Stays inactive until terms are reviewed.
+  feed_url: https://dailytrust.com/feed/
   active: false
   schedule_minutes: 30
   max_requests_per_hour: 60
@@ -226,8 +252,9 @@
   name: Leadership
   kind: news_outlet
   adapter: rss
-  home_url: https://leadership.ng                    # verify
-  feed_url: null                                     # verify
+  home_url: https://leadership.ng
+  # Verified 2026-09-30 (10 items). Stays inactive until terms are reviewed.
+  feed_url: https://leadership.ng/feed/
   active: false
   schedule_minutes: 30
   max_requests_per_hour: 60

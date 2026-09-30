@@ -1,0 +1,32 @@
+{
+  "description": "Real files from nerc.gov.ng.",
+  "retrieved_on": "2026-09-30",
+  "robots_txt": "Disallows /wp-admin/ only (allows admin-ajax.php).",
+  "terms_note": "No terms of use page was found (the usual URLs 404 and the home page footer has none). Public regulator documents; an operator should still confirm reuse terms before approving the permission.",
+  "files": [
+    {
+      "file": "orders.html",
+      "source_url": "https://nerc.gov.ng/resource-category/orders/",
+      "retrieved_on": "2026-09-30",
+      "bytes": 162828,
+      "sha256": "a40da5cbcee0edf5e5bec3b7ffb5a637bb830d0277d64a88d18ce8cbf2b9339e",
+      "note": "The orders listing (page 1 of 57). Each entry is a div.publication with h6.title, a date in li > a[title], and View/Download links to a PDF under /wp-content/uploads/YYYY/MM/. Titles such as 'IE MYTO SEPTEMBER 2026' are the monthly tariff schedule of one DisCo."
+    },
+    {
+      "file": "Amended-order-on-nonadmin-opex_04092026171143.pdf",
+      "source_url": "https://nerc.gov.ng/wp-content/uploads/2026/09/Amended-order-on-nonadmin-opex_04092026171143.pdf",
+      "retrieved_on": "2026-09-30",
+      "bytes": 633612,
+      "sha256": "4a5bd7e61e12c1691e5736defed0d6408e34c12476d0e68c697a737837b3905e",
+      "note": "A regulatory order with a real text layer (4 pages): pdfplumber extracts it. Useful for policy statements; it holds no tariff figures."
+    },
+    {
+      "file": "IE_HOLDCO_YSS_September_2026_093.pdf",
+      "source_url": "https://nerc.gov.ng/wp-content/uploads/2026/09/IE_HOLDCO_YSS_September_2026_093.pdf",
+      "retrieved_on": "2026-09-30",
+      "bytes": 5192255,
+      "sha256": "349d8de6eec841b02cb14b11a4f301558815b4fd0499e4f1eaa114a4958f03ca",
+      "note": "Ikeja Electric's September 2026 MYTO tariff schedule, 12 pages, 5.2 MB. pdfplumber finds almost no text in it (a few naira signs and two numbers): the tables are drawn, not typed. Reading tariffs from these PDFs needs OCR."
+    }
+  ]
+}

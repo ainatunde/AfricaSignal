@@ -1,0 +1,17 @@
+{
+  "description": "The NMDPRA site cannot be read without running JavaScript.",
+  "retrieved_on": "2026-09-30",
+  "finding": "https://nmdpra.gov.ng/ and https://www.nmdpra.gov.ng/press-release/ return the same 26 KB Blazor WebAssembly shell (blazor.webassembly.js); every page's content is loaded by the browser from an API. There are no links to press releases or price data in the HTML. Release 1 has no JavaScript rendering, so the adapter plan for NMDPRA (AS-026) needs a different route: the API behind the site (not inspected), another publication of the same data, or news reports.",
+  "robots_txt": "404 (none).",
+  "terms_note": "No terms page found (https://nmdpra.gov.ng/terms-and-conditions returns the same shell).",
+  "files": [
+    {
+      "file": "home.html",
+      "source_url": "https://nmdpra.gov.ng/",
+      "retrieved_on": "2026-09-30",
+      "bytes": 26156,
+      "sha256": "555a2072571e7ecc85016807a8a893c6ae684b768c0b9bfd1308c5cb73bbc147",
+      "note": "The SPA shell; identical bytes came from /press-release/."
+    }
+  ]
+}
