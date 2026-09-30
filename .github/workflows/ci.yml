@@ -33,6 +33,7 @@ jobs:
         with:
           path: data/places
           key: places-boundaries-v1
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: ruff format --check .

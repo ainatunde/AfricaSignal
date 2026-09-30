@@ -50,4 +50,8 @@ def load_all() -> None:
         process_document,
         release_held_versions,
     )
-    from africasignal.sources import nbs  # noqa: F401  (registers the NBS adapter)
+    from africasignal.sources import (  # noqa: F401  (register adapters)
+        nbs,
+        nerc,
+        price_announcements,
+    )
