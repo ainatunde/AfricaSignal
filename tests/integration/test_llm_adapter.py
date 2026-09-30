@@ -268,3 +268,78 @@ def test_spend_is_kept_even_if_the_caller_rolls_back_afterwards(engine: Engine) 
             s.execute(delete(LlmCall))
             s.execute(delete(LlmResponseCache))
             s.commit()
+
+
+# --- keys and limits come from the console settings -------------------------------------------
+
+
+@pytest.fixture
+def operator(session: Session, monkeypatch: pytest.MonkeyPatch):  # type: ignore[no-untyped-def]
+    for name in ("ANTHROPIC_API_KEY", "LLM_DAILY_BUDGET_USD", "LLM_PER_JOB_MAX_TOKENS"):
+        monkeypatch.delenv(name, raising=False)
+    from tests.integration.test_admin_console import make_operator
+
+    return make_operator(session).operator
+
+
+def settings_adapter(session: Session, fake: FakeProvider) -> LlmAdapter:
+    """An adapter that reads its limits from the settings store, as production does."""
+    return LlmAdapter(session, fake, config=config(), clock=lambda: NOW)
+
+
+def test_the_api_key_saved_in_the_console_wins_over_the_environment(
+    session: Session, operator, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    from africasignal import settings_store
+    from africasignal.llm.adapter import make_provider
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-environment")
+    assert make_provider(session)._client.api_key == "sk-from-environment"  # type: ignore[attr-defined]
+    settings_store.set_value(session, operator, "anthropic_api_key", "sk-from-console")
+    assert make_provider(session)._client.api_key == "sk-from-console"  # type: ignore[attr-defined]
+
+
+def test_no_key_anywhere_means_not_configured(session: Session, operator) -> None:  # type: ignore[no-untyped-def]
+    from africasignal.llm import LlmNotConfigured
+    from africasignal.llm.adapter import build_adapter
+
+    with pytest.raises(LlmNotConfigured):
+        build_adapter(session)
+
+
+def test_a_budget_changed_in_the_console_applies_to_the_next_call(
+    session: Session, operator
+) -> None:  # type: ignore[no-untyped-def]
+    from africasignal import settings_store
+
+    fake = FakeProvider([reply(), reply()])
+    a = settings_adapter(session, fake)
+    assert a.daily_budget_usd == Decimal("10.0")  # the default, nothing saved yet
+    settings_store.set_value(session, operator, "llm_daily_budget_usd", "0.0003")
+    call(a, user="one")
+    with pytest.raises(BudgetExhausted):
+        call(a, user="two")
+    settings_store.set_value(session, operator, "llm_daily_budget_usd", "5")  # same adapter
+    call(a, user="two")
+    assert len(fake.calls) == 2
+
+
+def test_the_budget_from_the_environment_is_the_fallback(
+    session: Session, operator, monkeypatch: pytest.MonkeyPatch
+) -> None:  # type: ignore[no-untyped-def]
+    monkeypatch.setenv("LLM_DAILY_BUDGET_USD", "3.5")
+    assert settings_adapter(session, FakeProvider([])).daily_budget_usd == Decimal("3.5")
+
+
+def test_the_per_job_token_limit_comes_from_the_console(session: Session, operator) -> None:  # type: ignore[no-untyped-def]
+    from africasignal import settings_store
+
+    settings_store.set_value(session, operator, "llm_per_job_max_tokens", "1000")
+    job_id = enqueue(session, "extract_claims", {})
+    assert job_id is not None
+    fake = FakeProvider([FakeReply('{"answer": "a"}', input_tokens=600, output_tokens=300)] * 2)
+    a = settings_adapter(session, fake)
+    assert a.per_job_max_tokens == 1000
+    call(a, user="one", job_id=job_id)
+    call(a, user="two", job_id=job_id)
+    assert fake.calls[1].max_tokens == 100  # 1000 - 900 used by the first call

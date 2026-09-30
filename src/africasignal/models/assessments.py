@@ -77,6 +77,8 @@ class AssessmentVersion(CreatedMixin, Base):
     change_summary: Mapped[str | None] = mapped_column(Text)
     withheld_reasons: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, server_default="[]")
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Policy rule R7: a first high-severity version waits until then for an operator to withhold it.
+    hold_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     supersedes_id: Mapped[int | None] = mapped_column(ForeignKey("assessment_version.id"))
 
 

@@ -11,11 +11,15 @@ from fastapi.responses import HTMLResponse
 from africasignal.config import get_settings
 from africasignal.db import database_is_up
 from africasignal.net.netutil import USER_AGENT
+from africasignal.web.csrf import AdminOriginGuard
+from africasignal.web.routes import admin
 
 
 def create_app() -> FastAPI:
     get_settings()  # fail closed at startup when required settings are missing
     app = FastAPI(title="AfricaSignal", docs_url=None, redoc_url=None)
+    app.add_middleware(AdminOriginGuard)
+    app.include_router(admin.router)
 
     @app.get("/healthz")
     def healthz() -> dict[str, bool]:

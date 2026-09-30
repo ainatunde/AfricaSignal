@@ -21,7 +21,7 @@ from typing import Any, Protocol
 
 from sqlalchemy.orm import Session
 
-from africasignal.config import get_settings
+from africasignal import settings_store
 from africasignal.llm import cache
 from africasignal.llm.budget import (
     budget_status,
@@ -42,6 +42,10 @@ from africasignal.llm.schema import errors as schema_errors
 from africasignal.models import LlmCall
 
 log = logging.getLogger("africasignal.llm")
+
+# Used only if the settings store supplies nothing; its own defaults are the same numbers.
+DEFAULT_DAILY_BUDGET_USD = 10.0
+DEFAULT_PER_JOB_MAX_TOKENS = 20_000
 
 
 @dataclass(frozen=True)
@@ -69,14 +73,15 @@ class LlmProvider(Protocol):
         ...
 
 
-def make_provider() -> LlmProvider:
-    """The production provider. Raises ``LlmNotConfigured`` when there is no API key."""
-    settings = get_settings()
-    if not settings.anthropic_api_key:
-        raise LlmNotConfigured("ANTHROPIC_API_KEY is not set")
+def make_provider(session: Session) -> LlmProvider:
+    """The production provider, with the key the operator saved in the console or else
+    ``ANTHROPIC_API_KEY``. Raises ``LlmNotConfigured`` when neither is set."""
+    api_key = settings_store.get(session, "anthropic_api_key")
+    if not api_key:
+        raise LlmNotConfigured("no Anthropic API key: set one in the console or ANTHROPIC_API_KEY")
     from africasignal.llm.anthropic_provider import AnthropicProvider
 
-    return AnthropicProvider(api_key=settings.anthropic_api_key)
+    return AnthropicProvider(api_key=api_key)
 
 
 class LlmAdapter:
@@ -90,17 +95,29 @@ class LlmAdapter:
         per_job_max_tokens: int | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
-        settings = get_settings()
         self.session = session
         self.provider = provider
         self.config = config or load_llm_config()
-        self.daily_budget_usd = Decimal(
-            str(settings.llm_daily_budget_usd if daily_budget_usd is None else daily_budget_usd)
-        )
-        self.per_job_max_tokens = (
-            settings.llm_per_job_max_tokens if per_job_max_tokens is None else per_job_max_tokens
-        )
+        self._daily_budget_override = daily_budget_usd
+        self._per_job_override = per_job_max_tokens
         self.clock = clock
+
+    # Read on every use, not at construction: a limit changed in the console applies to the next
+    # call. The arguments above override the stored settings (tests).
+
+    @property
+    def daily_budget_usd(self) -> Decimal:
+        if self._daily_budget_override is not None:
+            return Decimal(str(self._daily_budget_override))
+        value = settings_store.get_float(self.session, "llm_daily_budget_usd")
+        return Decimal(str(DEFAULT_DAILY_BUDGET_USD if value is None else value))
+
+    @property
+    def per_job_max_tokens(self) -> int:
+        if self._per_job_override is not None:
+            return self._per_job_override
+        value = settings_store.get_int(self.session, "llm_per_job_max_tokens")
+        return DEFAULT_PER_JOB_MAX_TOKENS if value is None else value
 
     def model_for(self, purpose: str) -> str:
         return self.config.purpose(purpose).model
@@ -242,5 +259,6 @@ class LlmAdapter:
 
 
 def build_adapter(session: Session) -> LlmAdapter:
-    """The adapter handlers use: the production provider and the settings from the environment."""
-    return LlmAdapter(session, make_provider())
+    """The adapter handlers use: the production provider, and the key and limits from the console
+    settings (falling back to the environment)."""
+    return LlmAdapter(session, make_provider(session))

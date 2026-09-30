@@ -325,11 +325,24 @@ def test_resolving_twice_changes_nothing(
     assert claim.place_id == places["NG-LA"]
 
 
-def test_the_extract_handler_module_exposes_the_registered_kinds() -> None:
-    from africasignal.jobs import handlers
+def test_the_worker_registers_both_handlers() -> None:
+    """``load_all`` is what the worker calls at startup. Run in a fresh interpreter, so the
+    handlers it registers do not leak into tests that expect an empty registry."""
+    import subprocess
+    import sys
 
-    handlers.load_all()
-    assert {"extract_claims", "resolve_places"} <= set(handlers.HANDLERS)
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from africasignal.jobs import handlers; handlers.load_all(); "
+            "print(' '.join(sorted(handlers.HANDLERS)))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    assert {"extract_claims", "resolve_places"} <= set(out)
 
 
 _ = Extraction  # re-exported type, imported to keep the public surface under test
