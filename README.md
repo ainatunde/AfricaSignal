@@ -44,3 +44,9 @@ pinned by SHA-256 in `src/africasignal/places/load.py`. Extra names live in
 Set through environment variables (see `src/africasignal/config.py`). With `ENV=staging` or
 `ENV=production`, startup fails with `RuntimeError` if `DATABASE_URL`, `S3_*`, `ANTHROPIC_API_KEY`,
 `EMAIL_*` or `SECRET_KEY` is missing.
+
+## Backups
+
+`scripts/backup.sh` (nightly via the `backup` compose profile) dumps the database and copies the
+evidence bucket to a separate bucket; `scripts/restore.sh` restores them. Setup, the restore drill,
+and failure handling are in `docs/runbook.md`.
