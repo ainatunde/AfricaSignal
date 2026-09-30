@@ -22,6 +22,7 @@ an assumed layout. What those files look like:
 from __future__ import annotations
 
 import io
+import zipfile
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
@@ -219,12 +220,32 @@ def _wanted(
     return False
 
 
+# An xlsx file is a ZIP of XML parts, and a few kilobytes of it can expand to gigabytes. The real
+# NBS workbooks are well under a megabyte unpacked; anything far past that is refused unread.
+MAX_UNPACKED_BYTES = 50_000_000
+MAX_ZIP_MEMBERS = 500
+
+
+def check_zip_size(content: bytes) -> None:
+    """Raise ``NbsParseError`` when the ZIP in ``content`` would unpack to an unreasonable size
+    (by the sizes its directory declares; Python reads no more than a member declares). Content
+    that is not a ZIP is left for the caller to reject."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            members = archive.infolist()
+    except zipfile.BadZipFile:
+        return
+    if len(members) > MAX_ZIP_MEMBERS or sum(m.file_size for m in members) > MAX_UNPACKED_BYTES:
+        raise NbsParseError("the file unpacks to an unreasonable size and was not opened")
+
+
 def parse_workbook(content: bytes, publication: NbsPublication) -> ParsedWorkbook:
     """Read every price table in the workbook that belongs to ``publication``.
 
     A workbook can carry sheets of other publications (the October 2024 petrol file also holds
     the diesel sheet), so tables are chosen by layout, not by sheet order.
     """
+    check_zip_size(content)
     try:
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True, read_only=False)
     except Exception as exc:

@@ -1,6 +1,9 @@
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+# Fail closed: without ENV=development the app will not start unless DATABASE_URL and SECRET_KEY are
+# set, so a forgotten variable cannot leave the well-known development secret in use.
+ENV ENV=production
 WORKDIR /app
 
 # tesseract reads the NERC tariff schedules, which are PDFs without a text layer

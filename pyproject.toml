@@ -19,6 +19,7 @@ dependencies = [
     "pdfplumber>=0.11,<1",
     "pypdfium2>=4,<6",
     "openpyxl>=3.1,<4",
+    "defusedxml>=0.7.1",  # openpyxl uses it, when installed, to refuse XML entity attacks in xlsx files
     "rapidfuzz>=3.9,<4",
     "pyyaml>=6,<7",
     "anthropic>=1.0,<2",

@@ -22,6 +22,10 @@ import pypdfium2 as pdfium
 log = logging.getLogger("africasignal.evidence.ocr")
 
 RESOLUTION_DPI = 200
+# A PDF can declare a page the size of a billboard; rendering it at 200 dpi would need gigabytes.
+# The longest side of a rendered page is capped, which lowers the resolution for such a page only.
+MAX_PAGE_PIXELS = 4_000
+MIN_RESOLUTION_DPI = 10  # PDF pages cannot exceed 14,400 points, which needs only 20 dpi
 MAX_PAGES = 40
 PAGE_TIMEOUT_SECONDS = 120
 # Numbers below this confidence (0-100) make their line doubtful.
@@ -68,6 +72,13 @@ def has_text_layer(content: bytes) -> bool:
 
 def tesseract_available() -> bool:
     return shutil.which("tesseract") is not None
+
+
+def render_dpi(width_pt: float, height_pt: float) -> int:
+    """The resolution to render a page of this size (in points, 1/72 inch): ``RESOLUTION_DPI``,
+    lowered so the longest side stays within ``MAX_PAGE_PIXELS``."""
+    longest = max(width_pt, height_pt, 1.0)
+    return int(max(MIN_RESOLUTION_DPI, min(RESOLUTION_DPI, MAX_PAGE_PIXELS * 72 / longest)))
 
 
 def _read_page(png: bytes) -> tuple[list[str], set[str]]:
@@ -120,7 +131,8 @@ def ocr_pdf(content: bytes, *, max_pages: int = MAX_PAGES) -> OcrResult:
         pages = pdf.pages[:max_pages]
         for number, page in enumerate(pages, start=1):
             buffer = io.BytesIO()
-            page.to_image(resolution=RESOLUTION_DPI).original.save(buffer, format="PNG")
+            dpi = render_dpi(float(page.width), float(page.height))
+            page.to_image(resolution=dpi).original.save(buffer, format="PNG")
             lines, bad = _read_page(buffer.getvalue())
             all_lines.extend(lines)
             all_lines.append("")  # blank line between pages

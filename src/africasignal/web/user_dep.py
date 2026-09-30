@@ -60,6 +60,8 @@ def safe_next(value: str | None) -> str | None:
     """A local path (``/s/abc``) or ``None``. Anything that could leave the site is refused."""
     if not value or not value.startswith("/") or value.startswith("//") or "\\" in value:
         return None
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in value):  # a tab or newline in "/\t/host"
+        return None
     parts = urlsplit(value)
     if parts.scheme or parts.netloc or len(value) > 300:
         return None

@@ -12,6 +12,7 @@ from africasignal.web.csrf import AdminOriginGuard
 from africasignal.web.public_csrf import PublicOriginGuard
 from africasignal.web.render import STATIC_DIR
 from africasignal.web.routes import account, admin, admin_feedback, api_v1, feedback, public
+from africasignal.web.security_headers import SecurityHeadersMiddleware
 
 
 def create_app() -> FastAPI:
@@ -22,6 +23,7 @@ def create_app() -> FastAPI:
     app.add_middleware(AnalyticsMiddleware)
     app.add_middleware(PublicOriginGuard)
     app.add_middleware(AdminOriginGuard)
+    app.add_middleware(SecurityHeadersMiddleware)  # outermost: every response, errors included
 
     @app.get("/healthz")
     def healthz() -> dict[str, bool]:

@@ -39,6 +39,10 @@ MAX_TEXT_CHARS = 2000
 MAX_CONTACT_CHARS = 254
 
 share_limiter = RateLimiter(limit=30, window_seconds=60)
+# Feedback is also limited per visitor code (below), but a script can drop its cookie and get a
+# new code on every request, so a second limit keys on the client. It is generous, because readers
+# behind one shared address (an office, a mobile carrier) must not lock each other out.
+feedback_limiter = RateLimiter(limit=30, window_seconds=3600)
 
 # A 1x1 transparent GIF.
 _PIXEL = bytes.fromhex(
@@ -157,6 +161,8 @@ def useful(
     if answer not in ("yes", "no"):
         return RedirectResponse(f"/s/{slug}", status_code=303)
     anon_id, is_new = _visitor(request)
+    if not feedback_limiter.check(_client(request))[0]:
+        return _too_many(request, db, current)
     kind: Literal["useful_yes", "useful_no"] = "useful_yes" if answer == "yes" else "useful_no"
     earlier = db.scalars(
         select(Feedback).where(
@@ -202,6 +208,8 @@ def report_submit(
     if isinstance(current, Response):
         return current
     anon_id, is_new = _visitor(request)
+    if not feedback_limiter.check(_client(request))[0]:
+        return _finish(_too_many(request, db, current), anon_id, is_new)
     if website:  # a field people cannot see: only a script fills it in
         return _finish(
             RedirectResponse(f"/s/{slug}/thanks?k=report", status_code=303), anon_id, is_new

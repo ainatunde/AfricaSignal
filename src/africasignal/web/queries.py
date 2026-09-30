@@ -218,6 +218,12 @@ def evidence_ids(version: AssessmentVersion) -> list[int]:
     return ids
 
 
+def web_url(url: str) -> str:
+    """``url`` when it is an http(s) link, else an empty string. Source addresses come from pages
+    and feeds we do not control; a ``javascript:`` or ``data:`` address must never become a link."""
+    return url if url.lower().startswith(("http://", "https://")) else ""
+
+
 def evidence_for(session: Session, version: AssessmentVersion) -> list[EvidenceView]:
     """The documents a version rests on, newest first, each with the excerpt its source permits."""
     ids = evidence_ids(version)
@@ -235,7 +241,7 @@ def evidence_for(session: Session, version: AssessmentVersion) -> list[EvidenceV
             source_slug=source.slug,
             source_name=source.name,
             title=doc.title or source.name,
-            url=doc.url,
+            url=web_url(doc.url),
             date=doc.published_at or doc.retrieved_at,
             quote=permitted_excerpt(doc.excerpt, permissions.get(source.id)),
             active=doc.status == "active",
