@@ -60,6 +60,26 @@ def set_disabled(email: str, disabled: bool) -> int:
     return 0
 
 
+def get_setting(key: str, reveal: bool) -> int:
+    """Print one effective setting for scripts on the host. Secrets need ``--reveal``."""
+    from africasignal import settings_store
+
+    try:
+        defn = settings_store.definition(key)
+    except KeyError:
+        print(f"error: unknown setting {key!r}", file=sys.stderr)
+        return 1
+    if defn.secret and not reveal:
+        print("error: that is a secret; pass --reveal to print it", file=sys.stderr)
+        return 1
+    with session_scope() as session:
+        value = settings_store.get(session, key)
+    if value is None:
+        return 2  # not set anywhere: nothing printed
+    print(value)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m africasignal.admin")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -72,7 +92,12 @@ def main(argv: list[str] | None = None) -> int:
     ):
         cmd = sub.add_parser(name, help=help_text)
         cmd.add_argument("--email", required=True)
+    getter = sub.add_parser("get-setting", help="print an effective console setting")
+    getter.add_argument("key")
+    getter.add_argument("--reveal", action="store_true", help="allow printing a secret")
     args = parser.parse_args(argv)
+    if args.command == "get-setting":
+        return get_setting(args.key, args.reveal)
     if args.command == "create-operator":
         return create_operator(args.email, args.role)
     return set_disabled(args.email, args.command == "disable-operator")
