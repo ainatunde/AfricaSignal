@@ -118,6 +118,7 @@ class Worker:
 
 def main() -> None:
     configure_logging()
+    handler_registry.load_all()
     worker = Worker()
 
     def _handle_signal(signum: int, frame: FrameType | None) -> None:

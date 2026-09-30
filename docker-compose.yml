@@ -34,7 +34,8 @@ services:
   migrate:
     build: .
     environment: *app-env
-    command: ["alembic", "upgrade", "head"]
+    # Migrate, then seed the source registry (idempotent; never approves anything).
+    command: ["sh", "-c", "alembic upgrade head && python -m africasignal.sources.seed"]
     depends_on:
       db:
         condition: service_healthy

@@ -36,3 +36,9 @@ def register(kind: str) -> Callable[[Handler], Handler]:
 
 def get_handler(kind: str) -> Handler | None:
     return HANDLERS.get(kind)
+
+
+def load_all() -> None:
+    """Import every handler module so its ``@register`` runs. Called by the worker and the
+    scheduler at startup."""
+    from africasignal.jobs.handlers import fetch_source  # noqa: F401

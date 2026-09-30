@@ -1,0 +1,209 @@
+# Source registry seed, loaded by `python -m africasignal.sources.seed` (idempotent upsert by slug).
+#
+# STATUS: the home pages below are the ones named in the implementation plan. None of these hosts
+# was reachable from the environment this file was written in, so no URL, feed or terms page has
+# been verified. Each `# verify` marks something to check against the live site (and its robots.txt
+# and terms) before an operator approves the source. News feeds are left empty and the sources
+# inactive until a working feed URL is confirmed.
+#
+# Permissions seeded here are created UNAPPROVED (version 1). An operator approves each one in the
+# console (AS-022) before the first fetch. Re-running the seed never touches an existing
+# permission, an operator's `active` switch or a source's schedule state.
+
+- slug: nbs-elibrary
+  name: National Bureau of Statistics (eLibrary)
+  kind: official_statistics
+  adapter: nbs
+  owner: National Bureau of Statistics
+  home_url: https://nigerianstat.gov.ng/elibrary    # verify
+  schedule_minutes: 1440
+  max_requests_per_hour: 30
+  coverage_note: Monthly price-watch publications (food, PMS, AGO, DPK, LPG), state by state.
+  permission:
+    may_collect: true
+    may_store_full_text: true
+    max_quote_chars: null
+    may_republish_numbers: true
+    rights_basis: "Public government statistics, attributed"
+
+- slug: nerc
+  name: Nigerian Electricity Regulatory Commission
+  kind: regulator
+  adapter: nerc
+  owner: Nigerian Electricity Regulatory Commission
+  home_url: https://nerc.gov.ng                      # verify
+  schedule_minutes: 360
+  max_requests_per_hour: 30
+  coverage_note: Tariff orders and supplementary orders.
+  permission:
+    may_collect: true
+    may_store_full_text: true
+    max_quote_chars: null
+    may_republish_numbers: true
+    rights_basis: "Public regulator documents, attributed"
+
+- slug: nmdpra
+  name: Nigerian Midstream and Downstream Petroleum Regulatory Authority
+  kind: regulator
+  adapter: price_announcement
+  owner: NMDPRA
+  home_url: https://nmdpra.gov.ng                    # verify
+  schedule_minutes: 360
+  max_requests_per_hour: 30
+  coverage_note: Price and policy announcements for petroleum products.
+  permission:
+    may_collect: true
+    may_store_full_text: true
+    max_quote_chars: null
+    may_republish_numbers: true
+    rights_basis: "Public regulator announcements, attributed"
+
+- slug: nnpc
+  name: NNPC Limited
+  kind: company
+  adapter: price_announcement
+  owner: NNPC Limited
+  home_url: https://nnpcgroup.com                    # verify
+  schedule_minutes: 360
+  max_requests_per_hour: 30
+  coverage_note: Company price announcements and press releases.
+  permission:
+    may_collect: true
+    may_store_full_text: false
+    max_quote_chars: 300
+    may_republish_numbers: true
+    rights_basis: "Company announcements: link and short quotation"
+
+- slug: gdelt
+  name: GDELT 2.0 Events and Mentions
+  kind: aggregator
+  adapter: gdelt
+  owner: The GDELT Project
+  home_url: https://www.gdeltproject.org
+  feed_url: http://data.gdeltproject.org/gdeltv2/lastupdate.txt
+  schedule_minutes: 15
+  max_requests_per_hour: 30
+  coverage_note: Used to discover news URLs only; never shown as evidence itself. Polled by the gdelt_poll job, not fetch_source.
+  permission:
+    may_collect: true
+    may_store_full_text: false
+    max_quote_chars: 0
+    may_republish_numbers: false
+    rights_basis: "GDELT is open with citation; only URLs and event metadata are used"
+
+# News outlets to evaluate for RSS (plan B6.1). Feed URLs are unverified, so each is inactive
+# until someone confirms a working feed, checks robots.txt and terms, and sets `feed_url`.
+- slug: punch-rss
+  name: Punch
+  kind: news_outlet
+  adapter: rss
+  home_url: https://punchng.com                      # verify
+  feed_url: null                                     # verify
+  active: false
+  schedule_minutes: 30
+  max_requests_per_hour: 60
+  permission: &news_permission
+    may_collect: true
+    may_store_full_text: false
+    max_quote_chars: 300
+    may_republish_numbers: false
+    rights_basis: "News: link and short quotation only"
+
+- slug: premium-times-rss
+  name: Premium Times
+  kind: news_outlet
+  adapter: rss
+  home_url: https://www.premiumtimesng.com           # verify
+  feed_url: null                                     # verify
+  active: false
+  schedule_minutes: 30
+  max_requests_per_hour: 60
+  permission: *news_permission
+
+- slug: businessday-rss
+  name: BusinessDay
+  kind: news_outlet
+  adapter: rss
+  home_url: https://businessday.ng                   # verify
+  feed_url: null                                     # verify
+  active: false
+  schedule_minutes: 30
+  max_requests_per_hour: 60
+  permission: *news_permission
+
+- slug: channels-tv-rss
+  name: Channels TV
+  kind: news_outlet
+  adapter: rss
+  home_url: https://www.channelstv.com               # verify
+  feed_url: null                                     # verify
+  active: false
+  schedule_minutes: 30
+  max_requests_per_hour: 60
+  permission: *news_permission
+
+- slug: vanguard-rss
+  name: Vanguard
+  kind: news_outlet
+  adapter: rss
+  home_url: https://www.vanguardngr.com              # verify
+  feed_url: null                                     # verify
+  active: false
+  schedule_minutes: 30
+  max_requests_per_hour: 60
+  permission: *news_permission
+
+- slug: thecable-rss
+  name: TheCable
+  kind: news_outlet
+  adapter: rss
+  home_url: https://www.thecable.ng                  # verify
+  feed_url: null                                     # verify
+  active: false
+  schedule_minutes: 30
+  max_requests_per_hour: 60
+  permission: *news_permission
+
+- slug: nairametrics-rss
+  name: Nairametrics
+  kind: news_outlet
+  adapter: rss
+  home_url: https://nairametrics.com                 # verify
+  feed_url: null                                     # verify
+  active: false
+  schedule_minutes: 30
+  max_requests_per_hour: 60
+  permission: *news_permission
+
+- slug: guardian-nigeria-rss
+  name: The Guardian Nigeria
+  kind: news_outlet
+  adapter: rss
+  home_url: https://guardian.ng                      # verify
+  feed_url: null                                     # verify
+  active: false
+  schedule_minutes: 30
+  max_requests_per_hour: 60
+  permission: *news_permission
+
+- slug: daily-trust-rss
+  name: Daily Trust
+  kind: news_outlet
+  adapter: rss
+  home_url: https://dailytrust.com                   # verify
+  feed_url: null                                     # verify
+  active: false
+  schedule_minutes: 30
+  max_requests_per_hour: 60
+  permission: *news_permission
+
+- slug: leadership-rss
+  name: Leadership
+  kind: news_outlet
+  adapter: rss
+  home_url: https://leadership.ng                    # verify
+  feed_url: null                                     # verify
+  active: false
+  schedule_minutes: 30
+  max_requests_per_hour: 60
+  permission: *news_permission

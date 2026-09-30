@@ -391,7 +391,10 @@ def test_inactive_and_not_due_sources_are_skipped(
     assert "fetch_source" not in _kinds(factory)
 
 
-def test_kinds_without_a_handler_are_not_enqueued(factory: sessionmaker[Session]) -> None:
+def test_kinds_without_a_handler_are_not_enqueued(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(handlers, "HANDLERS", {})
     for kind in ("fetch_source", "gdelt_poll", "expire_assessments", "dispatch_outbox"):
         assert handlers.get_handler(kind) is None
     _add_source(factory, due="now() - interval '1 hour'")

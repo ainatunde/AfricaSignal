@@ -48,7 +48,8 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
     due = session.execute(
         text(
             "SELECT id, schedule_minutes, next_due_at FROM source "
-            "WHERE active AND next_due_at <= :now ORDER BY next_due_at FOR UPDATE"
+            "WHERE active AND adapter <> 'gdelt' AND next_due_at <= :now "  # gdelt: gdelt_poll job
+            "ORDER BY next_due_at FOR UPDATE"
         ),
         {"now": now},
     ).mappings()
@@ -84,6 +85,7 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
 
 def main() -> None:
     configure_logging()
+    handler_registry.load_all()
     factory = sessionmaker(bind=get_engine(), expire_on_commit=False)
     stopping = threading.Event()
 

@@ -22,6 +22,13 @@ ruff check . && ruff format --check . && mypy src
 pytest   # needs PostgreSQL 16 + PostGIS; set DATABASE_URL (default: localhost africasignal_test)
 ```
 
+## Source registry
+
+`python -m africasignal.sources.seed` (run by the compose `migrate` service) upserts
+`config/sources.yaml`. Seeded permissions are created **unapproved**; nothing is fetched from a
+source until an operator approves its permission. See the notes at the top of `config/*.yaml` for
+what is still unverified.
+
 ## Load places
 
 ```sh

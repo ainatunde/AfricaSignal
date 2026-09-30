@@ -1,0 +1,89 @@
+# Tracked items, units, materiality thresholds and possible price drivers (spec B6.3, B6.8, B8.2).
+#
+# STATUS: `nbs_labels` are provisional. They are the row names as I understand NBS publishes them
+# but no NBS file could be fetched to check them. Ticket AS-010 must confirm or correct every
+# label against saved fixtures of the real Excel files before any parser depends on them.
+# Materiality defaults to |month-on-month| >= 5 % or |year-on-year| >= 20 %.
+
+keywords:
+  energy: [petrol, PMS, fuel price, pump price, diesel, AGO, kerosene, DPK, cooking gas, LPG,
+           electricity tariff, Band A, NERC, DisCo, prepaid meter, NMDPRA, NNPC, subsidy]
+  food: [food price, foodstuff, rice, garri, beans, yam, maize, tomato, bread, vegetable oil,
+         food inflation, market prices]
+
+items:
+  - code: pms_litre
+    label: petrol (PMS)
+    topic: energy
+    unit: NGN/litre
+    nbs_labels: ["Premium Motor Spirit (Petrol) price watch", "PMS"]
+    factors:
+      - {code: crude_price, label: Crude oil price, keywords: ["crude oil", "crude price", "brent"]}
+      - {code: exchange_rate, label: Exchange rate, keywords: ["exchange rate", "naira", "forex", "dollar"]}
+      - {code: supply_disruption, label: Supply disruption, keywords: ["supply", "depot", "scarcity", "queue", "strike"]}
+      - {code: regulatory_price_change, label: Regulatory price change, keywords: ["NMDPRA", "price cap", "subsidy", "ex-depot", "deregulation"]}
+
+  - code: ago_litre
+    label: diesel (AGO)
+    topic: energy
+    unit: NGN/litre
+    nbs_labels: ["Automotive Gas Oil (Diesel) price watch", "AGO"]
+    factors:
+      - {code: crude_price, label: Crude oil price, keywords: ["crude oil", "crude price", "brent"]}
+      - {code: exchange_rate, label: Exchange rate, keywords: ["exchange rate", "naira", "forex", "dollar"]}
+      - {code: supply_disruption, label: Supply disruption, keywords: ["supply", "depot", "scarcity", "strike"]}
+
+  - code: dpk_litre
+    label: household kerosene (DPK)
+    topic: energy
+    unit: NGN/litre
+    nbs_labels: ["Household Kerosene price watch", "DPK"]
+    factors:
+      - {code: crude_price, label: Crude oil price, keywords: ["crude oil", "crude price", "brent"]}
+      - {code: supply_disruption, label: Supply disruption, keywords: ["supply", "scarcity", "depot"]}
+
+  - code: lpg_12_5kg
+    label: cooking gas (12.5 kg refill)
+    topic: energy
+    unit: NGN/12.5kg
+    nbs_labels: ["Liquefied Petroleum Gas (Cooking Gas) price watch", "LPG 12.5kg"]
+    factors:
+      - {code: exchange_rate, label: Exchange rate, keywords: ["exchange rate", "naira", "forex", "dollar"]}
+      - {code: import_supply, label: Import and supply, keywords: ["import", "vessel", "supply", "scarcity"]}
+
+  - code: rice_local_1kg
+    label: local rice (1 kg)
+    topic: food
+    unit: NGN/kg
+    nbs_labels: ["Rice local sold loose"]
+    factors:
+      - {code: transport_costs, label: Transport costs, keywords: ["transport", "fuel price", "haulage"]}
+      - {code: import_policy, label: Import policy, keywords: ["import duty", "import ban", "tariff", "border"]}
+      - {code: insecurity, label: Insecurity affecting farming, keywords: ["insecurity", "banditry", "farmers"]}
+
+  - code: garri_white_1kg
+    label: white garri (1 kg)
+    topic: food
+    unit: NGN/kg
+    nbs_labels: ["Garri white sold loose"]
+    factors:
+      - {code: transport_costs, label: Transport costs, keywords: ["transport", "fuel price", "haulage"]}
+      - {code: insecurity, label: Insecurity affecting farming, keywords: ["insecurity", "banditry", "farmers"]}
+
+  - code: beans_brown_1kg
+    label: brown beans (1 kg)
+    topic: food
+    unit: NGN/kg
+    nbs_labels: ["Beans brown sold loose"]
+    factors:
+      - {code: transport_costs, label: Transport costs, keywords: ["transport", "fuel price", "haulage"]}
+      - {code: season, label: Harvest and season, keywords: ["harvest", "lean season", "rainfall", "flood"]}
+
+  - code: maize_white_1kg
+    label: white maize grain (1 kg)
+    topic: food
+    unit: NGN/kg
+    nbs_labels: ["Maize grain white sold loose"]
+    factors:
+      - {code: season, label: Harvest and season, keywords: ["harvest", "lean season", "rainfall", "flood"]}
+      - {code: insecurity, label: Insecurity affecting farming, keywords: ["insecurity", "banditry", "farmers"]}
