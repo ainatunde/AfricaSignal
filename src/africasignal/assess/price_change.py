@@ -14,15 +14,31 @@ Rules, as implemented (``THRESHOLD`` is the item's materiality threshold from ``
 * Severity: ``none`` when not material, ``low`` for ratio below 2, ``medium`` for ratio from 2 up
   to and including 4, ``high`` above 4. Severity is ``none`` whenever the evidence is
   ``insufficient``.
-* Evidence state: ``reported`` (the official measurement only; news claims do not exist yet) or
-  ``insufficient`` when the previous month is missing or the latest period ended more than 120
-  days before ``now``.
+* Evidence state (``insufficient`` first, then ``disputed``, then ``corroborated``):
+
+  - ``insufficient``: the previous month is missing or the latest period ended more than 120 days
+    before ``now``;
+  - ``disputed``: a valid claim from an official, regulator or company source, about a moment in
+    the period, says the price moved the opposite way (up against down) to the measurement;
+  - ``corroborated``: a valid news claim from an origin independent of the measurement, about a
+    moment within one month either side of the period, says the price moved the same way
+    (``unchanged`` counts when the measurement is unchanged). Copies of one story are one origin,
+    and a document in the same origin as the measurement is not independent of it;
+  - ``reported``: the official measurement only.
+
+  The claims given to ``compute_price_change`` are already matched to the item and the place
+  (the place itself, or a finer place inside a state); this module judges direction, timing and
+  independence. A news claim that says the opposite of the measurement does not make it disputed
+  (only an official source can) but is listed under the unknowns.
+* A possible factor is ``supported`` when a valid claim about the item and place, inside the same
+  window as corroboration, mentions one of the factor's keywords. Nothing else makes it more than
+  ``not_checked``, and no cause is ever stated as fact.
 * ``valid_until`` is the end of the day 75 days after the latest period ends.
 * A national situation (country scope) also gets the median of the state values, how many states
   rose, fell or stayed within +-0.5 %, and the three highest and lowest states.
-* ``inputs_hash`` covers the template version, the item, the place and every input measurement
-  (id and value), so the same inputs give the same hash and a new template version gives a new
-  one.
+* ``inputs_hash`` covers the template version, the item, the place, every input measurement
+  (id and value) and every claim that shaped the result (id and origin), so the same inputs give
+  the same hash and a new template version gives a new one.
 """
 
 from __future__ import annotations
@@ -35,13 +51,27 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal
 
-TEMPLATE_VERSION = "T1-1"
+from africasignal.assess.corroboration import (
+    OPPOSITE,
+    ClaimPoint,
+    add_months,
+    claim_text,
+    document_ids,
+    in_window,
+    independent_origins,
+    is_news,
+    is_official,
+    matches_any,
+    month_end,
+)
+
+TEMPLATE_VERSION = "T1-2"
 STALE_AFTER_DAYS = 120  # latest period older than this: insufficient evidence
 VALID_FOR_DAYS = 75  # after the period ends: the next release plus a grace period
 UNCHANGED_BAND_PCT = Decimal("0.5")  # a state within +-0.5 % is counted as unchanged
 TOP_N = 3
 
-EvidenceState = Literal["reported", "insufficient"]  # corroborated/disputed need claims (AS-025+)
+EvidenceState = Literal["reported", "corroborated", "disputed", "insufficient"]
 Severity = Literal["none", "low", "medium", "high"]
 
 _ONE_PLACE = Decimal("0.1")
@@ -58,6 +88,7 @@ class PricePoint:
     value: Decimal
     evidence_document_id: int
     source_label: str  # for example "Premium Motor Spirit (Petrol) Price Watch (October 2024)"
+    origin_id: int | None = None  # the reporting origin of the document behind the value
 
 
 @dataclass(frozen=True)
@@ -71,6 +102,7 @@ class StatePoint:
 class FactorSpec:
     code: str
     label: str
+    keywords: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -91,6 +123,7 @@ class PriceInputs:
     now: datetime  # passed in, so the same inputs at the same time give the same result
     states_current: tuple[StatePoint, ...] = ()  # national situations: every state at P
     states_previous: tuple[StatePoint, ...] = ()  # and at P - 1
+    claims: tuple[ClaimPoint, ...] = ()  # valid claims matched to the item and the place
 
 
 @dataclass(frozen=True)
@@ -166,15 +199,10 @@ def _json_number(value: Decimal) -> float:
     return float(value.quantize(_TWO_PLACES, rounding=ROUND_HALF_UP))
 
 
-def _add_months(d: date, n: int) -> date:
-    index = d.year * 12 + (d.month - 1) + n
-    return date(index // 12, index % 12 + 1, 1)
-
-
 # --- the computation ---------------------------------------------------------------------------
 
 
-def _inputs_hash(inputs: PriceInputs, used: list[tuple[str, int, Decimal]]) -> str:
+def _inputs_hash(inputs: PriceInputs, used: list[tuple[str, int, Decimal | str]]) -> str:
     doc = {
         "template": TEMPLATE_VERSION,
         "item": inputs.item_code,
@@ -194,6 +222,73 @@ def _direction(mom: Decimal | None) -> Literal["rose", "fell", "unchanged", "unk
     if mom < 0:
         return "fell"
     return "unchanged"
+
+
+_CLAIM_DIRECTION = {"rose": "up", "fell": "down", "unchanged": "unchanged"}
+
+
+@dataclass(frozen=True)
+class _Evidence:
+    state: EvidenceState
+    corroborating: tuple[ClaimPoint, ...] = ()  # news claims from independent origins
+    disputing: tuple[ClaimPoint, ...] = ()  # official claims that say the opposite
+    opposing_news: tuple[ClaimPoint, ...] = ()  # news claims that say the opposite
+
+
+def _weigh_claims(inputs: PriceInputs, mom: Decimal | None, insufficient: bool) -> _Evidence:
+    """The evidence state from the claims (spec B8.2). See the module docstring for the rules."""
+    if insufficient or mom is None:
+        return _Evidence("insufficient")
+    measured = _CLAIM_DIRECTION[_direction(mom)]
+    cur = inputs.current
+    # Documents that share an origin with the measurement are not independent reports of it.
+    own_origins = {
+        p.origin_id for p in (inputs.current, inputs.previous) if p is not None and p.origin_id
+    }
+    window_start, window_end = (
+        add_months(cur.period_start, -1),
+        month_end(add_months(cur.period_start, 1)),
+    )
+
+    def same_origin(claim: ClaimPoint) -> bool:
+        return claim.origin_id is not None and claim.origin_id in own_origins
+
+    disputing = tuple(
+        c
+        for c in inputs.claims
+        if is_official(c)
+        and not same_origin(c)
+        and c.direction == OPPOSITE.get(measured)
+        and in_window(c, cur.period_start, cur.period_end)
+    )
+    news = [c for c in inputs.claims if is_news(c) and not same_origin(c) and not c.copies_official]
+    news = [c for c in news if in_window(c, window_start, window_end)]
+    corroborating = tuple(c for c in news if c.direction == measured)
+    opposing = tuple(c for c in news if c.direction == OPPOSITE.get(measured))
+    if disputing:
+        return _Evidence("disputed", disputing=disputing, opposing_news=opposing)
+    if corroborating:
+        return _Evidence("corroborated", corroborating=corroborating, opposing_news=opposing)
+    return _Evidence("reported", opposing_news=opposing)
+
+
+def _supported_factors(inputs: PriceInputs) -> list[dict[str, Any]]:
+    """Possible factors, each ``supported`` only by a valid claim that names it (spec B8.2)."""
+    cur = inputs.current
+    start, end = add_months(cur.period_start, -1), month_end(add_months(cur.period_start, 1))
+    nearby = [c for c in inputs.claims if in_window(c, start, end)]
+    factors: list[dict[str, Any]] = []
+    for spec in inputs.factors:
+        linked = [c for c in nearby if matches_any(claim_text(c), spec.keywords)]
+        factor = _not_checked(spec)
+        if linked:
+            factor |= {
+                "status": "supported",
+                "evidence_ids": document_ids(linked),
+                "claim_ids": sorted(c.claim_id for c in linked),
+            }
+        factors.append(factor)
+    return factors
 
 
 def _headline(inputs: PriceInputs, mom: Decimal | None) -> str:
@@ -320,12 +415,13 @@ def compute_price_change(inputs: PriceInputs) -> PriceAssessment:
 
     age_days = (inputs.now.date() - cur.period_end).days
     stale = age_days > STALE_AFTER_DAYS
-    evidence_state: EvidenceState = "insufficient" if prev is None or stale else "reported"
+    weighed = _weigh_claims(inputs, mom, insufficient=prev is None or stale)
+    evidence_state = weighed.state
     severity: Severity = "none" if evidence_state == "insufficient" else severity_for(ratio)
 
     period = f"{cur.period_start:%B %Y}"
     facts = [_fact("Current price", cur.value, inputs.unit, cur, inputs.place_code, period)]
-    used: list[tuple[str, int, Decimal]] = [("measurement", cur.measurement_id, cur.value)]
+    used: list[tuple[str, int, Decimal | str]] = [("measurement", cur.measurement_id, cur.value)]
     if prev:
         used.append(("measurement", prev.measurement_id, prev.value))
         facts.append(
@@ -352,9 +448,45 @@ def compute_price_change(inputs: PriceInputs) -> PriceAssessment:
     facts += national_facts
     used += national_used
 
+    origins = independent_origins(weighed.corroborating)
+    if origins:
+        facts.append(
+            _claim_fact(
+                "Independent reports",
+                len(origins),
+                "reporting origins",
+                weighed.corroborating,
+                inputs.place_code,
+                period,
+            )
+        )
+    if weighed.disputing:
+        facts.append(
+            _claim_fact(
+                "Official statements that disagree",
+                len(weighed.disputing),
+                "statements",
+                weighed.disputing,
+                inputs.place_code,
+                period,
+            )
+        )
+    possible_factors = (
+        _supported_factors(inputs)
+        if evidence_state != "insufficient"
+        else [_not_checked(f) for f in inputs.factors]
+    )
+    supported_claims = {cid for factor in possible_factors for cid in factor.get("claim_ids", [])}
+    used_claims = (
+        {c.claim_id: c for c in (*weighed.corroborating, *weighed.disputing)}
+        | {c.claim_id: c for c in inputs.claims if c.claim_id in supported_claims}
+        | {c.claim_id: c for c in weighed.opposing_news}
+    )
+    used += [("claim", c.claim_id, str(c.origin_id)) for c in used_claims.values()]
+
     unknowns: list[str] = []
     if evidence_state == "insufficient" and prev is None:
-        unknowns.append(f"The value for {_add_months(cur.period_start, -1):%B %Y} is not available")
+        unknowns.append(f"The value for {add_months(cur.period_start, -1):%B %Y} is not available")
     if stale:
         unknowns.append(
             f"The latest {inputs.source_short} figure is for {period}, "
@@ -374,11 +506,15 @@ def compute_price_change(inputs: PriceInputs) -> PriceAssessment:
     if evidence_state == "reported":
         where = "this state" if inputs.place_kind == "state" else "Nigeria"
         unknowns.append(f"No independent report for {where} and month")
-
-    possible_factors = [
-        {"factor": f.label, "code": f.code, "status": "not_checked", "evidence_ids": []}
-        for f in inputs.factors
-    ]  # "supported" needs a linked claim; there are no claims yet
+    if weighed.disputing:
+        unknowns.append(
+            "An official statement says the price moved the other way in this period; "
+            "the figures above are the published measurement"
+        )
+    if weighed.opposing_news:
+        unknowns.append(
+            "A news report says the price moved the other way; it is not counted as confirmation"
+        )
 
     return PriceAssessment(
         template_version=TEMPLATE_VERSION,
@@ -404,9 +540,37 @@ def compute_price_change(inputs: PriceInputs) -> PriceAssessment:
             cur.period_end + timedelta(days=VALID_FOR_DAYS), time(23, 59, 59), tzinfo=UTC
         ),
         inputs=sorted({(kind, id_) for kind, id_, _ in used})
-        + [("evidence_document", d) for d in _documents(facts)],
+        + [("evidence_document", d) for d in _documents([*facts, *possible_factors])],
     )
 
 
-def _documents(facts: list[dict[str, Any]]) -> list[int]:
-    return sorted({doc for fact in facts for doc in fact["evidence_ids"]})
+def _documents(items: list[dict[str, Any]]) -> list[int]:
+    return sorted({doc for item in items for doc in item["evidence_ids"]})
+
+
+def _not_checked(spec: FactorSpec) -> dict[str, Any]:
+    return {
+        "factor": spec.label,
+        "code": spec.code,
+        "status": "not_checked",
+        "evidence_ids": [],
+    }
+
+
+def _claim_fact(
+    label: str,
+    value: int,
+    unit: str,
+    claims: tuple[ClaimPoint, ...],
+    place_code: str,
+    period: str,
+) -> dict[str, Any]:
+    return {
+        "label": label,
+        "value": value,
+        "unit": unit,
+        "period": period,
+        "place_code": place_code,
+        "source_label": ", ".join(sorted({c.origin_label for c in claims})),
+        "evidence_ids": document_ids(claims),
+    }

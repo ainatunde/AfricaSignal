@@ -84,6 +84,16 @@ returned against the figures the code reads from the document (`reconcile_tariff
 queues `resolve_places`. NNPC price announcements are read by code only. Publishing a version queues
 `notify_followers` once (`publish/hooks.py`; registered when the worker loads its handlers).
 
+When a document's valid claims are stored (and placed), `publish/claim_assessments.py` queues
+`assess_situation` for the situations they touch. Claims decide the evidence state of an official
+figure: a T1 price situation is `corroborated` by a news claim from an independent origin,
+`disputed` by an official claim that says the opposite, and its possible factors are `supported` only
+by a claim that names them (`assess/price_change.py`); a T2 policy situation
+(`assess/policy_change.py`, `publish/policy_situations.py`, series from `config/policies.yaml`)
+takes its rate from primary documents and is `corroborated` by news that the rate is being applied
+or `disputed` by a later suspension. The shared rules (news, official, windows, origins) are in
+`assess/corroboration.py`.
+
 ## Load places
 
 ```sh

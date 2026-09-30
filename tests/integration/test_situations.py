@@ -163,7 +163,7 @@ def test_a_state_assessment_from_real_petrol_data(
         "Average petrol (PMS) price in Lagos State rose 8.0% in October 2024 to ₦1,080.95 (NBS)"
     )
     assert (v.version, v.status, v.policy_version) == (1, "draft", POLICY_UNAPPLIED)
-    assert (v.template, v.template_version) == ("T1_price_change", "T1-1")
+    assert (v.template, v.template_version) == ("T1_price_change", "T1-2")
     # +82.9 % on the year is 4.1x the 20 % threshold (above 4x), so severity is high
     assert (v.evidence_state, v.severity) == ("reported", "high")
     assert v.scope_label == "Lagos State (state average, NBS)" and v.period_label == "October 2024"

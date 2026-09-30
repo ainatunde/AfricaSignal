@@ -9,6 +9,7 @@ from africasignal.evidence.capture import capture
 from africasignal.evidence.origins import assign_origin
 from africasignal.jobs.handlers import JobContext, register
 from africasignal.models import Source
+from africasignal.publish.claim_assessments import request_claim_assessments
 from africasignal.publish.situations import request_assessments
 from africasignal.sources.base import AdapterContext, get_adapter
 from africasignal.sources.health import record_failure
@@ -50,6 +51,8 @@ def process_document(ctx: JobContext) -> None:
         record_failure(session, source.id, f"{type(exc).__name__}: {exc}")
         raise
     queued = request_assessments(session, result.touched, document.id, result.superseded)
+    if result.claims:  # claims an adapter made by code (a tariff order) bear on T2 situations
+        queued += request_claim_assessments(session, document.id)
     log.info(
         "processed %s: %d measurements, %d claims, %d assessments queued",
         payload["url"],

@@ -148,6 +148,9 @@ class PolicySeries(BaseModel):
     scope: Literal["national", "states"]
     state_codes: list[str] = Field(default_factory=list)
     affected_groups: str
+    # A change in the rate of at least this many percent is material (spec B8.3 has no threshold
+    # of its own; this is the T1 month-on-month default).
+    materiality_pct: float = Field(default=5.0, gt=0)
 
     @model_validator(mode="after")
     def _states_match_scope(self) -> PolicySeries:

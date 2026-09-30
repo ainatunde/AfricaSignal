@@ -20,6 +20,7 @@ from datetime import date, datetime
 from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 
+from africasignal.assess.corroboration import OFFICIAL_SOURCE_KINDS
 from africasignal.assess.publication_policy import (
     POLICY_VERSION,
     Decision,
@@ -32,6 +33,7 @@ from africasignal.assess.publication_policy import (
 from africasignal.models import (
     AssessmentInput,
     AssessmentVersion,
+    Claim,
     EvidenceDocument,
     Measurement,
     MeasurementReview,
@@ -40,6 +42,7 @@ from africasignal.models import (
     Series,
     Setting,
     Situation,
+    Source,
 )
 from africasignal.publish.hooks import NotificationKind, notify_published
 
@@ -146,6 +149,24 @@ def build_draft(session: Session, version: AssessmentVersion, now: datetime) -> 
                 or 0
             ) > 0
 
+    has_primary = True  # only T2 can lack one (R5)
+    if version.template == "T2_policy_change":
+        has_primary = (
+            session.scalar(
+                select(func.count())
+                .select_from(AssessmentInput)
+                .join(Claim, Claim.id == AssessmentInput.input_id)
+                .join(EvidenceDocument, EvidenceDocument.id == Claim.evidence_document_id)
+                .join(Source, Source.id == EvidenceDocument.source_id)
+                .where(
+                    AssessmentInput.assessment_version_id == version.id,
+                    AssessmentInput.input_kind == "claim",
+                    Source.kind.in_(OFFICIAL_SOURCE_KINDS),
+                )
+            )
+            or 0
+        ) > 0
+
     return VersionDraft(
         template=version.template,  # type: ignore[arg-type]
         evidence_state=version.evidence_state,
@@ -166,6 +187,7 @@ def build_draft(session: Session, version: AssessmentVersion, now: datetime) -> 
         current_published_hash=current_hash,
         ever_published=ever_published,
         range_failure_pending=range_pending,
+        has_primary_document=has_primary,
     )
 
 
