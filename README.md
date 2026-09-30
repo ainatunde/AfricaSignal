@@ -109,3 +109,10 @@ accepted for development and tests; Postmark and Resend are implemented and have
 against a mocked transport. The provider, API key, sender and public address are saved in the
 operator console (Settings) and read on each use, so a change applies on the next send; the
 `EMAIL_*` and `PUBLIC_BASE_URL` environment variables are only the fallback.
+
+## Backups
+
+`scripts/backup.sh` (nightly via the `backup` compose profile) dumps the database and copies the
+evidence bucket to a separate bucket; `scripts/restore.sh` restores them. The backup bucket is set in
+the console under **Settings > Backup storage**. Setup, the restore drill, and failure handling are
+in `docs/runbook.md`.
