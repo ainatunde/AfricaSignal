@@ -1,10 +1,10 @@
 """Console session revocation and database-backed sign-in throttle (AS-042, S-04 and S-05)
 
 Revision ID: 0020
-Revises: 0006
+Revises: 0007
 Create Date: 2026-09-30
 
-``down_revision`` is 0006 (account deletion ledger), the head of claude/integration-2 when this was
+``down_revision`` is 0007 (evidence byline), the head of claude/integration-2 when this was
 merged; the number 0020 is kept on purpose.
 """
 
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0020"
-down_revision = "0006"
+down_revision = "0007"
 branch_labels = None
 depends_on = None
 
