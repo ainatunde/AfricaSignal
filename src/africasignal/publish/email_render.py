@@ -11,7 +11,9 @@ from typing import Any
 from urllib.parse import urlencode
 
 from jinja2 import Environment, StrictUndefined
+from sqlalchemy.orm import Session
 
+from africasignal import settings_store
 from africasignal.config import get_settings
 from africasignal.publish import tokens
 from africasignal.publish.email import EmailMessage
@@ -130,26 +132,36 @@ CORRECTION_HEADINGS = {
 }
 
 
-def base_url() -> str:
-    return get_settings().public_base_url.rstrip("/")
+DEV_BASE_URL = "http://localhost:8000"
 
 
-def situation_url(slug: str, *, ref: str | None = None) -> str:
-    url = f"{base_url()}{SITUATION_PATH}{slug}"
+def base_url(session: Session) -> str:
+    """The site's public address (the ``public_base_url`` setting, read on every call). Links in
+    emails need it, so outside development a missing address is an error, not a guess."""
+    value = settings_store.get(session, "public_base_url")
+    if value:
+        return value.rstrip("/")
+    if get_settings().env == "development":
+        return DEV_BASE_URL
+    raise RuntimeError("the public address is not set (public_base_url)")
+
+
+def situation_url(base: str, slug: str, *, ref: str | None = None) -> str:
+    url = f"{base}{SITUATION_PATH}{slug}"
     return f"{url}?{urlencode({'ref': ref})}" if ref else url
 
 
-def login_url(raw_token: str) -> str:
-    return f"{base_url()}{LOGIN_PATH}?{urlencode({'token': raw_token})}"
+def login_url(base: str, raw_token: str) -> str:
+    return f"{base}{LOGIN_PATH}?{urlencode({'token': raw_token})}"
 
 
-def unsubscribe_url(user_id: int) -> str:
+def unsubscribe_url(base: str, user_id: int) -> str:
     token = tokens.sign(UNSUBSCRIBE_PURPOSE, str(user_id))
-    return f"{base_url()}{UNSUBSCRIBE_PATH}?{urlencode({'t': token})}"
+    return f"{base}{UNSUBSCRIBE_PATH}?{urlencode({'t': token})}"
 
 
-def _with_url(item: dict[str, Any]) -> dict[str, Any]:
-    return {**item, "url": situation_url(item["slug"], ref="email")}
+def _with_url(base: str, item: dict[str, Any]) -> dict[str, Any]:
+    return {**item, "url": situation_url(base, item["slug"], ref="email")}
 
 
 def _unsubscribe_headers(url: str) -> dict[str, str]:
@@ -171,11 +183,13 @@ def render_login(to: str, payload: dict[str, Any], key: str) -> EmailMessage:
     )
 
 
-def render_correction(to: str, user_id: int, payload: dict[str, Any], key: str) -> EmailMessage:
-    unsub = unsubscribe_url(user_id)
+def render_correction(
+    base: str, to: str, user_id: int, payload: dict[str, Any], key: str
+) -> EmailMessage:
+    unsub = unsubscribe_url(base, user_id)
     data = {
         "heading": CORRECTION_HEADINGS[payload["notification_kind"]],
-        "item": _with_url(payload["item"]),
+        "item": _with_url(base, payload["item"]),
         "unsubscribe_url": unsub,
     }
     return EmailMessage(
@@ -188,12 +202,14 @@ def render_correction(to: str, user_id: int, payload: dict[str, Any], key: str) 
     )
 
 
-def render_digest(to: str, user_id: int, payload: dict[str, Any], key: str) -> EmailMessage:
-    unsub = unsubscribe_url(user_id)
+def render_digest(
+    base: str, to: str, user_id: int, payload: dict[str, Any], key: str
+) -> EmailMessage:
+    unsub = unsubscribe_url(base, user_id)
     data = {
         "week": payload["week"],
-        "followed": [_with_url(i) for i in payload["followed"]],
-        "top": [_with_url(i) for i in payload["top"]],
+        "followed": [_with_url(base, i) for i in payload["followed"]],
+        "top": [_with_url(base, i) for i in payload["top"]],
         "unsubscribe_url": unsub,
     }
     return EmailMessage(

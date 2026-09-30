@@ -1,7 +1,10 @@
 """Application settings, read from environment variables.
 
-In staging and production every required secret must be present; a missing one raises
-``RuntimeError`` at startup rather than failing later at first use.
+In staging and production the settings the app needs to start (the database and the secret key)
+must be present; a missing one raises ``RuntimeError`` at startup rather than failing later at
+first use. Everything else (Anthropic, email, storage, backups, the public address) can instead be
+saved in the operator console, so it is not required at startup: the console's Settings page lists
+what is still missing, and ``settings_store`` resolves each value (console, then environment).
 """
 
 from __future__ import annotations
@@ -14,20 +17,9 @@ from typing import Literal
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Settings that must be set outside development. ``S3_*`` and ``EMAIL_*`` are expanded to the
-# concrete field names below.
-REQUIRED_OUTSIDE_DEVELOPMENT: tuple[str, ...] = (
-    "database_url",
-    "s3_endpoint_url",
-    "s3_bucket",
-    "s3_access_key_id",
-    "s3_secret_access_key",
-    "anthropic_api_key",
-    "email_provider",
-    "email_api_key",
-    "email_from",
-    "secret_key",
-)
+# Settings that must be set in the environment outside development: the database (needed to read
+# anything else) and the secret key (which encrypts the secrets saved in the console).
+REQUIRED_OUTSIDE_DEVELOPMENT: tuple[str, ...] = ("database_url", "secret_key")
 
 DEV_DATABASE_URL = "postgresql+psycopg://africasignal:africasignal@localhost:5432/africasignal"
 
@@ -54,8 +46,7 @@ class Settings(BaseSettings):
 
     secret_key: str = Field(default="", alias="SECRET_KEY")
 
-    # Origin used in links inside emails (sign-in, unsubscribe, situation pages).
-    public_base_url: str = Field(default="http://localhost:8000", alias="PUBLIC_BASE_URL")
+    public_base_url: str = Field(default="", alias="PUBLIC_BASE_URL")
 
     def validate_required(self) -> None:
         """Raise ``RuntimeError`` naming every missing required setting (non-development only)."""

@@ -15,7 +15,7 @@ from africasignal.models import AppUser, Outbox, Place, Setting
 from africasignal.publish.accounts import set_digest_opt_in, set_preferences, unsubscribe
 from africasignal.publish.digest import build_digest, iso_week, run_weekly_digest
 from africasignal.publish.email import FakeProvider
-from africasignal.publish.email_render import unsubscribe_url
+from africasignal.publish.email_render import DEV_BASE_URL, unsubscribe_url
 from africasignal.publish.outbox import dispatch_pending
 from tests.integration.email_support import (
     NOW,
@@ -174,7 +174,7 @@ def test_sent_digest_content_and_headers(session: Session, places: dict[str, Pla
     assert "Petrol rose 5% in Lagos" in message.text and "Up from 4%" in message.text
     assert "http://localhost:8000/s/pms-ng-la?ref=email" in message.text
     assert message.html is not None and "Petrol rose 5% in Lagos" in message.html
-    assert message.headers["List-Unsubscribe"] == f"<{unsubscribe_url(user.id)}>"
+    assert message.headers["List-Unsubscribe"] == f"<{unsubscribe_url(DEV_BASE_URL, user.id)}>"
     assert message.headers["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
 
 
@@ -185,7 +185,7 @@ def test_unsubscribe_link_stops_the_digest(session: Session, places: dict[str, P
     add_version(session, situation)
     run_weekly_digest(session, NOW)  # queued but not yet sent
 
-    token = unsubscribe_url(user.id).split("t=", 1)[1]
+    token = unsubscribe_url(DEV_BASE_URL, user.id).split("t=", 1)[1]
     assert not unsubscribe(session, "tampered" + token)
     assert unsubscribe(session, token)
     assert unsubscribe(session, token)  # repeating is harmless

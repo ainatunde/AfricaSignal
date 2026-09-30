@@ -11,6 +11,7 @@ from africasignal.publish.email_render import (
     unsubscribe_url,
 )
 
+BASE = "https://africasignal.example"
 ITEM = {
     "slug": "pms-ng-la",
     "title": "Petrol, Lagos",
@@ -38,14 +39,14 @@ def test_login_email_has_the_link_in_both_parts() -> None:
 
 def test_digest_has_one_click_unsubscribe_and_both_parts() -> None:
     payload = {"user_id": 7, "week": "2026-W40", "followed": [ITEM], "top": [ITEM]}
-    message = render_digest("a@b.co", 7, payload, "digest:7:2026-W40")
-    link = unsubscribe_url(7)
+    message = render_digest(BASE, "a@b.co", 7, payload, "digest:7:2026-W40")
+    link = unsubscribe_url(BASE, 7)
     assert message.headers["List-Unsubscribe"] == f"<{link}>"
     assert message.headers["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
     assert link in message.text and message.html is not None and "Unsubscribe" in message.html
     assert "Petrol rose 5% & more" in message.text  # plain text is not HTML-escaped
     assert "Petrol rose 5% &amp; more" in message.html
-    assert "?ref=email" in message.text
+    assert f"{BASE}/s/pms-ng-la?ref=email" in message.text
     token = link.split("t=", 1)[1]
     assert token.startswith(unsubscribe_token(7).split(".")[0])
 
@@ -53,6 +54,6 @@ def test_digest_has_one_click_unsubscribe_and_both_parts() -> None:
 @pytest.mark.parametrize("kind", ["correction", "withdrawal", "new_version"])
 def test_correction_email_per_kind(kind: str) -> None:
     payload = {"user_id": 3, "notification_kind": kind, "item": ITEM}
-    message = render_correction("a@b.co", 3, payload, "k")
+    message = render_correction(BASE, "a@b.co", 3, payload, "k")
     assert ITEM["title"] in message.subject
     assert ITEM["change_summary"] in message.text

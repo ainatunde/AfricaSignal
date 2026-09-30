@@ -7,7 +7,6 @@ import json
 import httpx
 import pytest
 
-from africasignal.config import Settings
 from africasignal.publish.email import (
     ConsoleProvider,
     EmailMessage,
@@ -15,7 +14,7 @@ from africasignal.publish.email import (
     FakeProvider,
     PostmarkProvider,
     ResendProvider,
-    build_provider,
+    provider_from,
 )
 
 MESSAGE = EmailMessage(
@@ -101,12 +100,26 @@ def test_fake_provider_records_and_can_fail() -> None:
         fake.send(MESSAGE)
 
 
-def test_build_provider_selects_by_name() -> None:
-    def settings(name: str) -> Settings:
-        return Settings(EMAIL_PROVIDER=name, EMAIL_API_KEY="k", EMAIL_FROM="a@b.co")  # type: ignore[call-arg]
+def test_provider_from_selects_by_name() -> None:
+    def build(name: str, *, env: str = "production", key: str = "k") -> object:
+        return provider_from(name, key, "a@b.co", env=env)
 
-    assert isinstance(build_provider(settings("")), ConsoleProvider)
-    assert isinstance(build_provider(settings("Postmark")), PostmarkProvider)
-    assert isinstance(build_provider(settings("resend")), ResendProvider)
-    with pytest.raises(RuntimeError):
-        build_provider(settings("carrier-pigeon"))
+    assert isinstance(build("Postmark"), PostmarkProvider)
+    assert isinstance(build("resend"), ResendProvider)
+    assert isinstance(build("console"), ConsoleProvider)
+    assert isinstance(build("fake"), FakeProvider)
+    assert isinstance(build("", env="development"), ConsoleProvider)
+
+
+@pytest.mark.parametrize(
+    ("name", "key", "message"),
+    [
+        ("", "k", "not configured"),  # outside development an empty provider is an error
+        ("carrier-pigeon", "k", "not configured"),
+        ("ses", "k", "not implemented"),
+        ("postmark", "", "needs an API key"),
+    ],
+)
+def test_provider_from_rejects_unusable_settings(name: str, key: str, message: str) -> None:
+    with pytest.raises(RuntimeError, match=message):
+        provider_from(name, key, "a@b.co", env="production")

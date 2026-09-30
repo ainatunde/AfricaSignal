@@ -82,7 +82,7 @@ def request_login(session: Session, raw_email: str, now: datetime) -> bool:
     enqueue_email(
         session,
         "email_login",
-        {"user_id": user.id, "link": email_render.login_url(raw)},
+        {"user_id": user.id, "link": email_render.login_url(email_render.base_url(session), raw)},
         dedupe_key=f"login:{token.id}",
     )
     return True

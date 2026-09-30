@@ -1,15 +1,19 @@
 """Email provider adapter (plan D6).
 
 The provider is not chosen yet, so everything that sends mail depends only on
-:class:`EmailProvider`. ``EMAIL_PROVIDER`` selects the implementation:
+:class:`EmailProvider`. The ``email_provider`` setting selects the implementation:
 
 - ``console``: logs the message instead of sending it (development default)
 - ``fake``: keeps messages in memory (tests)
 - ``postmark``, ``resend``: HTTP APIs, through ``httpx``
 
+The provider, API key and sender come from ``settings_store`` (saved in the operator console,
+else the environment) and are read on every use.
+
 The Postmark and Resend adapters follow the providers' public API documentation and are tested
-against a mocked transport only; none has been run against the live service. Amazon SES is not
-implemented. To add a provider, write a class with ``send`` and register it in ``PROVIDERS``.
+against a mocked transport only; none has been run against the live service. Amazon SES is offered
+by the console but not implemented: it needs an access key pair and a region. To add a provider,
+write a class with ``send`` and add a branch to ``provider_from``.
 
 ``EmailMessage.idempotency_key`` is the outbox ``dedupe_key``. Providers that accept an
 idempotency key get it, so a retry after a timeout does not send twice.
@@ -22,8 +26,10 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 import httpx
+from sqlalchemy.orm import Session
 
-from africasignal.config import Settings, get_settings
+from africasignal import settings_store
+from africasignal.config import get_settings
 
 log = logging.getLogger("africasignal.email")
 
@@ -149,31 +155,48 @@ class ResendProvider(_HttpProvider):
         return str(self._post(self.URL, headers, body).get("id", ""))
 
 
-def build_provider(settings: Settings) -> EmailProvider:
-    name = settings.email_provider.strip().lower()
-    if name in ("", "console"):
+def provider_from(name: str, api_key: str, from_address: str, *, env: str) -> EmailProvider:
+    """The provider called ``name``. An empty name means ``console`` in development only: sending
+    for real needs a configured provider, and failing is better than silently dropping mail."""
+    name = name.strip().lower()
+    if name == "" and env == "development":
+        name = "console"
+    if name == "console":
         return ConsoleProvider()
     if name == "fake":
         return FakeProvider()
-    if name == "postmark":
-        return PostmarkProvider(settings.email_api_key, settings.email_from)
-    if name == "resend":
-        return ResendProvider(settings.email_api_key, settings.email_from)
-    raise RuntimeError(f"unknown EMAIL_PROVIDER {settings.email_provider!r}")
+    if name == "ses":
+        raise RuntimeError(
+            "EMAIL_PROVIDER ses is not implemented: it needs an access key pair and a region, "
+            "and only one API key can be saved"
+        )
+    if name not in ("postmark", "resend"):
+        raise RuntimeError(f"the email provider is not configured (got {name!r})")
+    if not api_key or not from_address:
+        raise RuntimeError(
+            f"{name} needs an API key and a sender address (email_api_key, email_from)"
+        )
+    cls = PostmarkProvider if name == "postmark" else ResendProvider
+    return cls(api_key, from_address)
 
 
-_provider: EmailProvider | None = None
-
-
-def get_provider() -> EmailProvider:
-    """The configured provider, built once per process."""
-    global _provider
-    if _provider is None:
-        _provider = build_provider(get_settings())
-    return _provider
+_override: EmailProvider | None = None
 
 
 def set_provider(provider: EmailProvider | None) -> None:
-    """Replace (or with ``None`` reset) the process-wide provider. For tests."""
-    global _provider
-    _provider = provider
+    """Use ``provider`` whatever the settings say (or with ``None`` stop doing so). For tests."""
+    global _override
+    _override = provider
+
+
+def get_provider(session: Session) -> EmailProvider:
+    """The provider the settings name right now. Read on every call, never cached, so a change
+    saved in the operator console applies on the next send."""
+    if _override is not None:
+        return _override
+    return provider_from(
+        settings_store.get(session, "email_provider") or "",
+        settings_store.get(session, "email_api_key") or "",
+        settings_store.get(session, "email_from") or "",
+        env=get_settings().env,
+    )

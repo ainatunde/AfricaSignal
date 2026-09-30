@@ -76,11 +76,15 @@ def _build_message(session: Session, row: Outbox) -> EmailMessage | None:
     if user.email_verified_at is None:
         return None
     if row.kind == "email_correction":
-        return email_render.render_correction(user.email, user.id, row.payload, row.dedupe_key)
+        base = email_render.base_url(session)
+        return email_render.render_correction(
+            base, user.email, user.id, row.payload, row.dedupe_key
+        )
     if row.kind == "email_digest":
         if not user.digest_opt_in:
             return None
-        return email_render.render_digest(user.email, user.id, row.payload, row.dedupe_key)
+        base = email_render.base_url(session)
+        return email_render.render_digest(base, user.email, user.id, row.payload, row.dedupe_key)
     raise ValueError(f"unknown outbox kind {row.kind!r}")
 
 

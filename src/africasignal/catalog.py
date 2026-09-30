@@ -44,6 +44,7 @@ class NbsPublication(BaseModel):
     code: NbsCode
     layout: NbsLayout
     title_pattern: str  # regular expression matched against the eLibrary listing title
+    microdata_catalog_id: int | None = None  # its page on microdata.nigerianstat.gov.ng
 
     @model_validator(mode="after")
     def _pattern_compiles(self) -> NbsPublication:
@@ -122,6 +123,11 @@ class Items(BaseModel):
 
     def publication(self, code: str) -> NbsPublication:
         return next(p for p in self.nbs_publications if p.code == code)
+
+    def publication_for_catalog(self, catalog_id: int) -> NbsPublication | None:
+        return next(
+            (p for p in self.nbs_publications if p.microdata_catalog_id == catalog_id), None
+        )
 
     def publication_for_title(self, title: str) -> NbsPublication | None:
         """The NBS publication an eLibrary listing title belongs to, if it is one we track."""

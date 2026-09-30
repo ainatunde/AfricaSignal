@@ -14,6 +14,6 @@ log = logging.getLogger("africasignal.dispatch_outbox")
 
 @register("dispatch_outbox")
 def dispatch_outbox(ctx: JobContext) -> None:
-    result = dispatch_pending(ctx.session, get_provider(), datetime.now(UTC))
+    result = dispatch_pending(ctx.session, get_provider(ctx.session), datetime.now(UTC))
     if result.sent or result.retried or result.dead or result.held:
         log.info("dispatch_outbox: %s", result, extra={"job_id": ctx.job.id})
