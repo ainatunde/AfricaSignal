@@ -20,7 +20,7 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
@@ -54,6 +54,7 @@ from africasignal.models import (
     Place,
     Series,
     Source,
+    SourcePermission,
 )
 from africasignal.places.load import load_aliases, load_boundaries
 from africasignal.places.resolve import resolve_candidates
@@ -240,7 +241,7 @@ def load_places(session: Session) -> dict[str, int]:
     return {code: pid for pid, code in session.execute(select(Place.id, Place.code)) if code}
 
 
-def _source(session: Session, cache: dict[str, Source], key: str) -> Source:
+def _source(session: Session, cache: dict[str, Source], key: str, now: datetime) -> Source:
     if key not in cache:
         if key not in SOURCES:
             raise KeyError(f"unknown source {key!r}; known: {sorted(SOURCES)}")
@@ -254,6 +255,19 @@ def _source(session: Session, cache: dict[str, Source], key: str) -> Source:
             schedule_minutes=60,
         )
         session.add(src)
+        session.flush()
+        # Only vetted sources corroborate (security review S-08): give every case source an approved
+        # permission, long enough ago to clear the waiting period for news outlets.
+        session.add(
+            SourcePermission(
+                source_id=src.id,
+                version=1,
+                may_collect=True,
+                may_store_full_text=True,
+                may_republish_numbers=True,
+                approved_at=now - timedelta(days=365),
+            )
+        )
         session.flush()
         cache[key] = src
     return cache[key]
@@ -271,7 +285,7 @@ def _store_documents(
         text = case.document_text(spec.key)
         url = f"https://{spec.source}.example/{case.id}/{spec.key}"
         doc = EvidenceDocument(
-            source_id=_source(session, sources, spec.source).id,
+            source_id=_source(session, sources, spec.source, case.now).id,
             url=url,
             canonical_url=url,
             retrieved_at=spec.published,

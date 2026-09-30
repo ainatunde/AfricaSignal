@@ -510,7 +510,7 @@ def build_t1() -> list[dict[str, Any]]:
         news("punch", a, [], family="pms", title="Petrol price watch reprinted", text=nbs_text)])
     b.t1("t1-factors-supported", values=lagos, state="corroborated", independent=1, supported_factors=["exchange_rate", "supply_disruption"], tags=["factors"], news_docs=[
         news("punch", a, [claim("The pump price of petrol has risen to N1,081 per litre in Lagos as the exchange rate weakened and depot supply tightened",
-                                item="pms_litre", value=1081.0, places=["Lagos"], place="NG-LA", passage="The pump price of petrol has risen to N1,081 per litre in Lagos")], family="pms")])
+                                item="pms_litre", value=1081.0, places=["Lagos"], place="NG-LA", passage="The pump price of petrol has risen to N1,081 per litre in Lagos as the exchange rate weakened and depot supply tightened")], family="pms")])
     b.t1("t1-factors-not-supported", values=lagos, state="corroborated", independent=1, supported_factors=[], tags=["factors"], news_docs=[
         news("punch", a, [sc("pms_litre", place_word="Lagos", price=1081, place="NG-LA")], family="pms")])
     b.t1("t1-claim-says-unchanged", values=lagos, tags=["corroboration"], news_docs=[
