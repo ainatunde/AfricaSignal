@@ -55,6 +55,12 @@ def enqueue_notify_followers(
     )
 
 
+def queue_notifications(session: Session, version_id: int, kind: str) -> None:
+    """The publication hook: publishing a version queues its follower notifications. The worker
+    registers it (see ``jobs/handlers/notify_followers.py``)."""
+    enqueue_notify_followers(session, version_id, kind)
+
+
 def item_snapshot(situation: Situation, version: AssessmentVersion) -> dict[str, Any]:
     """The display text an email needs, copied into the outbox payload."""
     return {

@@ -49,6 +49,28 @@ changing it signs everyone out and makes all of those unreadable (recreate opera
 secrets). Scripts on the host can read a setting with
 `python -m africasignal.admin get-setting backup_s3_bucket` (add `--reveal` for a secret).
 
+## Accounts, feedback and metrics
+
+Readers sign in with an emailed link (`/signin`). The link opens `/signin/verify`, which only shows
+a button; the token is spent by the POST behind it, because mail scanners open links. A signed-in
+reader can follow situations (`/following`), see in-site notifications, choose the weekly email,
+download their data and delete their account (`/account`). `/unsubscribe` works the same way and
+also answers a mail client's one-click POST.
+
+Feedback ("Was this useful?", "Report an error") is limited to 10 submissions per visitor per day.
+The site records page views, follows, feedback, share clicks and (for readers who opted in) digest
+opens as `event` rows keyed by a random `anon_id` cookie. No IP address or user agent is stored,
+crawlers and link previews are not counted, and events are deleted after 13 months.
+
+In the operator console, **Feedback** is the inbox (status and a resolution note, audited) and
+**Metrics** shows the plan's D1 demand-test numbers by ISO week against the proposed thresholds.
+Two numbers come from outside the app and are entered there by an admin: WhatsApp channel
+followers and the monthly infrastructure bill.
+
+The email provider, sender, API key and public address are read from the console **Settings** page
+on every use (environment variables are the fallback). With no provider configured, development
+logs mail and every other environment leaves it waiting in the outbox.
+
 ## Load places
 
 ```sh

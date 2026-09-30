@@ -24,7 +24,13 @@ from sqlalchemy.orm import Session
 from africasignal.jobs.queue import backoff_seconds
 from africasignal.models import AppUser, Outbox
 from africasignal.publish import email_render
-from africasignal.publish.email import EmailMessage, EmailProvider, EmailSendError
+from africasignal.publish.email import (
+    EmailMessage,
+    EmailNotConfigured,
+    EmailProvider,
+    EmailSendError,
+    get_provider,
+)
 from africasignal.publish.suspension import publication_suspended
 
 log = logging.getLogger("africasignal.outbox")
@@ -75,12 +81,17 @@ def _build_message(session: Session, row: Outbox) -> EmailMessage | None:
         return email_render.render_login(user.email, row.payload, row.dedupe_key)
     if user.email_verified_at is None:
         return None
+    base = email_render.resolve_base_url(session)  # read now, so a console change applies
     if row.kind == "email_correction":
-        return email_render.render_correction(user.email, user.id, row.payload, row.dedupe_key)
+        return email_render.render_correction(
+            user.email, user.id, row.payload, row.dedupe_key, base=base
+        )
     if row.kind == "email_digest":
         if not user.digest_opt_in:
             return None
-        return email_render.render_digest(user.email, user.id, row.payload, row.dedupe_key)
+        return email_render.render_digest(
+            user.email, user.id, row.payload, row.dedupe_key, base=base
+        )
     raise ValueError(f"unknown outbox kind {row.kind!r}")
 
 
@@ -150,3 +161,14 @@ def _record_failure(
         row.status = "dead"
         _scrub(row)
         result.dead += 1
+
+
+def dispatch_with_configured_provider(session: Session, now: datetime) -> DispatchResult | None:
+    """Send due rows with the provider the operator configured in the console. ``None`` when no
+    usable provider is configured: nothing is sent, nothing is marked, and the rows wait."""
+    try:
+        provider = get_provider(session)
+    except EmailNotConfigured as exc:
+        log.warning("email not sent: %s", exc)
+        return None
+    return dispatch_pending(session, provider, now)

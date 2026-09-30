@@ -166,6 +166,7 @@ def test_the_page_cache_is_keyed_by_version(
     session: Session, store: S3Store, source: Source, client: TestClient
 ) -> None:
     situation, v1 = seed_petrol(session, store, source)["NG-LA"]
+    client.cookies.set("anon_id", "a-returning-visitor-1234")  # a first visit gets a private page
     first = client.get("/s/price-pms_litre-ng-la")
     assert first.headers["cache-control"] == "public, max-age=300"
     v2 = AssessmentVersion(

@@ -48,6 +48,7 @@ def load_all() -> None:
         import_nbs_file,
         notify_followers,
         process_document,
+        prune_events,
         release_held_versions,
         weekly_digest,
     )

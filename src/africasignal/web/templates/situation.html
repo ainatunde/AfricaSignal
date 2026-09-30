@@ -120,9 +120,16 @@
   </section>
 
   <div class="actions">
-    <a class="button" href="/s/{{ situation.slug }}?ref=share" data-share="{{ share_url }}" rel="nofollow">Share this page</a>
-    {% for a in actions %}<a class="button secondary" href="{{ a.href }}">{{ a.label }}</a>{% endfor %}
+    <a class="button" href="/s/{{ situation.slug }}?ref=share" data-share="{{ share_url }}" data-beacon="/s/{{ situation.slug }}/share" rel="nofollow">Share this page</a>
+    <form method="post" action="/s/{{ situation.slug }}/follow"><button class="secondary" type="submit">Follow</button></form>
+    <a class="button secondary" href="/s/{{ situation.slug }}/report">Report an error</a>
   </div>
+
+  <form method="post" action="/s/{{ situation.slug }}/useful" class="useful" aria-labelledby="h-useful">
+    <p id="h-useful"><strong>Was this useful?</strong></p>
+    <button class="secondary" type="submit" name="answer" value="yes">Yes</button>
+    <button class="secondary" type="submit" name="answer" value="no">No</button>
+  </form>
 </article>
 {% endblock %}
 {% block scripts %}<script src="/static/site.js" defer></script>{% endblock %}

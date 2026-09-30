@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Unsubscribe · AfricaSignal{% endblock %}
+{% block head %}<meta name="robots" content="noindex, nofollow"><meta name="referrer" content="no-referrer">{% endblock %}
+{% block content %}
+{% if done %}
+<h1>You are unsubscribed</h1>
+<p class="lead">We will not send you the weekly email. You can turn it on again any time in your account.</p>
+{% elif token %}
+<h1>Stop the weekly email?</h1>
+<form method="post" action="/unsubscribe?t={{ token|urlencode }}" class="form">
+  <button type="submit">Unsubscribe</button>
+</form>
+{% else %}
+<h1>This link is not valid</h1>
+<p class="lead">Use the unsubscribe link in the latest email, or turn the weekly email off in <a href="/account">your account</a>.</p>
+{% endif %}
+{% endblock %}

@@ -37,10 +37,6 @@ from africasignal.web.session_dep import get_db
 router = APIRouter()
 Db = Annotated[Session, Depends(get_db)]
 
-# Buttons for features another ticket adds: accounts and follows (AS-031), feedback (AS-034).
-# Flip a flag when its routes exist; the situation page then shows the button.
-FEATURES = {"accounts": False, "feedback": False}
-
 PLACE_COOKIE = "place"
 VISIT_PREV, VISIT_CUR = "visit_prev", "visit_cur"
 SESSION_GAP = timedelta(minutes=30)
@@ -264,16 +260,6 @@ def _summary(version: Any) -> dict[str, Any] | None:
     }
 
 
-def _actions(situation_slug: str) -> list[dict[str, str]]:
-    actions = []
-    if FEATURES["accounts"]:
-        actions.append({"label": "Follow", "href": f"/s/{situation_slug}/follow"})
-    if FEATURES["feedback"]:
-        actions.append({"label": "Was this useful?", "href": f"/s/{situation_slug}/feedback"})
-        actions.append({"label": "Report an error", "href": f"/s/{situation_slug}/report"})
-    return actions
-
-
 @router.get("/s/{slug}", response_class=HTMLResponse)
 def situation_page(request: Request, slug: str, db: Db) -> Response:
     current = queries.current_situation(db, slug)
@@ -281,7 +267,7 @@ def situation_page(request: Request, slug: str, db: Db) -> Response:
         return _not_found(request, "This situation has no published assessment.")
     suspended = queries.publication_suspended(db)
     status = current.effective_status
-    key = (current.version.id, status, suspended, tuple(sorted(FEATURES.items())))
+    key = (current.version.id, status, suspended)
     page = _page_cache.get(key)
     if page is None:
         version = current.version
@@ -302,8 +288,7 @@ def situation_page(request: Request, slug: str, db: Db) -> Response:
             "chart_from": f"{points[0].period_start:%B %Y}" if points else "",
             "chart_to": f"{points[-1].period_start:%B %Y}" if points else "",
             "evidence": queries.evidence_for(db, version),
-            "actions": _actions(slug),
-            "share_url": f"{public_base_url()}/s/{slug}?ref=share",
+            "share_url": f"{public_base_url(db)}/s/{slug}?ref=share",
         }
         page = templates.env.get_template("situation.html").render(context)
         _page_cache.set(key, page)

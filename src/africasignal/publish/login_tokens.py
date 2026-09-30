@@ -11,6 +11,7 @@ GET would be used up by the scanner, so the web layer should show a confirm butt
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import secrets
 from dataclasses import dataclass
@@ -22,7 +23,10 @@ from sqlalchemy.orm import Session
 
 from africasignal.models import AppUser, LoginToken, UserSession
 from africasignal.publish import email_render
+from africasignal.publish.email import EmailSendError
 from africasignal.publish.outbox import enqueue_email
+
+log = logging.getLogger("africasignal.login")
 
 LOGIN_TOKEN_TTL = timedelta(minutes=15)
 SESSION_TTL = timedelta(days=30)
@@ -73,6 +77,12 @@ def request_login(session: Session, raw_email: str, now: datetime) -> bool:
     if (recent or 0) >= MAX_LOGIN_REQUESTS_PER_HOUR:
         return False
 
+    try:
+        base = email_render.resolve_base_url(session)  # read now: the console may have changed it
+    except EmailSendError:
+        log.error("sign-in email not queued: the public address is not set in the console")
+        return False
+
     raw = secrets.token_urlsafe(32)
     token = LoginToken(
         user_id=user.id, token_sha256=hash_token(raw), expires_at=now + LOGIN_TOKEN_TTL
@@ -82,7 +92,7 @@ def request_login(session: Session, raw_email: str, now: datetime) -> bool:
     enqueue_email(
         session,
         "email_login",
-        {"user_id": user.id, "link": email_render.login_url(raw)},
+        {"user_id": user.id, "link": email_render.login_url(raw, base)},
         dedupe_key=f"login:{token.id}",
     )
     return True

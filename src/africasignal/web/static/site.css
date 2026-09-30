@@ -103,3 +103,18 @@ button, .button {
 }
 button.secondary, .button.secondary { background: #fff; color: var(--accent); }
 .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1.25rem; }
+
+.form { margin: 1rem 0; max-width: 34rem; }
+.form label { display: block; font-weight: 600; margin: .9rem 0 .25rem; }
+.form label.check { display: flex; gap: .5rem; align-items: center; font-weight: 400; margin: .2rem 0; }
+.form input[type="email"], .form input[type="text"], .form textarea {
+  width: 100%; padding: .55rem .6rem; border: 2px solid var(--muted); border-radius: 6px; font: inherit; background: #fff; color: var(--fg);
+}
+.form fieldset { border: 1px solid var(--line); border-radius: 6px; margin: 1rem 0; padding: .5rem .9rem .75rem; }
+.form legend { font-weight: 600; padding: 0 .3rem; }
+.form button { margin-top: 1rem; }
+.actions form, form.useful { display: inline; }
+form.useful { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: 1.25rem; }
+form.useful p { margin: 0 .5rem 0 0; }
+.card form { margin-top: .5rem; }
+input[type="checkbox"]:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }

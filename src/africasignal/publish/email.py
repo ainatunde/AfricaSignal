@@ -22,8 +22,11 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 import httpx
+from sqlalchemy.orm import Session
 
+from africasignal import settings_store
 from africasignal.config import Settings, get_settings
+from africasignal.db import session_scope
 
 log = logging.getLogger("africasignal.email")
 
@@ -149,31 +152,62 @@ class ResendProvider(_HttpProvider):
         return str(self._post(self.URL, headers, body).get("id", ""))
 
 
-def build_provider(settings: Settings) -> EmailProvider:
-    name = settings.email_provider.strip().lower()
+class EmailNotConfigured(RuntimeError):
+    """No usable email provider is configured. Mail stays in the outbox until one is."""
+
+
+def build_provider_named(name: str, api_key: str, from_address: str) -> EmailProvider:
+    name = name.strip().lower()
     if name in ("", "console"):
         return ConsoleProvider()
     if name == "fake":
         return FakeProvider()
-    if name == "postmark":
-        return PostmarkProvider(settings.email_api_key, settings.email_from)
-    if name == "resend":
-        return ResendProvider(settings.email_api_key, settings.email_from)
-    raise RuntimeError(f"unknown EMAIL_PROVIDER {settings.email_provider!r}")
+    if name in ("postmark", "resend"):
+        if not api_key or not from_address:
+            raise EmailNotConfigured(f"{name} needs an API key and a sender address")
+        cls = PostmarkProvider if name == "postmark" else ResendProvider
+        return cls(api_key, from_address)
+    if name == "ses":
+        raise EmailNotConfigured("Amazon SES is not implemented yet; choose Postmark or Resend")
+    raise EmailNotConfigured(f"unknown email provider {name!r}")
+
+
+def build_provider(settings: Settings) -> EmailProvider:
+    return build_provider_named(
+        settings.email_provider, settings.email_api_key, settings.email_from
+    )
 
 
 _provider: EmailProvider | None = None
+_built: tuple[tuple[str, str, str], EmailProvider] | None = None
 
 
-def get_provider() -> EmailProvider:
-    """The configured provider, built once per process."""
-    global _provider
-    if _provider is None:
-        _provider = build_provider(get_settings())
-    return _provider
+def get_provider(session: Session | None = None) -> EmailProvider:
+    """The provider the operator configured in the console (environment variables as the
+    fallback), read on each call so a change applies on the next dispatch. With nothing
+    configured, development logs mail (console provider); any other environment raises
+    ``EmailNotConfigured`` so mail waits in the outbox instead of being dropped."""
+    global _built
+    if _provider is not None:
+        return _provider
+    if session is None:
+        with session_scope() as own:
+            return get_provider(own)
+    name = settings_store.get(session, "email_provider") or ""
+    api_key = settings_store.get(session, "email_api_key") or ""
+    sender = settings_store.get(session, "email_from") or ""
+    if not name and get_settings().env == "development":
+        name = "console"
+    if not name:
+        raise EmailNotConfigured("no email provider is set in the console settings")
+    key = (name, api_key, sender)
+    if _built is None or _built[0] != key:
+        _built = (key, build_provider_named(name, api_key, sender))
+    return _built[1]
 
 
 def set_provider(provider: EmailProvider | None) -> None:
     """Replace (or with ``None`` reset) the process-wide provider. For tests."""
-    global _provider
+    global _provider, _built
     _provider = provider
+    _built = None

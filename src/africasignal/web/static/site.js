@@ -46,6 +46,8 @@
       var url = new URL(share.getAttribute("href"), window.location.href).href;
       navigator.clipboard.writeText(url).then(function () {
         share.textContent = "Link copied";
+        var beacon = share.getAttribute("data-beacon");
+        if (beacon && navigator.sendBeacon) { navigator.sendBeacon(beacon); }
       });
     });
   }

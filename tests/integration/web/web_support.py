@@ -56,3 +56,6 @@ def seed_petrol(
     import_bytes(session, store, source, PMS_SEP)
     import_bytes(session, store, source, PMS_OCT)
     return {code: assess_and_publish(session, "pms_litre", code) for code in place_codes}
+
+
+ORIGIN = {"Origin": "http://testserver"}  # what a browser sends with a form on the site itself

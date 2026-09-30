@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Your account · AfricaSignal{% endblock %}
+{% block head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% block content %}
+<h1>Your account</h1>
+{% if notice %}<p class="callout" role="status">{{ notice }}</p>{% endif %}
+{% if error %}<p class="callout warn" role="alert">{{ error }}</p>{% endif %}
+<p>Signed in as <strong>{{ user.email }}</strong>. <a href="/following">What you follow</a></p>
+
+<section aria-labelledby="h-digest">
+  <h2 id="h-digest">Weekly email</h2>
+  <p>On Monday mornings we email the situations you follow that changed in the last week, and the biggest changes in your places. We send it only if you ask for it, and there is a link in every email to stop it. Corrections to a situation you follow are emailed too, for readers who asked for the weekly email.</p>
+  <form method="post" action="/account/digest" class="form">
+    <input type="hidden" name="digest" value="{% if user.digest_opt_in %}off{% else %}on{% endif %}">
+    <p>The weekly email is <strong>{% if user.digest_opt_in %}on{% else %}off{% endif %}</strong>.</p>
+    <button type="submit">{% if user.digest_opt_in %}Turn it off{% else %}Send me the weekly email{% endif %}</button>
+  </form>
+  <p class="help">If you turn it on, the email contains a tiny image that tells us it was opened. That is the only tracking in it.</p>
+</section>
+
+<section aria-labelledby="h-places">
+  <h2 id="h-places">Your places and topics</h2>
+  <form method="post" action="/account/preferences" class="form">
+    <fieldset>
+      <legend>Topics</legend>
+      {% for t, on in topics %}
+      <label class="check"><input type="checkbox" name="topic" value="{{ t }}"{% if on %} checked{% endif %}> {{ t|capitalize }}</label>
+      {% endfor %}
+    </fieldset>
+    <fieldset>
+      <legend>States</legend>
+      <ul class="plain states">
+        {% for s, on in states %}
+        <li><label class="check"><input type="checkbox" name="place" value="{{ s.code }}"{% if on %} checked{% endif %}> {{ s.name }}</label></li>
+        {% endfor %}
+      </ul>
+    </fieldset>
+    <button type="submit">Save</button>
+  </form>
+</section>
+
+<section aria-labelledby="h-data">
+  <h2 id="h-data">Your data</h2>
+  <p><a href="/account/export">Download everything we hold about you</a> (a JSON file).</p>
+  <form method="post" action="/signout"><button class="secondary" type="submit">Sign out</button></form>
+</section>
+
+<section aria-labelledby="h-delete">
+  <h2 id="h-delete">Delete your account</h2>
+  <p>This removes your email address, what you follow, your choices and your notifications, now and for good. Feedback you sent stays, without your name or address.</p>
+  <form method="post" action="/account/delete" class="form">
+    <label for="confirm">Type the word <strong>delete</strong> to confirm</label>
+    <input id="confirm" name="confirm" type="text" autocomplete="off" required>
+    <button type="submit">Delete my account</button>
+  </form>
+</section>
+{% endblock %}
