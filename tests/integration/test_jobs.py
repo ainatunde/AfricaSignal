@@ -447,3 +447,15 @@ def test_scheduler_reclaims_expired_leases(factory: sessionmaker[Session]) -> No
         s.commit()
     assert _tick(factory)["reclaimed"] == 1
     assert _row(factory, job_id)["status"] == "queued"
+
+
+def test_held_versions_are_checked_every_minute(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _register(monkeypatch, "release_held_versions", lambda ctx: None)
+    t = datetime(2026, 10, 7, 10, 3, 10, tzinfo=UTC)
+    _tick(factory, t)
+    _tick(factory, t.replace(second=50))  # same minute
+    assert _kinds(factory) == ["release_held_versions"]
+    _tick(factory, t.replace(minute=4))
+    assert _kinds(factory) == ["release_held_versions"] * 2

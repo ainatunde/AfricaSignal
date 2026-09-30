@@ -19,9 +19,11 @@ Reference-month values far from the previous month's median wait in ``measuremen
 
 from __future__ import annotations
 
+import io
 import logging
 import re
 import statistics
+import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -159,6 +161,46 @@ def excel_link(read_page_html: str, page_url: str) -> str | None:
     """The workbook link on a report page ("Download Tables"), or None if it only has a PDF."""
     match = _EXCEL_LINK.search(read_page_html)
     return urljoin(page_url, match.group(1)) if match else None
+
+
+@dataclass(frozen=True)
+class CatalogDownload:
+    label: str  # "PMS Report May 2026"
+    url: str
+
+
+_CATALOG_LINK = re.compile(
+    r'<a[^>]*href="([^"]+)"[^>]*class="font-weight-bold"[^>]*>\s*([^<]*?)\s*</strong>',
+    re.IGNORECASE,
+)
+_CATALOG_ID_IN_URL = re.compile(r"/catalog/(\d+)/download/")
+
+
+def parse_catalog_downloads(html: str, page_url: str = "") -> list[CatalogDownload]:
+    """The downloads listed on a microdata catalog page, newest first as the page lists them."""
+    return [
+        CatalogDownload(re.sub(r"\s+", " ", m.group(2)), urljoin(page_url, m.group(1)))
+        for m in _CATALOG_LINK.finditer(html)
+    ]
+
+
+def workbook_bytes(content: bytes) -> tuple[bytes, date | None]:
+    """The xlsx inside what NBS served, and the newest file date inside a ZIP (the release date
+    when nothing better is known). An xlsx is itself a ZIP, so it is recognised by its
+    ``[Content_Types].xml`` and returned as it is."""
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile:
+        return content, None  # not a ZIP at all: the parser will say so
+    with archive:
+        names = archive.namelist()
+        if "[Content_Types].xml" in names:
+            return content, None
+        sheets = [n for n in names if n.lower().endswith((".xlsx", ".xls"))]
+        if not sheets:
+            raise NbsParseError(f"the ZIP holds no Excel file (it holds {names})")
+        stamps = [date(*i.date_time[:3]) for i in archive.infolist() if i.date_time[0] >= 1980]
+        return archive.read(sheets[0]), max(stamps, default=None)
 
 
 # --------------------------------------------------------------------------------------------
@@ -459,7 +501,7 @@ def import_workbook(
     expected_month: date | None = None,
 ) -> NbsImport:
     """Parse the stored workbook of ``document`` and store its measurements."""
-    parsed = parse_workbook(store.get(document.storage_key), publication)
+    parsed = parse_workbook(workbook_bytes(store.get(document.storage_key))[0], publication)
     if expected_month is not None and parsed.reference_month != expected_month:
         raise NbsParseError(
             f"the file's reference month is {parsed.reference_month:%B %Y} but the release is "
@@ -503,6 +545,8 @@ class NbsAdapter:
     def discover(self, source: Source, ctx: AdapterContext) -> list[DiscoveredItem]:
         if not source.home_url:
             raise NbsParseError(f"source {source.slug} has no home_url")
+        if (urlparse(source.home_url).hostname or "").startswith("microdata."):
+            return self._discover_microdata(source, ctx)
         listing = self._get(source, source.home_url, max_bytes=LISTING_MAX_BYTES)
         entries = parse_listing(listing.content.decode("utf-8", errors="replace"), listing.url)
         catalog = load_items()
@@ -558,23 +602,68 @@ class NbsAdapter:
             )
         return items
 
+    def _discover_microdata(self, source: Source, ctx: AdapterContext) -> list[DiscoveredItem]:
+        """The newest downloads on each publication's catalog page that are not yet imported.
+        These pages have no release dates; the date comes from inside the ZIP at import time."""
+        assert source.home_url
+        base = source.home_url.rstrip("/")
+        known = set(
+            ctx.session.scalars(
+                select(EvidenceDocument.url).where(EvidenceDocument.source_id == source.id)
+            )
+        )
+        items: list[DiscoveredItem] = []
+        seen_links = 0
+        for pub in load_items().nbs_publications:
+            if pub.microdata_catalog_id is None:
+                continue
+            page = self._get(source, f"{base}/{pub.microdata_catalog_id}")
+            links = [
+                d
+                for d in parse_catalog_downloads(
+                    page.content.decode("utf-8", errors="replace"), page.url
+                )
+                if d.url.lower().endswith((".zip", ".xlsx", ".xls"))
+            ]
+            seen_links += len(links)
+            for link in links[:RECENT_MONTHS]:
+                if link.url in known:
+                    continue
+                if not _same_site(link.url, source.home_url):
+                    log.warning("nbs: %r links to another site (%s); skipped", link.label, link.url)
+                    continue
+                items.append(DiscoveredItem(url=link.url, title=link.label))
+        if seen_links == 0:
+            raise NbsParseError(
+                "no downloads found on the microdata catalog pages; "
+                "the page layout may have changed"
+            )
+        return items
+
     def process(self, doc: EvidenceDocument, ctx: AdapterContext) -> ProcessResult:
         source = ctx.session.get(Source, doc.source_id)
         if source is None:
             raise NbsParseError(f"document {doc.id} has no source")
+        catalog = load_items()
         title = doc.title or ""
-        publication = load_items().publication_for_title(title)
+        publication = catalog.publication_for_title(title)
+        if publication is None and (m := _CATALOG_ID_IN_URL.search(doc.url)):
+            publication = catalog.publication_for_catalog(int(m.group(1)))
         if publication is None:
-            raise NbsParseError(f"{title!r} is not a tracked NBS price watch")
-        if doc.published_at is None:
-            raise NbsParseError(f"document {doc.id} has no release date to use as its vintage")
+            raise NbsParseError(f"{title or doc.url!r} is not a tracked NBS price watch")
+        released = doc.published_at.date() if doc.published_at else None
+        if released is None:
+            released = workbook_bytes(ctx.store.get(doc.storage_key))[1]
+            if released is None:
+                raise NbsParseError(f"document {doc.id} has no release date to use as its vintage")
+            doc.published_at = datetime(released.year, released.month, released.day, tzinfo=UTC)
         return import_workbook(
             ctx.session,
             ctx.store,
             source,
             doc,
             publication,
-            vintage=doc.published_at.date(),
+            vintage=released,
             expected_month=title_month(title),
         ).as_result()
 

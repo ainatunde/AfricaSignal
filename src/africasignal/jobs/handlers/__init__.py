@@ -46,5 +46,6 @@ def load_all() -> None:
         fetch_source,
         import_nbs_file,
         process_document,
+        release_held_versions,
     )
     from africasignal.sources import nbs  # noqa: F401  (registers the NBS adapter)
