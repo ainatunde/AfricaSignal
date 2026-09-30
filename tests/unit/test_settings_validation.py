@@ -77,6 +77,9 @@ def test_storage_endpoint_may_be_plain_http_and_have_a_path() -> None:
 
 def test_email_fields() -> None:
     assert n("email_provider", "postmark") == "postmark"
+    assert n("email_provider", "resend") == "resend"
+    with pytest.raises(SettingError):
+        n("email_provider", "ses")  # needs a key pair and a region; not offered yet
     with pytest.raises(SettingError):
         n("email_provider", "carrier-pigeon")
     assert n("email_from", "AfricaSignal <hello@africasignal.example>")

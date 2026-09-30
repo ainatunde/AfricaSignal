@@ -41,7 +41,7 @@ PREFIX = "config."
 Kind = Literal["text", "secret", "url", "https_url", "email", "int", "float", "choice"]
 Source = Literal["console", "environment", "default", "unset", "unreadable"]
 
-EMAIL_PROVIDERS = ("postmark", "resend", "ses")
+EMAIL_PROVIDERS = ("postmark", "resend")
 
 
 class SettingError(ValueError):
