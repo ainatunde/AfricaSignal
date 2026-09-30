@@ -54,12 +54,83 @@ rclone_define_s3() {
   local name
   name="$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"
   export "RCLONE_CONFIG_${name}_TYPE=s3"
-  export "RCLONE_CONFIG_${name}_PROVIDER=Other"
-  export "RCLONE_CONFIG_${name}_ENDPOINT=$2"
+  if [ -n "$2" ]; then
+    export "RCLONE_CONFIG_${name}_PROVIDER=Other"
+    export "RCLONE_CONFIG_${name}_ENDPOINT=$2"
+  else
+    export "RCLONE_CONFIG_${name}_PROVIDER=AWS" # no endpoint: plain AWS S3
+  fi
   export "RCLONE_CONFIG_${name}_ACCESS_KEY_ID=$3"
   export "RCLONE_CONFIG_${name}_SECRET_ACCESS_KEY=$4"
   # Scoped tokens (Cloudflare R2, Backblaze B2) usually cannot create buckets; never try to.
   export "RCLONE_CONFIG_${name}_NO_CHECK_BUCKET=true"
+}
+
+# ---- settings the operator manages in the console -----------------------------------------------
+# Backup and storage settings are saved in the operator console (Settings page) and read here with
+# `python -m africasignal.admin get-setting KEY --reveal`. That already falls back to the environment
+# variable of the same name in capitals and then to the default, so the console wins over `.env`.
+# When the console cannot be read (Python or the app is not installed, the database is down, which
+# is the case in a disaster recovery), the plain environment variable is used instead and a warning
+# is logged. Set OPS_USE_CONSOLE_SETTINGS=0 to skip the console entirely.
+
+# Find a Python that can import africasignal; sets OPS_CONSOLE (1 usable, 0 not) once per run.
+console_settings_init() {
+  [ -z "${OPS_CONSOLE:-}" ] || return 0
+  OPS_CONSOLE=0
+  if [ "${OPS_USE_CONSOLE_SETTINGS:-1}" = 0 ] || [ -z "${DATABASE_URL:-}" ]; then
+    return 0
+  fi
+  local py
+  for py in "${OPS_PYTHON:-}" python3 python; do
+    [ -n "$py" ] || continue
+    if command -v "$py" >/dev/null 2>&1 && "$py" -c 'import africasignal.admin' >/dev/null 2>&1; then
+      OPS_PYTHON="$py"
+      OPS_CONSOLE=1
+      return 0
+    fi
+  done
+  log "warning: africasignal is not importable here; using environment variables, not console settings"
+}
+
+# setting_value KEY ENV_NAME: print the console value of KEY, else the environment variable ENV_NAME.
+setting_value() {
+  local key="$1" envname="$2" value rc=0
+  console_settings_init
+  if [ "$OPS_CONSOLE" = 1 ]; then
+    value="$("$OPS_PYTHON" -m africasignal.admin get-setting "$key" --reveal 2>"$WORKDIR/setting.err")" || rc=$?
+    case "$rc" in
+      0)
+        printf '%s' "$value"
+        return 0
+        ;;
+      2) ;; # not set in the console, the environment or as a default
+      *)
+        log "warning: console settings could not be read ($(tail -n 1 "$WORKDIR/setting.err" | cut -c1-160)); using environment variables"
+        OPS_CONSOLE=0
+        ;;
+    esac
+  fi
+  printf '%s' "${!envname:-}"
+}
+
+# Fill BACKUP_S3_* and BACKUP_RETAIN_DAYS from the console (or the environment).
+load_backup_settings() {
+  BACKUP_RETAIN_DAYS="$(setting_value backup_retain_days BACKUP_RETAIN_DAYS)"
+  [ -z "${BACKUP_DIR:-}" ] || return 0
+  BACKUP_S3_ENDPOINT_URL="$(setting_value backup_s3_endpoint_url BACKUP_S3_ENDPOINT_URL)"
+  BACKUP_S3_BUCKET="$(setting_value backup_s3_bucket BACKUP_S3_BUCKET)"
+  BACKUP_S3_ACCESS_KEY_ID="$(setting_value backup_s3_access_key_id BACKUP_S3_ACCESS_KEY_ID)"
+  BACKUP_S3_SECRET_ACCESS_KEY="$(setting_value backup_s3_secret_access_key BACKUP_S3_SECRET_ACCESS_KEY)"
+  BACKUP_S3_PREFIX="$(setting_value backup_s3_prefix BACKUP_S3_PREFIX)"
+}
+
+# Fill S3_* (the app's evidence bucket) from the console (or the environment).
+load_app_bucket_settings() {
+  S3_ENDPOINT_URL="$(setting_value s3_endpoint_url S3_ENDPOINT_URL)"
+  S3_BUCKET="$(setting_value s3_bucket S3_BUCKET)"
+  S3_ACCESS_KEY_ID="$(setting_value s3_access_key_id S3_ACCESS_KEY_ID)"
+  S3_SECRET_ACCESS_KEY="$(setting_value s3_secret_access_key S3_SECRET_ACCESS_KEY)"
 }
 
 # Sets BACKUP_ROOT to the rclone path under which dumps (db/) and object copies (objects/) live:

@@ -15,6 +15,10 @@
 #   --verify-objects N  check that N random evidence_document.storage_key objects exist in the RESTORE_S3_* bucket
 #   --overwrite-live    allow the target to be the same database as DATABASE_URL, or ENV=production
 #
+# Where the backups are comes from the console settings or the BACKUP_* variables, exactly as in
+# scripts/backup.sh. In a disaster recovery the console's database is the thing that was lost, so
+# keep the BACKUP_S3_* values in your password manager and pass them as environment variables.
+#
 # Environment: the BACKUP_* variables described in scripts/backup.sh, plus BACKUP_PASSPHRASE_FILE
 # when dumps are encrypted, and RESTORE_S3_ENDPOINT_URL, RESTORE_S3_BUCKET, RESTORE_S3_ACCESS_KEY_ID,
 # RESTORE_S3_SECRET_ACCESS_KEY for the bucket that receives objects. Objects are never restored
@@ -62,6 +66,7 @@ case "$verify_objects" in '' | *[!0-9]*) die "--verify-objects needs a number" ;
 
 if [ -z "$local_file" ] || [ "$do_list" -eq 1 ]; then
   rclone_init
+  load_backup_settings
   backup_root_init
 fi
 
@@ -157,7 +162,7 @@ if [ "$restore_objects" -eq 1 ] || [ "$verify_objects" -gt 0 ]; then
   rclone_init
   rclone_define_s3 restore "${RESTORE_S3_ENDPOINT_URL:-}" "${RESTORE_S3_ACCESS_KEY_ID:-}" "${RESTORE_S3_SECRET_ACCESS_KEY:-}"
   if [ "$restore_objects" -eq 1 ]; then
-    [ -n "${BACKUP_ROOT:-}" ] || backup_root_init
+    [ -n "${BACKUP_ROOT:-}" ] || { load_backup_settings; backup_root_init; }
     log "copying objects into $RESTORE_S3_BUCKET"
     rclone copy "$BACKUP_ROOT/objects" "restore:$RESTORE_S3_BUCKET" --size-only --transfers 8 --checkers 16
   fi

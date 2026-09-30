@@ -4,8 +4,17 @@
 #
 # Usage: scripts/backup.sh [--no-objects]
 #
+# Settings: the backup bucket, the app's evidence bucket and the retention are read from the operator
+# console (Settings page; needs DATABASE_URL and SECRET_KEY, and africasignal installed), and the
+# environment variable of the same name is used when the console has nothing or cannot be read.
+# Console key -> variable: backup_s3_endpoint_url, backup_s3_bucket, backup_s3_access_key_id,
+# backup_s3_secret_access_key, backup_s3_prefix, backup_retain_days -> BACKUP_S3_ENDPOINT_URL, ...;
+# s3_endpoint_url, s3_bucket, s3_access_key_id, s3_secret_access_key -> S3_*.
+#
 # Environment:
 #   DATABASE_URL                     database to dump (postgresql:// or postgresql+psycopg://)
+#   SECRET_KEY                       needed to read secrets saved in the console
+#   OPS_USE_CONSOLE_SETTINGS=0       ignore the console and use only environment variables
 #   BACKUP_S3_ENDPOINT_URL           S3 endpoint of the backup bucket (Cloudflare R2, Backblaze B2, MinIO)
 #   BACKUP_S3_BUCKET                 backup bucket; must not be the app's own bucket
 #   BACKUP_S3_ACCESS_KEY_ID / BACKUP_S3_SECRET_ACCESS_KEY   credentials for the backup bucket only
@@ -59,12 +68,13 @@ on_exit() {
 trap on_exit EXIT
 
 [ -n "${DATABASE_URL:-}" ] || die "DATABASE_URL is not set"
-retain_days="${BACKUP_RETAIN_DAYS:-30}"
-case "$retain_days" in '' | *[!0-9]* | 0) die "BACKUP_RETAIN_DAYS must be a positive integer" ;; esac
 require_cmd pg_dump pg_restore sha256sum
 
 umask 077
 WORKDIR="$(mktemp -d "${BACKUP_WORKDIR:-${TMPDIR:-/tmp}}/africasignal-backup.XXXXXX")"
+load_backup_settings
+retain_days="${BACKUP_RETAIN_DAYS:-30}"
+case "$retain_days" in '' | *[!0-9]* | 0) die "backup_retain_days / BACKUP_RETAIN_DAYS must be a positive integer" ;; esac
 passphrase_init
 if [ -n "${BACKUP_PASSPHRASE_FILE:-}" ]; then
   require_cmd openssl
@@ -106,6 +116,7 @@ remote_size="$(rclone lsf --format s --files-only "$BACKUP_ROOT/db/$name" | tr -
 [ "$remote_size" = "$size" ] || die "uploaded size $remote_size does not match local size $size"
 log "uploaded db/$name ($size bytes, sha256 $sum)"
 
+[ "$copy_objects" -eq 0 ] || load_app_bucket_settings
 if [ "$copy_objects" -eq 1 ] && [ -n "${S3_BUCKET:-}" ]; then
   if [ -z "${BACKUP_DIR:-}" ] && [ "${S3_ENDPOINT_URL:-}" = "${BACKUP_S3_ENDPOINT_URL:-}" ] && [ "$S3_BUCKET" = "$BACKUP_S3_BUCKET" ]; then
     die "the backup bucket is the app's own bucket; use a separate bucket (ideally another account)"

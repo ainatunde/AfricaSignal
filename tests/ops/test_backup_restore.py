@@ -6,15 +6,18 @@ The scripts need pg_dump, pg_restore, psql and rclone; the tests skip when one i
 from __future__ import annotations
 
 import http.server
+import json
 import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -90,10 +93,35 @@ def scratch_db(admin_url: str) -> Iterator[str]:
         psql(admin_url, f'DROP DATABASE IF EXISTS "{db}" WITH (FORCE)')
 
 
+@pytest.fixture
+def s3_server() -> Iterator[tuple[str, str, Any]]:
+    """A local S3 server with buckets app, backups and drill; yields (endpoint, host, boto client)."""
+    boto3 = pytest.importorskip("boto3")
+    server_mod = pytest.importorskip("moto.server")
+    server = server_mod.ThreadedMotoServer(port=0, verbose=False)
+    server.start()
+    host, port = server.get_host_and_port()
+    endpoint = f"http://{host}:{port}"
+    client = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id="k",
+        aws_secret_access_key="s",
+        region_name="us-east-1",
+    )
+    for bucket in ("app", "backups", "drill"):
+        client.create_bucket(Bucket=bucket)
+    try:
+        yield endpoint, host, client
+    finally:
+        server.stop()
+
+
 def run(script: Path, *args: str, env: dict[str, str] | None = None):
     full = {k: v for k, v in os.environ.items() if not k.startswith(("BACKUP_", "RESTORE_", "S3_"))}
     full.pop("AWS_CA_BUNDLE", None)  # rclone cannot load it; tests only talk to localhost
     full.pop("ENV", None)
+    full["OPS_USE_CONSOLE_SETTINGS"] = "0"  # tests that exercise the console turn this back on
     full.update(env or {})
     return subprocess.run([str(script), *args], capture_output=True, text=True, env=full)
 
@@ -311,86 +339,166 @@ def test_passphrase_can_be_given_as_a_variable(
 
 
 def test_s3_backup_copies_objects_and_restore_verifies_them(
-    tmp_path: Path, admin_url: str, scratch_db: str
+    tmp_path: Path, admin_url: str, scratch_db: str, s3_server: tuple[str, str, Any]
 ) -> None:
-    boto3 = pytest.importorskip("boto3")
-    server_mod = pytest.importorskip("moto.server")
-    server = server_mod.ThreadedMotoServer(port=0, verbose=False)
-    server.start()
-    host, port = server.get_host_and_port()
-    endpoint = f"http://{host}:{port}"
-    try:
-        s3 = boto3.client(
-            "s3",
-            endpoint_url=endpoint,
-            aws_access_key_id="k",
-            aws_secret_access_key="s",
-            region_name="us-east-1",
-        )
-        for bucket in ("app", "backups", "drill"):
-            s3.create_bucket(Bucket=bucket)
-        s3.put_object(Bucket="app", Key="evidence/ab/cd/one.html", Body=b"one")
-        s3.put_object(Bucket="app", Key="evidence/ef/01/two.pdf", Body=b"two")
+    endpoint, host, s3 = s3_server
+    s3.put_object(Bucket="app", Key="evidence/ab/cd/one.html", Body=b"one")
+    s3.put_object(Bucket="app", Key="evidence/ef/01/two.pdf", Body=b"two")
+    creds = {"_ACCESS_KEY_ID": "k", "_SECRET_ACCESS_KEY": "s"}
+    env = {
+        "DATABASE_URL": scratch_db,
+        "ENV": "staging",
+        "no_proxy": host,
+        "S3_ENDPOINT_URL": endpoint,
+        "S3_BUCKET": "app",
+        **{f"S3{k}": v for k, v in creds.items()},
+        "BACKUP_S3_ENDPOINT_URL": endpoint,
+        "BACKUP_S3_BUCKET": "backups",
+        **{f"BACKUP_S3{k}": v for k, v in creds.items()},
+    }
+    done = run(BACKUP, env=env)
+    assert done.returncode == 0, done.stderr
+    keys = {o["Key"] for o in s3.list_objects_v2(Bucket="backups")["Contents"]}
+    assert any(k.startswith("africasignal/staging/db/africasignal-") for k in keys)
+    assert "africasignal/staging/objects/evidence/ab/cd/one.html" in keys
 
-        creds = {"_ACCESS_KEY_ID": "k", "_SECRET_ACCESS_KEY": "s"}
-        env = {
-            "DATABASE_URL": scratch_db,
-            "ENV": "staging",
-            "no_proxy": host,
-            "S3_ENDPOINT_URL": endpoint,
-            "S3_BUCKET": "app",
-            **{f"S3{k}": v for k, v in creds.items()},
-            "BACKUP_S3_ENDPOINT_URL": endpoint,
-            "BACKUP_S3_BUCKET": "backups",
-            **{f"BACKUP_S3{k}": v for k, v in creds.items()},
-        }
-        done = run(BACKUP, env=env)
-        assert done.returncode == 0, done.stderr
-        keys = {o["Key"] for o in s3.list_objects_v2(Bucket="backups")["Contents"]}
-        assert any(k.startswith("africasignal/staging/db/africasignal-") for k in keys)
-        assert "africasignal/staging/objects/evidence/ab/cd/one.html" in keys
+    # Running again must not trip the immutability check on objects already copied.
+    assert run(BACKUP, env=env).returncode == 0
 
-        # Running again must not trip the immutability check on objects already copied.
-        assert run(BACKUP, env=env).returncode == 0
+    restore_env = {
+        **{k: v for k, v in env.items() if k.startswith("BACKUP_") or k == "no_proxy"},
+        "BACKUP_S3_PREFIX": "africasignal/staging",
+        "RESTORE_S3_ENDPOINT_URL": endpoint,
+        "RESTORE_S3_BUCKET": "drill",
+        **{f"RESTORE_S3{k}": v for k, v in creds.items()},
+    }
+    target = sibling_url(scratch_db, "restored")
+    done = run(
+        RESTORE,
+        "--target-url",
+        target,
+        "--recreate",
+        "--restore-objects",
+        "--verify-objects",
+        "5",
+        env=restore_env,
+    )
+    assert done.returncode == 0, done.stderr
+    assert "all present" in done.stderr
+    assert s3.get_object(Bucket="drill", Key="evidence/ef/01/two.pdf")["Body"].read() == b"two"
 
-        restore_env = {
-            **{k: v for k, v in env.items() if k.startswith("BACKUP_") or k == "no_proxy"},
-            "BACKUP_S3_PREFIX": "africasignal/staging",
-            "RESTORE_S3_ENDPOINT_URL": endpoint,
-            "RESTORE_S3_BUCKET": "drill",
-            **{f"RESTORE_S3{k}": v for k, v in creds.items()},
-        }
-        target = sibling_url(scratch_db, "restored")
-        done = run(
-            RESTORE,
-            "--target-url",
-            target,
-            "--recreate",
-            "--restore-objects",
-            "--verify-objects",
-            "5",
-            env=restore_env,
-        )
-        assert done.returncode == 0, done.stderr
-        assert "all present" in done.stderr
-        assert s3.get_object(Bucket="drill", Key="evidence/ef/01/two.pdf")["Body"].read() == b"two"
+    # An object that the database points at but the bucket lacks is reported, not ignored.
+    s3.delete_object(Bucket="drill", Key="evidence/ef/01/two.pdf")
+    done = run(
+        RESTORE,
+        "--target-url",
+        target,
+        "--recreate",
+        "--verify-objects",
+        "5",
+        env=restore_env,
+    )
+    assert done.returncode != 0 and "MISSING object: evidence/ef/01/two.pdf" in done.stderr
 
-        # An object that the database points at but the bucket lacks is reported, not ignored.
-        s3.delete_object(Bucket="drill", Key="evidence/ef/01/two.pdf")
-        done = run(
-            RESTORE,
-            "--target-url",
-            target,
-            "--recreate",
-            "--verify-objects",
-            "5",
-            env=restore_env,
-        )
-        assert done.returncode != 0 and "MISSING object: evidence/ef/01/two.pdf" in done.stderr
+    # The backup bucket must not be the app bucket.
+    same = {**env, "BACKUP_S3_BUCKET": "app"}
+    done = run(BACKUP, env=same)
+    assert done.returncode != 0 and "app's own bucket" in done.stderr
 
-        # The backup bucket must not be the app bucket.
-        same = {**env, "BACKUP_S3_BUCKET": "app"}
-        done = run(BACKUP, env=same)
-        assert done.returncode != 0 and "app's own bucket" in done.stderr
-    finally:
-        server.stop()
+
+def prepare_console_database(url: str, settings: dict[str, str]) -> None:
+    """Migrate ``url`` to head and save ``settings`` in it as an operator would in the console."""
+    env = {**os.environ, "DATABASE_URL": url.replace("postgresql://", "postgresql+psycopg://", 1)}
+    env["SECRET_KEY"] = "console-secret-key-for-tests"
+    env.pop("ENV", None)
+    subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=ROOT,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+    code = (
+        "import json, sys\n"
+        "from africasignal import operators, settings_store\n"
+        "from africasignal.db import session_scope\n"
+        "with session_scope() as session:\n"
+        "    op, _ = operators.create_operator(session, 'ops@example.org', 'a long enough passphrase 42', 'admin')\n"
+        "    for key, value in json.loads(sys.argv[1]).items():\n"
+        "        settings_store.set_value(session, op, key, value)\n"
+    )
+    subprocess.run(
+        [sys.executable, "-c", code, json.dumps(settings)],
+        cwd=ROOT,
+        env=env,
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_console_settings_choose_the_buckets_and_beat_the_environment(
+    tmp_path: Path, admin_url: str, scratch_db: str, s3_server: tuple[str, str, Any]
+) -> None:
+    endpoint, host, s3 = s3_server
+    s3.put_object(Bucket="app", Key="evidence/ab/cd/one.html", Body=b"one")
+    live = sibling_url(scratch_db, "fresh")
+    psql(admin_url, f'CREATE DATABASE "{live.rsplit("/", 1)[1]}"')
+    prepare_console_database(
+        live,
+        {
+            "backup_s3_endpoint_url": endpoint,
+            "backup_s3_bucket": "backups",
+            "backup_s3_access_key_id": "k-console",
+            "backup_s3_secret_access_key": "s-console-secret",
+            "backup_s3_prefix": "console/prefix",
+            "backup_retain_days": "7",
+            "s3_endpoint_url": endpoint,
+            "s3_bucket": "app",
+            "s3_access_key_id": "k-console",
+            "s3_secret_access_key": "s-console-secret",
+        },
+    )
+    env = {
+        "DATABASE_URL": live.replace("postgresql://", "postgresql+psycopg://", 1),
+        "SECRET_KEY": "console-secret-key-for-tests",
+        "OPS_USE_CONSOLE_SETTINGS": "1",
+        "OPS_PYTHON": sys.executable,
+        "no_proxy": host,
+        # Wrong values in the environment: the console must win.
+        "BACKUP_S3_ENDPOINT_URL": "http://127.0.0.1:1",
+        "BACKUP_S3_BUCKET": "not-the-console-bucket",
+        "BACKUP_S3_ACCESS_KEY_ID": "wrong",
+        "BACKUP_S3_SECRET_ACCESS_KEY": "wrong",
+        "BACKUP_RETAIN_DAYS": "999",
+    }
+    # moto accepts any credentials, so the access key used is proven by the prefix and bucket below.
+    done = run(BACKUP, env=env)
+    assert done.returncode == 0, done.stderr
+    assert "pruning dumps older than 7 days" in done.stderr
+    keys = {o["Key"] for o in s3.list_objects_v2(Bucket="backups")["Contents"]}
+    assert any(k.startswith("console/prefix/db/africasignal-") for k in keys)
+    assert "console/prefix/objects/evidence/ab/cd/one.html" in keys
+
+    listing = run(RESTORE, "--list", env=env)
+    assert listing.returncode == 0 and "africasignal-" in listing.stdout
+    target = sibling_url(scratch_db, "restored")
+    done = run(RESTORE, "--target-url", target, "--recreate", env=env)
+    assert done.returncode == 0, done.stderr
+    assert psql(target, "SELECT count(*) FROM operator") == "1"
+
+
+def test_environment_is_used_when_the_console_cannot_be_read(
+    tmp_path: Path, scratch_db: str
+) -> None:
+    # The scratch database has no setting table, like a database lost and restored elsewhere.
+    env = {
+        "DATABASE_URL": scratch_db.replace("postgresql://", "postgresql+psycopg://", 1),
+        "BACKUP_DIR": str(tmp_path),
+        "OPS_USE_CONSOLE_SETTINGS": "1",
+        "OPS_PYTHON": sys.executable,
+        "BACKUP_RETAIN_DAYS": "12",
+    }
+    done = run(BACKUP, env=env)
+    assert done.returncode == 0, done.stderr
+    assert "console settings could not be read" in done.stderr
+    assert "pruning dumps older than 12 days" in done.stderr

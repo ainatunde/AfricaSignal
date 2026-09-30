@@ -36,21 +36,30 @@ Design choices worth knowing:
 1. Create a private bucket for backups in a different account from the app bucket (Cloudflare R2,
    Backblaze B2 or any S3-compatible store). Create an access key scoped to that bucket only, with read,
    write, list and delete (delete is for pruning).
+   Then sign in to the operator console, open **Settings**, and fill in **Backup storage**: endpoint
+   URL, bucket, access key ID, secret access key, and optionally the key prefix and the days to keep
+   dumps. **Evidence storage** on the same page is the app's bucket, which the backup also reads.
+   Changes apply the next time a backup or restore runs.
 2. Create a heartbeat check with a dead-man's-switch service (for example healthchecks.io): expected
    every 24 hours, grace 2 hours, alerts by email. Copy its ping URL. This is how a *missed* night gets
    noticed; a failed one also pings `<url>/fail`.
-3. Set these in the server's `.env` (next to `docker-compose.yml`):
+3. Set these in the server's `.env` (next to `docker-compose.yml`). Only these are needed there; the
+   bucket settings come from the console:
 
    | Variable | Meaning |
    |---|---|
    | `ENV` | `staging` or `production`; also the default bucket prefix `africasignal/<ENV>/` |
-   | `DATABASE_URL`, `S3_*` | the same values the app uses |
-   | `BACKUP_S3_ENDPOINT_URL`, `BACKUP_S3_BUCKET`, `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY` | the backup bucket |
-   | `BACKUP_S3_PREFIX` | optional; default `africasignal/<ENV>` |
-   | `BACKUP_RETAIN_DAYS` | optional; default 30 |
+   | `DATABASE_URL`, `SECRET_KEY` | the same values the app uses. The backup job reads the console settings from that database, and decrypts the saved secrets with `SECRET_KEY` |
    | `BACKUP_AT_UTC` | optional; `HH:MM`, default `02:30` |
    | `BACKUP_PASSPHRASE` or `BACKUP_PASSPHRASE_FILE` | optional; encrypts dumps |
    | `BACKUP_HEARTBEAT_URL` | the ping URL from step 2 |
+
+   Where a value is set, the console wins over `.env`: for each of `backup_s3_endpoint_url`,
+   `backup_s3_bucket`, `backup_s3_access_key_id`, `backup_s3_secret_access_key`, `backup_s3_prefix`,
+   `backup_retain_days` and `s3_*` the job uses the console value, then the environment variable in
+   capitals (`BACKUP_S3_BUCKET`, `BACKUP_RETAIN_DAYS`, `S3_BUCKET`, ...), then the default (30 days).
+   The environment variables are the fallback when the console cannot be read, which is exactly the
+   situation in a disaster recovery (4.1). The job logs a warning when it falls back.
 
 4. Start the job and run one backup by hand to prove it works:
 
@@ -64,8 +73,9 @@ Design choices worth knowing:
    restore drill every quarter.
 
 Without Docker (for example on a developer machine) run `scripts/backup.sh` directly; it needs
-`pg_dump` and `pg_restore` 16, `psql`, `rclone`, `curl` and `openssl`. Set `BACKUP_DIR=/some/dir`
-instead of the `BACKUP_S3_*` variables to back up to a local directory.
+`pg_dump` and `pg_restore` 16, `psql`, `rclone`, `curl` and `openssl`, and `africasignal` installed
+(`pip install .`) if it should read the console settings. Set `BACKUP_DIR=/some/dir` instead of the
+bucket settings to back up to a local directory, and `OPS_USE_CONSOLE_SETTINGS=0` to ignore the console.
 
 ## 3. Daily and weekly checks
 
@@ -90,7 +100,14 @@ restore --list
 ### 4.1 Disaster recovery (the server or its database is lost)
 
 1. Provision a host and install Docker. Get the repository and the `.env` from your password manager.
+   **`SECRET_KEY` must be the old value**: secrets saved in the console (API keys, bucket credentials)
+   are encrypted with a key derived from it and cannot be read with another.
 2. Start only the database: `docker compose up -d db`. Wait until it is healthy.
+   The console settings live in the database you are about to restore, so they cannot tell the restore
+   where the backups are. **Put the backup bucket's endpoint, bucket, access key and secret in your
+   password manager, and export them as `BACKUP_S3_ENDPOINT_URL`, `BACKUP_S3_BUCKET`,
+   `BACKUP_S3_ACCESS_KEY_ID`, `BACKUP_S3_SECRET_ACCESS_KEY` (and `BACKUP_S3_PREFIX` if you set one) in
+   `.env` before step 3.** `restore.sh` then logs a warning that the console cannot be read and uses them.
 3. Restore the newest dump into it and copy the objects back into the app bucket (if the app bucket
    was lost too, create it first):
 
@@ -172,11 +189,14 @@ The job exits non-zero and pings `<heartbeat>/fail` on any failure. Read
 
 | Message | Cause and fix |
 |---|---|
-| `DATABASE_URL is not set`, `set BACKUP_S3_BUCKET` | Missing variable in `.env`; fix and `docker compose --profile backup up -d backup`. |
+| `DATABASE_URL is not set` | Missing variable in `.env`; fix and `docker compose --profile backup up -d backup`. |
+| `set BACKUP_S3_BUCKET` | No backup bucket in the console (**Settings > Backup storage**) or in `.env`. |
+| `warning: console settings could not be read (...)` | The job could not read the console settings (database down, wrong `SECRET_KEY`, schema not migrated) and used `.env` instead. Fine in a disaster recovery; otherwise fix the cause, because a bucket changed in the console is ignored until it works. |
+| `warning: africasignal is not importable here` | The script runs without the app installed (not the backup image), so it uses `.env` only. |
 | `pg_dump: error: ... connection` | The database is down or the password changed. Check `docker compose ps db`. |
 | `pg_dump: error: aborting because of server version mismatch` | The server is newer than the client (16). Rebuild the backup image with the matching `postgres:<major>` base in `docker/backup/Dockerfile`. |
 | `uploaded size ... does not match` or rclone errors | Network or credentials for the backup bucket. Test with `restore --list`. |
-| `the backup bucket is the app's own bucket` | `BACKUP_S3_BUCKET`/`BACKUP_S3_ENDPOINT_URL` equals the app's. Use a separate bucket. |
+| `the backup bucket is the app's own bucket` | The backup bucket setting equals the evidence storage setting. Use a separate bucket. |
 | `immutable file modified` | An object in the app bucket has a different size from its backup copy. Evidence objects must never change: find out why (someone edited or overwrote it) before continuing. |
 | Missed night, no error | The container is not running (`docker compose --profile backup ps`) or the host was down. Start it and run a backup by hand. |
 
