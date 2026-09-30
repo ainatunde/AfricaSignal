@@ -44,3 +44,8 @@ pinned by SHA-256 in `src/africasignal/places/load.py`. Extra names live in
 Set through environment variables (see `src/africasignal/config.py`). With `ENV=staging` or
 `ENV=production`, startup fails with `RuntimeError` if `DATABASE_URL`, `S3_*`, `ANTHROPIC_API_KEY`,
 `EMAIL_*` or `SECRET_KEY` is missing.
+
+Email: `EMAIL_PROVIDER` is `console` (logs, the development default), `postmark` or `resend`, with
+`EMAIL_API_KEY` and `EMAIL_FROM`. `PUBLIC_BASE_URL` is the origin used in links inside emails.
+The provider is chosen behind `publish/email.py`; the Postmark and Resend adapters have only been
+tested against a mocked transport.

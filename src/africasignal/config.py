@@ -54,6 +54,9 @@ class Settings(BaseSettings):
 
     secret_key: str = Field(default="", alias="SECRET_KEY")
 
+    # Origin used in links inside emails (sign-in, unsubscribe, situation pages).
+    public_base_url: str = Field(default="http://localhost:8000", alias="PUBLIC_BASE_URL")
+
     def validate_required(self) -> None:
         """Raise ``RuntimeError`` naming every missing required setting (non-development only)."""
         if self.env == "development":
