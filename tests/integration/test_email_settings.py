@@ -89,9 +89,8 @@ def test_an_unusable_choice_leaves_mail_waiting(
 ) -> None:
     with pytest.raises(EmailNotConfigured, match="no email provider"):
         get_provider(session)
-    save(session, operator, email_provider="ses")
-    with pytest.raises(EmailNotConfigured, match="not implemented"):
-        get_provider(session)
+    with pytest.raises(EmailNotConfigured, match="unknown email provider"):
+        email_module.build_provider_named("ses", "key", "a@b.co")
     save(session, operator, email_provider="postmark")  # no key or sender yet
     with pytest.raises(EmailNotConfigured, match="needs an API key"):
         get_provider(session)

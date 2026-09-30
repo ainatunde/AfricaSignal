@@ -167,8 +167,6 @@ def build_provider_named(name: str, api_key: str, from_address: str) -> EmailPro
             raise EmailNotConfigured(f"{name} needs an API key and a sender address")
         cls = PostmarkProvider if name == "postmark" else ResendProvider
         return cls(api_key, from_address)
-    if name == "ses":
-        raise EmailNotConfigured("Amazon SES is not implemented yet; choose Postmark or Resend")
     raise EmailNotConfigured(f"unknown email provider {name!r}")
 
 
