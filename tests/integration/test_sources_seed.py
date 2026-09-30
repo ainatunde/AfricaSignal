@@ -44,10 +44,15 @@ def test_shipped_seed_loads_and_covers_the_plan_sources() -> None:
     assert len(slugs) == len(load_seed())
 
 
-def test_unverified_news_feeds_are_seeded_inactive() -> None:
-    news = [s for s in load_seed() if s.adapter == "rss"]
+def test_news_feeds_are_seeded_inactive_and_only_checked_feeds_have_a_url() -> None:
+    """Every outlet stays inactive until an operator has reviewed its terms. Eight feeds were
+    checked on 2026-09-30; TheCable and Guardian Nigeria answer bots with a challenge page."""
+    news = {s.slug: s for s in load_seed() if s.adapter == "rss"}
     assert len(news) == 10
-    assert all(not s.active and s.feed_url is None for s in news)
+    assert all(not s.active for s in news.values())
+    without_feed = {slug for slug, s in news.items() if s.feed_url is None}
+    assert without_feed == {"thecable-rss", "guardian-nigeria-rss"}
+    assert all(s.feed_url.startswith("https://") for s in news.values() if s.feed_url)
 
 
 def test_seed_creates_sources_with_unapproved_permissions(session: Session) -> None:
