@@ -8,6 +8,7 @@ from africasignal.models.assessments import (
 from africasignal.models.base import Base
 from africasignal.models.claims import Claim
 from africasignal.models.evidence import EvidenceDocument, GdeltDiscovery, ReportingOrigin
+from africasignal.models.llm_cache import LlmResponseCache
 from africasignal.models.measurements import Measurement, MeasurementReview, Series
 from africasignal.models.ops import (
     AuditLog,
@@ -44,6 +45,7 @@ __all__ = [
     "GdeltDiscovery",
     "Job",
     "LlmCall",
+    "LlmResponseCache",
     "LoginToken",
     "Measurement",
     "MeasurementReview",

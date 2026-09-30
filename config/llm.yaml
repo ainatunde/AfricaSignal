@@ -1,0 +1,20 @@
+# Language-model settings (spec A3 D3, B12, AS-020): which model serves which purpose, and what
+# the models cost. Model ids are set here, not in code.
+#
+# Prices are USD per million tokens, copied on 2026-09-30 from the model table bundled with
+# Claude Code (cached 2026-09-25). Check them against https://www.anthropic.com/pricing before
+# launch: the daily budget is only as accurate as this table. A model without a price here is
+# refused, so a model change can never spend unmetered.
+#
+# `effort` is the model's own thinking-depth setting (low | medium | high | xhigh | max). Claim
+# extraction is reading and copying, not reasoning, so it runs at `low`.
+
+default_model: claude-sonnet-5-5
+
+purposes:
+  claim_extract: {model: claude-sonnet-5-5, effort: low}
+
+prices:
+  claude-sonnet-5-5: {input: 2.00, output: 10.00}
+  claude-opus-5-5: {input: 4.00, output: 20.00}
+  claude-haiku-4-5: {input: 1.00, output: 5.00}
