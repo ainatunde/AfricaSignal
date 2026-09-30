@@ -1,12 +1,8 @@
 """Ledger of deleted accounts, for re-applying deletions after a backup restore (AS-043 gap G4)
 
 Revision ID: 0006
-Revises: 0004
+Revises: 0005
 Create Date: 2026-09-30
-
-``down_revision`` is 0004 because this branch does not contain 0005 (the LLM response cache,
-another branch). When both are merged, change ``down_revision`` below to "0005" so there is one
-head.
 """
 
 import sqlalchemy as sa
@@ -14,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0006"
-down_revision = "0004"
+down_revision = "0005"
 branch_labels = None
 depends_on = None
 

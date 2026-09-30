@@ -37,3 +37,19 @@ def test_downgrade_removes_tables_and_enum_types_then_upgrade_again(engine: Engi
     )
     command.upgrade(cfg, "head")
     assert _user_tables(engine) == set(Base.metadata.tables)
+
+
+def test_upgrade_from_an_empty_database_lands_on_the_single_head(engine: Engine) -> None:
+    from alembic.script import ScriptDirectory
+
+    cfg = alembic_config()
+    command.downgrade(cfg, "base")
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM alembic_version"))
+    assert _user_tables(engine) == set()
+    command.upgrade(cfg, "head")
+    heads = ScriptDirectory.from_config(cfg).get_heads()
+    with engine.connect() as conn:
+        stored = set(conn.execute(text("SELECT version_num FROM alembic_version")).scalars())
+    assert stored == set(heads)
+    assert _user_tables(engine) == set(Base.metadata.tables)
