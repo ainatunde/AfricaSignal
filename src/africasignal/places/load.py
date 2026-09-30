@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,7 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from africasignal.config import config_dir
-from africasignal.net.fetch import fetch_document
+from africasignal.net.fetch import FetchResult, fetch_document
 from africasignal.places.normalise import normalise, slugify
 
 log = logging.getLogger("africasignal.places.load")
@@ -82,6 +83,17 @@ def boundary_version(files: dict[str, bytes]) -> str:
     return f"{BOUNDARY_ATTRIBUTION} [{hashes}]"
 
 
+def _fetch_politely(url: str) -> FetchResult:
+    """Fetch ``url``, waiting out the per-domain rate limit (the three files share one host)."""
+    result = fetch_document(url, max_bytes=60_000_000, timeout=120.0)
+    for _ in range(3):
+        if not result.abstained:
+            break
+        time.sleep(1.2)
+        result = fetch_document(url, max_bytes=60_000_000, timeout=120.0)
+    return result
+
+
 def download_boundaries(cache_dir: Path | None = None) -> dict[str, bytes]:
     """Fetch the three boundary files (or read them from ``cache_dir``), verifying SHA-256."""
     out: dict[str, bytes] = {}
@@ -90,7 +102,7 @@ def download_boundaries(cache_dir: Path | None = None) -> dict[str, bytes]:
         if cached is not None and cached.exists():
             content = cached.read_bytes()
         else:
-            result = fetch_document(spec.url, max_bytes=60_000_000, timeout=120.0)
+            result = _fetch_politely(spec.url)
             if not result.success:
                 raise PlacesDataError(
                     f"could not download {spec.url}: {result.error or result.status_code}"
