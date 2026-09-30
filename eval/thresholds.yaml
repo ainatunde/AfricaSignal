@@ -1,0 +1,20 @@
+# Launch-gate thresholds for the evaluation harness (plan AS-040, "Accept when (launch gate)").
+#
+# These numbers are the plan's, not the build's. Tunde can change them before tuning starts, and
+# not after; a change here should be its own commit so the history shows when it happened.
+
+# Every number in every assessment must be exactly right.
+number_accuracy_min: 1.0
+
+# No published assessment may name a place finer than the place its evidence is about.
+published_place_finer_than_evidence_max: 0
+
+# Share of cases whose evidence state matches the label, per template.
+evidence_state_accuracy_min:
+  T1: 0.90
+  T2: 0.80
+
+# "At least 100 cases (60 T1, 40 T2)".
+reference_set_min_cases:
+  T1: 60
+  T2: 40
