@@ -104,7 +104,8 @@ Real files from both are saved in `tests/fixtures/nbs` with their URLs, dates an
 Assessments (`publish/situations.py`) are computed in `assess/price_change.py` and are stored as
 drafts until the publication policy decides them.
 
-Email: `EMAIL_PROVIDER` is `console` (logs, the development default), `postmark` or `resend`, with
-`EMAIL_API_KEY` and `EMAIL_FROM`. `PUBLIC_BASE_URL` is the origin used in links inside emails.
-The provider is chosen behind `publish/email.py`; the Postmark and Resend adapters have only been
-tested against a mocked transport.
+Email: the provider is chosen behind `publish/email.py`. `console` (logs only) and `fake` are
+accepted for development and tests; Postmark and Resend are implemented and have only been tested
+against a mocked transport. The provider, API key, sender and public address are saved in the
+operator console (Settings) and read on each use, so a change applies on the next send; the
+`EMAIL_*` and `PUBLIC_BASE_URL` environment variables are only the fallback.
