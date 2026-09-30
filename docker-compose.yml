@@ -53,6 +53,10 @@ services:
 
   web:
     <<: *app
+    # Same as the image's default, spelled out so `docker compose config` shows it: uvicorn's
+    # access log would write every reader's IP address and requested URL. Do not remove
+    # --no-access-log (tests/unit/test_logging_policy.py checks it).
+    command: ["uvicorn", "africasignal.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
     ports:
       - "8000:8000"
 

@@ -371,7 +371,7 @@ def account_delete(
             },
             400,
         )
-    accounts.delete_account(db, user.id)
+    accounts.delete_account(db, user.id, now())
     db.commit()
     response = _page(request, db, "account_deleted.html", {})
     clear_session_cookie(response)

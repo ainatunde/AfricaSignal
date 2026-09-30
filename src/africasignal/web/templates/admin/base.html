@@ -37,7 +37,7 @@
     <a href="/admin/sources">Sources</a>
     <a href="/admin/feedback">Feedback</a>
     <a href="/admin/metrics">Metrics</a>
-    {% if operator.role == "admin" %}<a href="/admin/settings">Settings</a>{% endif %}
+    {% if operator.role == "admin" %}<a href="/admin/publication">Publication</a><a href="/admin/settings">Settings</a>{% endif %}
     <a href="/admin/audit">Audit log</a>
   </nav>
   <span class="muted">{{ operator.email }} ({{ operator.role }})</span>

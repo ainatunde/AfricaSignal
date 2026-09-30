@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% from "_legal.html" import draft_banner, contact, operator, todo with context %}
+{% block title %}Privacy notice · AfricaSignal{% endblock %}
+{% block head %}{% if not reviewed %}<meta name="robots" content="noindex, nofollow">{% endif %}{% endblock %}
+{% block content %}
+<h1>Privacy notice</h1>
+{{ draft_banner("notice") }}
+<p class="lead">AfricaSignal is built to work with as little information about you as possible. You can read everything on the site without an account. This page says what we do collect, why, who sees it, how long we keep it and how to get it deleted.</p>
+
+<h2>Who is responsible</h2>
+<p>{{ operator() }} runs AfricaSignal and decides how your information is used (in data protection terms, the <em>data controller</em>). You can reach us at {{ contact() }}. This notice is written with the Nigeria Data Protection Act 2023 in mind.</p>
+
+<h2>The short version</h2>
+<ul>
+  <li>Our software does not store your IP address, your browser details or the full address of the pages you visit. (The companies that host the site may keep short technical logs; see “Technical logs” below.)</li>
+  <li>We do not use advertising or third-party analytics, and the site loads no scripts, fonts or images from other companies.</li>
+  <li>An account needs only your email address. The weekly email is off until you turn it on.</li>
+  <li>When you use “Use my location”, your position is turned into a state and local government area and then thrown away.</li>
+  <li>You can download your data and delete your account yourself, at any time, on the <a href="/account">account page</a>.</li>
+</ul>
+
+<h2>What we collect</h2>
+
+<h3>When you just read the site</h3>
+<ul>
+  <li><strong>A visitor code.</strong> The first time you open a page we put a random code in a cookie (<code>{{ anon_cookie }}</code>). It is not made from anything about you. It lets us count how many people visit and how many come back, and limit feedback to {{ feedback_limit }} submissions per visitor per day.</li>
+  <li><strong>Page-view records.</strong> For each page you open we record the time, the kind of page (for example “situation” or “coverage”), which situation it was if it was a situation page, and where you came from if the link ended in <code>?ref=wa</code>, <code>x</code>, <code>email</code> or <code>share</code>. We also record when you follow or unfollow a situation, send feedback, tap Share, or open the weekly email. If you are signed in, the record also carries your account number, so we can tell which signed-in people find the site useful.</li>
+  <li><strong>Not collected:</strong> IP address, user agent, the full URL or the search text you type into the place picker. Link previews and crawlers (for example a WhatsApp preview of a shared link) are not counted as visitors.</li>
+  <li><strong>Your choices in cookies.</strong> The state or area you pick, and the times of your last visits, are kept in cookies in your browser so the home page can show “since your last visit”. They are sent back to us with each page request, but we do not copy them into our database.</li>
+</ul>
+
+<h3>If you use “Use my location”</h3>
+<p>Only when you press the button, and only after your browser asks your permission, your phone or computer sends its position to us once. We find which local government area and state contain it, show you the answer and discard the position. It is not stored or written to a log.</p>
+
+<h3>If you create an account</h3>
+<ul>
+  <li><strong>Your email address</strong>, when you ask for a sign-in link. An account is created the moment an address is entered, and becomes verified when the link is used. Someone who types your address by mistake or on purpose can make us send you a sign-in email; if you ignore it, nothing else happens.</li>
+  <li><strong>Sign-in records.</strong> The link is valid for {{ login_link_minutes }} minutes and works once. You then stay signed in for {{ session_days }} days, or until you sign out. We keep only one-way fingerprints of links and sessions, never the links themselves.</li>
+  <li><strong>What you ask us to remember:</strong> the situations you follow, the states and topics you choose, the notifications we have shown you, and whether and when you turned on the weekly email.</li>
+</ul>
+
+<h3>If you turn on the weekly email</h3>
+<p>We email your address on Monday mornings with the situations you follow that changed and the biggest changes in your places. If a situation you follow is corrected or withdrawn we email that too, but only to people who turned the weekly email on. Each email has a link that turns the emails off in one click. The email contains a tiny image that tells us it was opened, and we record that against your account (once per week). That is the only tracking in it.</p>
+
+<h3>If you send feedback</h3>
+<ul>
+  <li>“Was this useful?” saves your yes or no, the version of the page, and your visitor code.</li>
+  <li>“Report an error” saves what you wrote (up to 2,000 characters), the page version and your visitor code, and your account number if you are signed in. An email address is saved <em>only</em> if you type one in the optional box, and is used only to reply about that report. Please do not put personal details about yourself or other people in the text.</li>
+</ul>
+
+<h3>Technical logs</h3>
+<p>Our own software does not write visitor IP addresses anywhere. To limit abuse we hold your address briefly in memory, scrambled with a code that changes each time the server restarts, and forget it when the time window ends. The companies that run our servers and network may still keep short technical logs that include IP addresses, for security and to keep the service running. {{ todo("which hosting provider and any proxy or CDN are used, what they log, and for how long; set the shortest practical period") }}</p>
+
+<h2>Why we are allowed to use it</h2>
+<table>
+  <thead><tr><th scope="col">What</th><th scope="col">Reason</th></tr></thead>
+  <tbody>
+    <tr><td>Account, sign-in, follows, choices, notifications</td><td>You asked for them. They are how the account works.</td></tr>
+    <tr><td>The weekly email and correction emails</td><td>Your consent, given when you turn the weekly email on. You can withdraw it at any time with the link in each email or on the account page. Withdrawing does not affect anything sent before.</td></tr>
+    <tr><td>Visitor code and page-view records</td><td>Our legitimate interest in knowing whether people use the service, which pages help, and whether it is worth continuing. We keep it to the minimum: no IP address, no user agent, and deletion after {{ event_retention }}.</td></tr>
+    <tr><td>Error reports and useful/not useful answers</td><td>Our legitimate interest in finding and fixing mistakes. If you give an email address to get a reply, it is given voluntarily for that purpose.</td></tr>
+    <tr><td>Short-lived address handling to limit abuse, and security logs</td><td>Our legitimate interest in keeping the service available and safe.</td></tr>
+  </tbody>
+</table>
+<p>{{ todo("counsel to confirm the lawful basis for each row against the Act, and whether the visitor-code cookie needs a consent banner") }}</p>
+
+<h2>Cookies</h2>
+<p>These are the only cookies the site sets. All are first-party (set by AfricaSignal itself), none is used for advertising, and none is shared with anyone. The site works without them; you would lose your remembered place, “since your last visit” and staying signed in.</p>
+<table>
+  <thead><tr><th scope="col">Cookie</th><th scope="col">What it does</th><th scope="col">Set when</th><th scope="col">Lasts</th></tr></thead>
+  <tbody>
+  {% for c in cookies %}
+    <tr><td><code>{{ c.name }}</code></td><td>{{ c.purpose }}</td><td>{{ c.set_when }}</td><td>{{ c.lasts }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h2>Who else sees it</h2>
+<ul>
+  <li><strong>People who run AfricaSignal</strong> can see feedback, including any email address typed into it, and aggregate numbers. Access is limited to operators who sign in with a password and an authenticator code, and what they change is logged.</li>
+  <li><strong>Our email provider</strong>{% if email_provider %} (currently {{ email_provider|capitalize }}){% endif %} receives your email address and the text of each email we send you, so it can deliver them.</li>
+  <li><strong>Our hosting and storage providers</strong> hold the database and its backups on our behalf. {{ todo("name the hosting and backup providers and their countries") }}</li>
+  <li><strong>The language model we use to read source documents</strong> is sent only text from public sources such as news articles and official releases. It is never sent anything about our readers.</li>
+  <li>We do not sell your information, and we do not share it with advertisers or data brokers. We will disclose it if the law requires.</li>
+</ul>
+<p>Some of these providers may store or process information outside Nigeria. {{ todo("the countries involved and the safeguards or contracts relied on for transfers under the Act") }}</p>
+
+<h2>How long we keep it</h2>
+<table>
+  <thead><tr><th scope="col">What</th><th scope="col">How long</th></tr></thead>
+  <tbody>
+    <tr><td>Page-view and other event records</td><td>{{ event_retention }}, then deleted automatically. If you delete your account, your account number is removed from them straight away.</td></tr>
+    <tr><td>Account, follows, choices and notifications</td><td>Until you delete your account, which removes them immediately. An address that was entered but never confirmed with the sign-in link is deleted {{ unverified_days }} days later.</td></tr>
+    <tr><td>Sign-in link and session records</td><td>Deleted {{ login_record_days }} days after the link or session stops working, or when you delete your account, whichever is first.</td></tr>
+    <tr><td>Feedback and error reports</td><td>{{ feedback_months }} months. After that the text, any email address you typed, your visitor code and the link to your account are removed, and only the yes or no, the date and whether the report led to a correction are kept. When you delete your account, your reports are cut loose from it straight away and your address is removed from the text.</td></tr>
+    <tr><td>Cookies in your browser</td><td>As listed above. You can delete them at any time in your browser.</td></tr>
+    <tr><td>Backups</td><td>{% if backup_days %}We keep database backups for {{ backup_days }} days.{% else %}We keep database backups for a limited period.{% endif %} Something you delete from the live site can remain in a backup until that backup expires. Backups are used only to recover from a failure. If a backup is ever restored, the accounts that were deleted after it was taken are deleted again before the site is switched back on. For that we keep a scrambled fingerprint of each deleted address (not the address itself) for {{ ledger_days }} days, which is as long as a backup that could hold the account exists.</td></tr>
+  </tbody>
+</table>
+
+<h2>Your rights</h2>
+<p>Under the Nigeria Data Protection Act you can ask us to tell you what we hold about you, give you a copy, correct it, delete it, restrict or object to how we use it, and withdraw consent. Most of this you can do yourself:</p>
+<ul>
+  <li><strong>Copy of your data:</strong> on the <a href="/account">account page</a>, “Download everything we hold about you”. It covers your account, choices, follows, notifications, feedback and the page-view records that were recorded while you were signed in. Page views from before you signed in carry only a visitor code and cannot be tied to you, so they are not included.</li>
+  <li><strong>Delete your account:</strong> on the same page. It is immediate.</li>
+  <li><strong>Stop the weekly email:</strong> the link in any email, or the account page.</li>
+  <li><strong>Anything else</strong>, including removing your email address or personal details from a report you sent, or help if you cannot sign in: write to {{ contact() }}. We aim to answer within {{ request_days }} days. {{ todo("counsel to confirm the response time and any identity checks before acting on a request") }}</li>
+</ul>
+<p>If you are not happy with how we handled your information you can complain to the Nigeria Data Protection Commission.</p>
+
+<h2>Children</h2>
+<p>AfricaSignal is not aimed at children, and we do not knowingly create accounts for people under 18. {{ todo("counsel to confirm the age rule and any parental-consent wording") }}</p>
+
+<h2>Security</h2>
+<p>Connections use HTTPS. Sign-in links and sessions are stored only as one-way fingerprints, operator access needs a second factor, and the database and backups are not public. If a breach puts your information at risk we will tell the Nigeria Data Protection Commission and, where the law requires, you. {{ todo("counsel to confirm the notification duties and time limits") }}</p>
+
+<h2>Changes</h2>
+<p>If we change this notice in a way that matters, we will say so at the top of this page and, for account holders, by email. The date of the current wording is at the top of the page while it is a draft.</p>
+{% endblock %}

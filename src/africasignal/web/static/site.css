@@ -56,6 +56,7 @@ h3 { font-size: 1.02rem; margin: 1.25rem 0 .4rem; }
 .health-healthy { color: #0b5d3b; } .health-degraded { color: #8a5a00; } .health-failing { color: #a11d1d; }
 
 .callout { background: var(--panel); border-left: 4px solid var(--accent); padding: .6rem .9rem; margin: 1rem 0; }
+mark.todo { background: var(--warn-bg); color: inherit; outline: 1px solid var(--warn-line); padding: 0 .2em; }
 .callout.warn { background: var(--warn-bg); border-left-color: var(--warn-line); }
 
 table { width: 100%; border-collapse: collapse; margin: .5rem 0 1rem; font-size: .95rem; }

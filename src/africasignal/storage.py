@@ -12,6 +12,7 @@ from typing import Any, Protocol
 import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
+from sqlalchemy.orm import Session
 
 from africasignal.config import get_settings
 from africasignal.db import session_scope
@@ -91,6 +92,16 @@ class S3Store:
         _check_key(key)
         self._client.delete_object(Bucket=self._bucket, Key=key)
 
+    def list_keys(self, prefix: str) -> list[str]:
+        """Every key that starts with ``prefix``, in key order."""
+        _check_key(prefix)
+        keys: list[str] = []
+        for page in self._client.get_paginator("list_objects_v2").paginate(
+            Bucket=self._bucket, Prefix=prefix
+        ):
+            keys.extend(item["Key"] for item in page.get("Contents", []))
+        return keys
+
 
 @lru_cache(maxsize=4)
 def _store_for(config: StorageConfig) -> S3Store:
@@ -103,6 +114,15 @@ def _store_for(config: StorageConfig) -> S3Store:
         config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
     )
     return S3Store(client, config.bucket)
+
+
+def store_for_session(session: Session) -> S3Store | None:
+    """The evidence store for code that already holds a database session, or ``None`` when no
+    bucket or credentials are configured yet (nothing then tries the network)."""
+    config = storage_config(session)
+    if not (config.bucket and config.access_key_id and config.secret_access_key):
+        return None
+    return _store_for(config)
 
 
 def get_store() -> S3Store:

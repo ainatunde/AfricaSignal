@@ -80,6 +80,31 @@ def get_setting(key: str, reveal: bool) -> int:
     return 0
 
 
+def reapply_deletions() -> int:
+    """After a backup restore, delete again the accounts their holders deleted since the backup
+    was taken. Run it before the app is started. Safe to repeat."""
+    from datetime import UTC, datetime
+
+    from africasignal.publish import retention
+    from africasignal.storage import store_for_session
+
+    with session_scope() as session:
+        store = store_for_session(session)
+        if store is None:
+            print(
+                "warning: no object storage is configured, so only the deletion ledger in the "
+                "database was used; deletions made after the backup are lost",
+                file=sys.stderr,
+            )
+        try:
+            removed = retention.reapply_deletions(session, datetime.now(UTC), store)
+        except Exception as exc:  # the object store being unreachable must not look like success
+            print(f"error: could not read the deletion ledger: {exc}", file=sys.stderr)
+            return 1
+    print(f"Deleted {removed} account(s) that were deleted after the backup was taken.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m africasignal.admin")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -95,7 +120,13 @@ def main(argv: list[str] | None = None) -> int:
     getter = sub.add_parser("get-setting", help="print an effective console setting")
     getter.add_argument("key")
     getter.add_argument("--reveal", action="store_true", help="allow printing a secret")
+    sub.add_parser(
+        "reapply-deletions",
+        help="after a restore, delete again the accounts deleted since the backup was taken",
+    )
     args = parser.parse_args(argv)
+    if args.command == "reapply-deletions":
+        return reapply_deletions()
     if args.command == "get-setting":
         return get_setting(args.key, args.reveal)
     if args.command == "create-operator":

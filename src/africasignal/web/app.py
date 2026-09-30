@@ -11,7 +11,15 @@ from africasignal.web.analytics import AnalyticsMiddleware
 from africasignal.web.csrf import AdminOriginGuard
 from africasignal.web.public_csrf import PublicOriginGuard
 from africasignal.web.render import STATIC_DIR
-from africasignal.web.routes import account, admin, admin_feedback, api_v1, feedback, public
+from africasignal.web.routes import (
+    account,
+    admin,
+    admin_feedback,
+    api_v1,
+    feedback,
+    legal,
+    public,
+)
 
 
 def create_app() -> FastAPI:
@@ -34,6 +42,7 @@ def create_app() -> FastAPI:
         admin.router,
         admin_feedback.router,
         public.router,
+        legal.router,
         account.router,
         feedback.router,
         api_v1.router,
