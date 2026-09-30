@@ -79,7 +79,9 @@
   owner: NMDPRA
   # Verified 2026-09-30: the site is a Blazor WebAssembly app; its pages carry no content without
   # running JavaScript, so this source cannot be read by the static adapters of release 1.
-  # Inactive until a route (the API behind the site, or another publication) is found.
+  # The API behind it needs a Microsoft Entra ID sign-in, so it is not used. NMDPRA's monthly
+  # sector fact sheets (cooking gas prices by city) are reported by the press; their own URL was
+  # not found. Inactive until a route is found. See tests/fixtures/nmdpra/manifest.json.
   home_url: https://nmdpra.gov.ng
   active: false
   schedule_minutes: 360
