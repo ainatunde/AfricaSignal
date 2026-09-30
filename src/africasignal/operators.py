@@ -11,18 +11,23 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 import pyotp
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
+from africasignal import audit
 from africasignal.config import get_settings
-from africasignal.models import Operator
+from africasignal.models import Operator, OperatorSignInFailure
+
+log = logging.getLogger("africasignal.operators")
 
 MIN_PASSWORD_LENGTH = 12
 ROLES = ("admin", "editor")
@@ -139,72 +144,94 @@ def create_operator(session: Session, email: str, password: str, role: str) -> t
 
 # --- TOTP ---------------------------------------------------------------------------------------
 
-# Last accepted time step per operator, so a code can't be replayed inside its validity window.
-# Process-local, which is enough for one web process; a second process would need a shared store.
-_last_step: dict[int, int] = {}
 
-
-def verify_totp(operator_id: int, secret: str, code: str, now: float | None = None) -> bool:
-    """Accept the current code or one step either side (clock drift), each code only once."""
+def matching_totp_step(secret: str, code: str, now: float | None = None) -> int | None:
+    """The time step whose code equals ``code`` (the current step or one either side, for clock
+    drift), or None. Pure: whether the step was already used is ``authenticate``'s business."""
     code = code.strip().replace(" ", "")
     if not (code.isascii() and code.isdigit() and len(code) == 6):
-        return False
+        return None
     now = time.time() if now is None else now
     totp = pyotp.TOTP(secret)
     step = int(now // TOTP_STEP_SECONDS)
-    last = _last_step.get(operator_id, -1)
     matched = None
     for candidate in (step - 1, step, step + 1):
         # Compare against every candidate, without stopping at the first, to keep timing flat.
         if hmac.compare_digest(totp.at(candidate * TOTP_STEP_SECONDS), code):
             matched = candidate
-    if matched is None or matched <= last:
-        return False
-    _last_step[operator_id] = matched
-    return True
+    return matched
+
+
+def _use_totp_step(session: Session, operator: Operator, step: int) -> bool:
+    """Record ``step`` as the newest accepted for the operator. False when it is not newer than the
+    last one, so a code is good once, in every process (one conditional UPDATE, no race)."""
+    result = session.execute(
+        update(Operator)
+        .where(
+            Operator.id == operator.id,
+            or_(Operator.last_totp_step.is_(None), Operator.last_totp_step < step),
+        )
+        .values(last_totp_step=step)
+    )
+    return bool(result.rowcount)  # type: ignore[attr-defined]
 
 
 # --- throttle -----------------------------------------------------------------------------------
+#
+# Two counters, both stored in the database so a restart or a second process does not reset them:
+#
+# * per account and client: 5 failures in 15 minutes stop that client (a keyed hash of its
+#   address, never the address) trying that account. This is the brute-force limit.
+# * per account, all clients: 50 failures in 15 minutes stop everyone, for the same 15 minutes.
+#   Password and code are both needed, so 50 guesses gain nothing, and the limit is high enough
+#   that a stranger must keep up real traffic to hold an operator out. It never gets longer by
+#   trying more: refused attempts are not counted, and each failure ages out after 15 minutes.
+#
+# A refused attempt costs nothing and is not recorded, so a flood cannot grow the table; failures
+# are only recorded up to ``MAX_TRACKED_FAILURES`` rows. ``python -m africasignal.admin
+# unlock-operator --email ...`` clears an account's failures at once.
+
+CLIENT_MAX_FAILURES = 5
+ACCOUNT_MAX_FAILURES = 50
+FAILURE_WINDOW = timedelta(minutes=15)
+MAX_TRACKED_FAILURES = 50_000
 
 
-@dataclass
-class LoginThrottle:
-    """Refuse sign-in for an email after too many failures in a window. In memory, so it resets
-    when the process restarts; the client IP is not used (it is not stored anywhere, and behind a
-    proxy it would be the proxy's)."""
-
-    max_failures: int = 5
-    window_seconds: float = 900.0
-    max_tracked: int = 10_000
-    _failures: dict[str, list[float]] = field(default_factory=dict)
-
-    def _recent(self, key: str, now: float) -> list[float]:
-        recent = [t for t in self._failures.get(key, []) if now - t < self.window_seconds]
-        if recent:
-            self._failures[key] = recent
-        else:
-            self._failures.pop(key, None)
-        return recent
-
-    def blocked(self, key: str, now: float | None = None) -> bool:
-        now = time.time() if now is None else now
-        return len(self._recent(key, now)) >= self.max_failures
-
-    def record_failure(self, key: str, now: float | None = None) -> None:
-        now = time.time() if now is None else now
-        if key not in self._failures and len(self._failures) >= self.max_tracked:
-            # Drop entries whose window has passed; if the table is still full, forget the oldest.
-            for old in [k for k in self._failures if not self._recent(k, now)]:
-                self._failures.pop(old, None)
-            if len(self._failures) >= self.max_tracked:
-                self._failures.pop(next(iter(self._failures)))
-        self._failures.setdefault(key, []).append(now)
-
-    def clear(self, key: str) -> None:
-        self._failures.pop(key, None)
+def client_key(address: str) -> str:
+    """A keyed hash of a client address: stable for the throttle, meaningless outside it."""
+    return hmac.new(derive_key("operator-throttle"), address.encode(), hashlib.sha256).hexdigest()[
+        :32
+    ]
 
 
-throttle = LoginThrottle()
+@dataclass(frozen=True)
+class _Counts:
+    client: int
+    account: int
+
+    @property
+    def blocked(self) -> bool:
+        return self.client >= CLIENT_MAX_FAILURES or self.account >= ACCOUNT_MAX_FAILURES
+
+
+def _failure_counts(session: Session, email: str, client: str, since: datetime) -> _Counts:
+    in_window = (OperatorSignInFailure.email == email) & (OperatorSignInFailure.at > since)
+    account = session.scalar(select(func.count()).where(in_window)) or 0
+    from_client = (
+        session.scalar(
+            select(func.count()).where(in_window, OperatorSignInFailure.client_key == client)
+        )
+        or 0
+    )
+    return _Counts(client=from_client, account=account)
+
+
+def unlock(session: Session, email: str) -> int:
+    """Forget an account's recorded failures. Returns how many there were."""
+    result = session.execute(
+        delete(OperatorSignInFailure).where(OperatorSignInFailure.email == normalise_email(email))
+    )
+    return int(result.rowcount)  # type: ignore[attr-defined]
 
 
 # --- sign-in ------------------------------------------------------------------------------------
@@ -221,26 +248,62 @@ def authenticate(
     email: str,
     password: str,
     code: str,
+    client: str = "",
     now: float | None = None,
 ) -> SignInResult:
     """Password and TOTP code together. On success returns the operator; otherwise ``operator`` is
-    None and ``throttled`` says whether the refusal was because of too many recent failures."""
+    None and ``throttled`` says whether the refusal was because of too many recent failures.
+    ``client`` is ``client_key(address)`` of whoever is signing in."""
     key = normalise_email(email)
-    if throttle.blocked(key, now):
+    moment = datetime.fromtimestamp(time.time() if now is None else now, UTC)
+    since = moment - FAILURE_WINDOW
+    session.execute(delete(OperatorSignInFailure).where(OperatorSignInFailure.at <= since))
+    if _failure_counts(session, key, client, since).blocked:
         return SignInResult(None, throttled=True)
 
     operator = session.scalars(select(Operator).where(Operator.email == key)).first()
     password_ok = _verify_password(operator.password_hash if operator else None, password)
     secret = decrypt_totp_secret(operator.totp_secret_enc) if operator else None
-    # verify_totp consumes the code, so only run it when the password was right: a wrong password
-    # must not burn the real operator's current code.
-    code_ok = bool(
-        operator and secret and password_ok and verify_totp(operator.id, secret, code, now)
-    )
+    # The code is only checked, and used up, when the password was right: a wrong password must
+    # not burn the real operator's current code.
+    step = matching_totp_step(secret, code, now) if operator and secret and password_ok else None
+    code_ok = step is not None and operator is not None and _use_totp_step(session, operator, step)
     if not (operator and password_ok and code_ok and operator.disabled_at is None):
-        throttle.record_failure(key, now)
+        _record_failure(session, operator, key, client, moment, since)
         return SignInResult(None)
-    throttle.clear(key)
+    session.execute(
+        delete(OperatorSignInFailure).where(
+            OperatorSignInFailure.email == key, OperatorSignInFailure.client_key == client
+        )
+    )
     if _hasher.check_needs_rehash(operator.password_hash):
         operator.password_hash = hash_password(password)
     return SignInResult(operator)
+
+
+def _record_failure(
+    session: Session,
+    operator: Operator | None,
+    email: str,
+    client: str,
+    moment: datetime,
+    since: datetime,
+) -> None:
+    if (session.scalar(select(func.count()).select_from(OperatorSignInFailure)) or 0) < (
+        MAX_TRACKED_FAILURES
+    ):
+        session.add(OperatorSignInFailure(email=email, client_key=client, at=moment))
+        session.flush()
+    if operator is None:
+        return  # an address that is not an operator has no audit trail to write to
+    audit.record(session, operator, "operator.sign_in_failed", "operator", operator.id)
+    counts = _failure_counts(session, email, client, since)
+    if counts.client == CLIENT_MAX_FAILURES or counts.account == ACCOUNT_MAX_FAILURES:
+        audit.record(session, operator, "operator.sign_in_locked", "operator", operator.id)
+        log.warning("console sign-in locked for an operator after repeated failures")
+
+
+def revoke_sessions(session: Session, operator: Operator) -> None:
+    """End every console session of the operator: cookies of the old epoch stop working."""
+    operator.session_epoch = (operator.session_epoch or 0) + 1
+    session.flush()

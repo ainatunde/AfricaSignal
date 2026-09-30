@@ -224,3 +224,25 @@ the backup scripts and this runbook.** Until they exist, do the following.
   ```
 
   `docker compose exec db psql -U africasignal africasignal` opens a prompt.
+
+## 8. Console access and client addresses
+
+**Client addresses behind a proxy.** The rate limits (sign-in, feedback, API, "use my location" and
+console sign-in) are keyed on the reader's address. Behind a reverse proxy or CDN the connecting
+address is the proxy's, so every reader would share one limit. In the console, **Settings > Website >
+Proxies in front of the site** says how many proxies add to `X-Forwarded-For` (1 for one proxy, 2 for
+a CDN and a proxy). The app then takes that many entries from the right end of the header, which only
+your own proxies wrote; anything a reader adds further left is ignored. Leave it at 0 when nothing
+sits in front of the app, and also when the proxy runs on the same machine and uvicorn already
+handles it (its default trusts `127.0.0.1`; do not set `FORWARDED_ALLOW_IPS=*`). After deploying,
+check that two different readers get separate limits (the launch checklist has this step).
+
+**A stolen console cookie.** Signing out ends every session of that operator, in every browser. To end
+sessions of an operator who cannot sign out: `python -m africasignal.admin revoke-sessions --email ...`.
+A password change or disabling the operator also ends them.
+
+**An operator locked out.** Sign-in is stopped for a client after 5 failures in 15 minutes, and for
+everyone after 50 failures on one account in 15 minutes (refused attempts are not counted, so the lock
+never gets longer by being tried). To let the operator in at once:
+`python -m africasignal.admin unlock-operator --email ...`. Failures and lockouts are in the audit log
+(`operator.sign_in_failed`, `operator.sign_in_locked`).

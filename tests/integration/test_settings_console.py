@@ -19,7 +19,6 @@ from africasignal.models import AuditLog, Setting
 from africasignal.settings_store import SettingError
 from tests.integration.test_admin_console import (  # noqa: F401  (fixtures and helpers)
     ORIGIN,
-    _clean_state,
     client,
     make_operator,
     signed_in,

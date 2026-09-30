@@ -17,6 +17,7 @@ from africasignal.models.ops import (
     Job,
     LlmCall,
     Operator,
+    OperatorSignInFailure,
     Outbox,
     Setting,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "MeasurementReview",
     "Notification",
     "Operator",
+    "OperatorSignInFailure",
     "Outbox",
     "Place",
     "PlaceAlias",

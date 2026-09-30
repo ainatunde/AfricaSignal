@@ -1,4 +1,4 @@
-"""Operator primitives that need no database: passwords, TOTP, encryption, throttle, cookie."""
+"""Operator primitives that need no database: passwords, TOTP, encryption, cookie."""
 
 from __future__ import annotations
 
@@ -7,14 +7,7 @@ import pytest
 
 from africasignal import operators
 from africasignal.models import Operator
-from africasignal.operators import LoginThrottle
 from africasignal.web import deps
-
-
-@pytest.fixture(autouse=True)
-def _clean() -> None:
-    operators._last_step.clear()
-    operators.throttle._failures.clear()
 
 
 def test_password_policy() -> None:
@@ -44,53 +37,22 @@ def test_totp_accepts_current_and_adjacent_steps_only() -> None:
     secret = pyotp.random_base32()
     totp = pyotp.TOTP(secret)
     now = 1_800_000_000.0
-    assert operators.verify_totp(1, secret, totp.at(now), now)
-    operators._last_step.clear()
-    assert operators.verify_totp(1, secret, totp.at(now - 30), now)  # one step behind
-    operators._last_step.clear()
-    assert operators.verify_totp(1, secret, totp.at(now + 30), now)  # one step ahead
-    operators._last_step.clear()
-    assert not operators.verify_totp(1, secret, totp.at(now - 90), now)  # too old
+    step = int(now // operators.TOTP_STEP_SECONDS)
+    assert operators.matching_totp_step(secret, totp.at(now), now) == step
+    assert operators.matching_totp_step(secret, totp.at(now - 30), now) == step - 1
+    assert operators.matching_totp_step(secret, totp.at(now + 30), now) == step + 1
+    assert operators.matching_totp_step(secret, totp.at(now - 90), now) is None  # too old
 
 
 @pytest.mark.parametrize("code", ["", "12345", "1234567", "abcdef", "١٢٣٤٥٦", "12 34 5"])
 def test_totp_rejects_malformed_codes(code: str) -> None:
-    assert not operators.verify_totp(1, pyotp.random_base32(), code, 1_800_000_000.0)
-
-
-def test_totp_code_cannot_be_replayed() -> None:
-    secret = pyotp.random_base32()
-    now = 1_800_000_000.0
-    code = pyotp.TOTP(secret).at(now)
-    assert operators.verify_totp(7, secret, code, now)
-    assert not operators.verify_totp(7, secret, code, now + 5)
-    # a different operator is unaffected
-    assert operators.verify_totp(8, secret, code, now)
-
-
-def test_throttle_blocks_after_max_failures_and_recovers() -> None:
-    t = LoginThrottle(max_failures=3, window_seconds=100)
-    for i in range(3):
-        assert not t.blocked("a@example.org", now=i)
-        t.record_failure("a@example.org", now=i)
-    assert t.blocked("a@example.org", now=10)
-    assert not t.blocked("b@example.org", now=10)
-    assert not t.blocked("a@example.org", now=200)  # window passed
-
-
-def test_throttle_success_clears_and_table_is_bounded() -> None:
-    t = LoginThrottle(max_failures=2, window_seconds=100, max_tracked=3)
-    t.record_failure("a", now=0)
-    t.clear("a")
-    assert not t._failures
-    for key in "abcdef":
-        t.record_failure(key, now=1)
-    assert len(t._failures) <= 3
+    assert operators.matching_totp_step(pyotp.random_base32(), code, 1_800_000_000.0) is None
 
 
 def _operator(role: str = "admin") -> Operator:
     op = Operator(email="o@example.org", password_hash="hash-one", totp_secret_enc="x", role=role)
     op.id = 5
+    op.session_epoch = 0
     return op
 
 
@@ -124,3 +86,26 @@ def test_password_change_changes_the_fingerprint() -> None:
     a, b = _operator(), _operator()
     b.password_hash = "hash-two"
     assert deps.fingerprint(a) != deps.fingerprint(b)
+
+
+def test_a_raised_session_epoch_is_part_of_the_cookie() -> None:
+    op = _operator()
+    cookie = deps.new_session_cookie(op, now=1000)
+    op.session_epoch = 1
+    data = deps.decode_session(cookie, now=1100)
+    assert data is not None and data.epoch == 0  # the cookie keeps the epoch it was issued under
+    assert deps.decode_session(deps.new_session_cookie(op, now=1000), now=1100).epoch == 1  # type: ignore[union-attr]
+
+
+def test_a_cookie_from_before_epochs_is_not_accepted() -> None:
+    import base64
+    import json
+
+    body = (
+        base64.urlsafe_b64encode(
+            json.dumps({"op": 5, "iat": 1000, "seen": 1000, "fp": "x"}).encode()
+        )
+        .rstrip(b"=")
+        .decode()
+    )
+    assert deps.decode_session(f"{body}.{deps._sign(body)}", now=1100) is None
