@@ -25,6 +25,7 @@ from africasignal.net.netutil import USER_AGENT
 from africasignal.web import queries
 from africasignal.web.cache import TTLCache
 from africasignal.web.chart import line_chart_svg
+from africasignal.web.ratelimit import RateLimiter
 from africasignal.web.render import (
     BADGES,
     EVIDENCE_STATE_HELP,
@@ -50,6 +51,9 @@ KIND_WORDS = {
     "lga": "local government area",
     "city": "city",
 }
+
+# "Use my location" runs a spatial query and needs no cookie or sign-in: limited per client.
+locate_limiter = RateLimiter(limit=30, window_seconds=60)
 
 # Rendered situation pages, keyed by version (B11.3). Nothing personal is ever in these pages.
 _page_cache: TTLCache[str] = TTLCache(ttl_seconds=PAGE_CACHE_SECONDS)
@@ -198,9 +202,18 @@ class Coordinates(BaseModel):
 
 
 @router.post("/places/locate")
-def locate_place(body: Coordinates, db: Db) -> JSONResponse:
+def locate_place(body: Coordinates, request: Request, db: Db) -> JSONResponse:
     """Turn a position into the LGA and state that contain it. Writes nothing and logs nothing:
     the coordinates live in this function's arguments and one query, then are gone."""
+    allowed, retry_after = locate_limiter.check(
+        request.client.host if request.client else "unknown"
+    )
+    if not allowed:
+        return JSONResponse(
+            {"detail": "Too many requests."},
+            status_code=429,
+            headers={"Retry-After": str(retry_after), "Cache-Control": "no-store"},
+        )
     lga, state = queries.locate(db, body.lat, body.lon)
     return JSONResponse(
         {"lga": queries.place_summary(lga), "state": queries.place_summary(state)},

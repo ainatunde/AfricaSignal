@@ -103,7 +103,7 @@
     <ul class="evidence">
       {% for e in evidence %}
       <li>
-        <a href="{{ e.url }}" rel="noopener noreferrer">{{ e.title }}</a>
+        {% if e.url %}<a href="{{ e.url }}" rel="noopener noreferrer">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}
         <span class="meta">{{ e.source_name }} · {{ e.date|date }}{% if not e.active %} · withdrawn{% endif %}</span>
         {% if e.quote %}<blockquote>{{ e.quote }}</blockquote>{% endif %}
       </li>

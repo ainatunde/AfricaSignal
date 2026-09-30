@@ -20,6 +20,7 @@ from africasignal.web.routes import (
     legal,
     public,
 )
+from africasignal.web.security_headers import SecurityHeadersMiddleware
 
 
 def create_app() -> FastAPI:
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
     app.add_middleware(AnalyticsMiddleware)
     app.add_middleware(PublicOriginGuard)
     app.add_middleware(AdminOriginGuard)
+    app.add_middleware(SecurityHeadersMiddleware)  # outermost: every response, errors included
 
     @app.get("/healthz")
     def healthz() -> dict[str, bool]:

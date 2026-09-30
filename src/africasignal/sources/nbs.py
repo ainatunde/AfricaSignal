@@ -54,6 +54,7 @@ from africasignal.sources.base import (
     register_adapter,
 )
 from africasignal.sources.nbs_workbook import (
+    MAX_UNPACKED_BYTES,
     Column,
     NbsParseError,
     ParsedTable,
@@ -199,6 +200,10 @@ def workbook_bytes(content: bytes) -> tuple[bytes, date | None]:
         sheets = [n for n in names if n.lower().endswith((".xlsx", ".xls"))]
         if not sheets:
             raise NbsParseError(f"the ZIP holds no Excel file (it holds {names})")
+        if archive.getinfo(sheets[0]).file_size > MAX_UNPACKED_BYTES:
+            raise NbsParseError(
+                "the Excel file in the ZIP is unreasonably large and was not opened"
+            )
         stamps = [date(*i.date_time[:3]) for i in archive.infolist() if i.date_time[0] >= 1980]
         return archive.read(sheets[0]), max(stamps, default=None)
 

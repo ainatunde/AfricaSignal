@@ -51,6 +51,8 @@ def client(session: Session) -> Iterator[TestClient]:
     api_v1.rate_limiter.reset()
     account.signin_limiter.reset()
     feedback.share_limiter.reset()
+    feedback.feedback_limiter.reset()
+    public.locate_limiter.reset()
     with TestClient(app) as test_client:
         yield test_client
     public.clear_page_cache()
