@@ -1,0 +1,15 @@
+{% macro badge(b) -%}
+<span class="badge badge-{{ b.state }}"><span aria-hidden="true">{{ b.glyph }}</span> {{ b.text }}</span>
+{%- endmacro %}
+
+{% macro situation_card(c, b, show_place=False) -%}
+<li class="card">
+  <h3><a href="/s/{{ c.situation.slug }}">{{ c.version.headline }}</a></h3>
+  <p class="meta">{{ badge(b) }}
+    {% if c.effective_status == "stale" %}<span class="tag tag-stale">Out of date</span>{% endif %}
+    {% if c.effective_status == "withdrawn" %}<span class="tag tag-stale">Withdrawn</span>{% endif %}
+    {% if c.version.severity != "none" and severity_words[c.version.severity] %}<span class="tag">{{ severity_words[c.version.severity] }}</span>{% endif %}
+  </p>
+  <p class="meta">{{ c.version.scope_label }} · {{ c.version.period_label }}{% if c.version.published_at %} · published {{ c.version.published_at|date }}{% endif %}</p>
+</li>
+{%- endmacro %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Report an error · AfricaSignal{% endblock %}
+{% block head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/s/{{ situation.slug }}">{{ situation.title }}</a></p>
+<h1>Report an error</h1>
+<p class="lead">Tell us what looks wrong on this page. A person reads every report.</p>
+{% if error %}<p class="callout warn" role="alert">{{ error }}</p>{% endif %}
+<form method="post" action="/s/{{ situation.slug }}/report" class="form">
+  <label for="text">What looks wrong?</label>
+  <textarea id="text" name="text" rows="6" maxlength="2000" required>{{ text }}</textarea>
+  <label for="contact">Your email, if you want a reply (optional)</label>
+  <input id="contact" name="contact" type="email" value="{{ contact }}" autocomplete="email" maxlength="254">
+  <p class="help">We keep your email only if you type it here, and use it only to reply about this report.</p>
+  <div class="visually-hidden" aria-hidden="true"><label>Leave this empty <input name="website" tabindex="-1" autocomplete="off"></label></div>
+  <button type="submit">Send report</button>
+</form>
+{% endblock %}

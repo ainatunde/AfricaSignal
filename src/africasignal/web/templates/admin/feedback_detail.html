@@ -1,0 +1,21 @@
+{% extends "admin/base.html" %}
+{% block title %}Feedback #{{ feedback.id }}{% endblock %}
+{% block content %}
+<p><a href="/admin/feedback">All feedback</a></p>
+<h1>{{ kind_words[feedback.kind] }} · {{ situation.title }}</h1>
+<dl>
+  <dt>Received</dt><dd>{{ feedback.created_at|when }}</dd>
+  <dt>About</dt><dd><a href="/s/{{ situation.slug }}">{{ version.headline }}</a> (version {{ version.version }}, {{ version.status }})</dd>
+  <dt>Reader</dt><dd>{% if reader %}{{ reader.email }} (signed in){% else %}anonymous{% endif %}{% if feedback.contact_email %}; typed contact: {{ feedback.contact_email }}{% endif %}</dd>
+  {% if feedback.text %}<dt>Text</dt><dd><pre>{{ feedback.text }}</pre></dd>{% endif %}
+</dl>
+<form method="post" action="/admin/feedback/{{ feedback.id }}">
+  <label for="status">Status</label>
+  <select id="status" name="status">
+    {% for s in statuses %}<option value="{{ s }}"{% if feedback.status == s %} selected{% endif %}>{{ status_words[s] }}</option>{% endfor %}
+  </select>
+  <label for="resolution_note">Note (required when resolving or closing)</label>
+  <textarea id="resolution_note" name="resolution_note" rows="4" maxlength="2000" style="width:100%;max-width:36rem">{{ feedback.resolution_note or "" }}</textarea>
+  <p><button type="submit">Save</button></p>
+</form>
+{% endblock %}

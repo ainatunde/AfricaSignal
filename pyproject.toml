@@ -20,6 +20,10 @@ dependencies = [
     "openpyxl>=3.1,<4",
     "rapidfuzz>=3.9,<4",
     "pyyaml>=6,<7",
+    "argon2-cffi>=23.1,<26",
+    "pyotp>=2.9,<3",
+    "cryptography>=43",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +42,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"africasignal.web" = ["templates/**/*", "static/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

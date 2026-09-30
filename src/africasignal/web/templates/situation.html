@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% from "_badge.html" import badge as badge_tag %}
+{% block title %}{{ version.headline }} · AfricaSignal{% endblock %}
+{% block description %}{{ version.scope_label }} · {{ version.period_label }}. {{ b.text }}.{% endblock %}
+{% block content %}
+<article>
+  <p class="crumbs"><a href="/places/{{ place.code }}">{{ place.name }}</a> · {{ situation.topic|capitalize }}</p>
+  <h1>{{ version.headline }}</h1>
+  <p class="meta">{{ badge_tag(b) }}
+    {% if status == "stale" %}<span class="tag tag-stale">Out of date</span>{% endif %}
+  </p>
+  <p class="scope">{{ version.scope_label }} · {{ version.period_label }}</p>
+
+  {% if status == "withdrawn" %}
+  <div class="callout warn" role="note">
+    <strong>This assessment was withdrawn.</strong>
+    {% if version.change_summary %}{{ version.change_summary }}{% endif %}
+  </div>
+  {% elif status == "stale" %}
+  <div class="callout warn" role="note">
+    <strong>Out of date: last checked {{ version.last_checked_at|date }}.</strong>
+    A newer figure may exist. We are checking again.
+  </div>
+  {% endif %}
+
+  {% if version.evidence_state == "insufficient" %}
+  <div class="callout" role="note">
+    <strong>Not enough evidence.</strong> {{ help }}
+  </div>
+  {% endif %}
+
+  {% if summary %}
+  <section aria-labelledby="h-facts">
+    <h2 id="h-facts">Key facts</h2>
+    <table class="summary">
+      <thead><tr>
+        <th scope="col">{{ summary.current.period or "Latest" }}</th>
+        <th scope="col">Change vs last month</th>
+        <th scope="col">Change vs last year</th>
+      </tr></thead>
+      <tbody><tr>
+        <td class="big">{{ summary.current|fact_value }}</td>
+        <td>{% if summary.mom %}{{ summary.mom|fact_value }}{% else %}Not available{% endif %}</td>
+        <td>{% if summary.yoy %}{{ summary.yoy|fact_value }}{% else %}Not available{% endif %}</td>
+      </tr></tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  {% if chart %}
+  <section aria-labelledby="h-chart">
+    <h2 id="h-chart">Price history</h2>
+    <p class="help">Monthly values, {{ chart_from }} to {{ chart_to }} (up to the last 13 months). A gap means no figure was published for that month.</p>
+    {{ chart|safe }}
+  </section>
+  {% endif %}
+
+  {% if facts %}
+  <section aria-labelledby="h-all">
+    <h2 id="h-all">All figures</h2>
+    <table>
+      <thead><tr><th scope="col">Measure</th><th scope="col">Value</th><th scope="col">Period</th><th scope="col">Source</th></tr></thead>
+      <tbody>
+      {% for f in facts %}
+        <tr><th scope="row">{{ f.label }}</th><td>{{ f|fact_value }}</td><td>{{ f.period or "" }}</td><td>{{ f.source_label or "" }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+  {% endif %}
+
+  {% if version.explanation and version.evidence_state != "insufficient" %}
+  <section aria-labelledby="h-why">
+    <h2 id="h-why">Why this matters</h2>
+    <p>{{ version.explanation }}</p>
+  </section>
+  {% endif %}
+
+  {% if version.possible_factors %}
+  <section aria-labelledby="h-factors">
+    <h2 id="h-factors">Possible factors</h2>
+    <p class="help">These are things that can move this kind of price. A factor is marked as supported only when a report we collected links it to this change.</p>
+    <ul class="plain">
+      {% for f in version.possible_factors %}
+      <li>{{ f.factor }}: {% if f.status == "supported" %}<strong>supported by a report</strong>{% else %}<span class="muted">not checked</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if version.unknowns %}
+  <section aria-labelledby="h-unknown">
+    <h2 id="h-unknown">What we don't know</h2>
+    <ul>
+      {% for u in version.unknowns %}<li>{{ u }}</li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <section aria-labelledby="h-evidence">
+    <h2 id="h-evidence">Evidence</h2>
+    {% if evidence %}
+    <ul class="evidence">
+      {% for e in evidence %}
+      <li>
+        <a href="{{ e.url }}" rel="noopener noreferrer">{{ e.title }}</a>
+        <span class="meta">{{ e.source_name }} · {{ e.date|date }}{% if not e.active %} · withdrawn{% endif %}</span>
+        {% if e.quote %}<blockquote>{{ e.quote }}</blockquote>{% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p>No source documents are attached to this version.</p>
+    {% endif %}
+  </section>
+
+  <section class="footline" aria-label="About this version">
+    <p>Last checked {{ version.last_checked_at|date }}{% if version.valid_until %} · valid until {{ version.valid_until|date }}{% endif %} · version {{ version.version }}
+      · <a href="/s/{{ situation.slug }}/history">version history</a></p>
+  </section>
+
+  <div class="actions">
+    <a class="button" href="/s/{{ situation.slug }}?ref=share" data-share="{{ share_url }}" data-beacon="/s/{{ situation.slug }}/share" rel="nofollow">Share this page</a>
+    <form method="post" action="/s/{{ situation.slug }}/follow"><button class="secondary" type="submit">Follow</button></form>
+    <a class="button secondary" href="/s/{{ situation.slug }}/report">Report an error</a>
+  </div>
+
+  <form method="post" action="/s/{{ situation.slug }}/useful" class="useful" aria-labelledby="h-useful">
+    <p id="h-useful"><strong>Was this useful?</strong></p>
+    <button class="secondary" type="submit" name="answer" value="yes">Yes</button>
+    <button class="secondary" type="submit" name="answer" value="no">No</button>
+  </form>
+</article>
+{% endblock %}
+{% block scripts %}<script src="/static/site.js" defer></script>{% endblock %}

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% from "_badge.html" import badge as badge_tag %}
+{% block title %}Following · AfricaSignal{% endblock %}
+{% block head %}<meta name="robots" content="noindex, nofollow">{% endblock %}
+{% block content %}
+<h1>Following</h1>
+{% if notice %}<p class="callout" role="status">{{ notice }}</p>{% endif %}
+
+<section aria-labelledby="h-updates">
+  <h2 id="h-updates">New since you last looked</h2>
+  {% if updates %}
+  <ul class="cards">
+    {% for n, v, s in updates %}
+    <li class="card">
+      <h3><a href="/s/{{ s.slug }}">{{ v.headline }}</a></h3>
+      <p class="meta"><span class="tag">{{ kind_words[n.kind] }}</span> {{ v.scope_label }} · {{ v.period_label }}{% if v.published_at %} · published {{ v.published_at|date }}{% endif %}</p>
+      {% if v.change_summary and n.kind != "new_version" %}<p>{{ v.change_summary }}</p>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  <form method="post" action="/following/read"><button class="secondary" type="submit">Mark all as read</button></form>
+  {% else %}
+  <p>Nothing new.</p>
+  {% endif %}
+</section>
+
+<section aria-labelledby="h-list">
+  <h2 id="h-list">Situations you follow</h2>
+  {% if items %}
+  <ul class="cards">
+    {% for item in items %}
+    <li class="card">
+      {% if item.current %}
+      <h3><a href="/s/{{ item.situation.slug }}">{{ item.current.version.headline }}</a></h3>
+      <p class="meta">{{ badge_tag(item.badge) }}
+        {% if item.current.effective_status == "stale" %}<span class="tag tag-stale">Out of date</span>{% endif %}
+        {% if item.current.effective_status == "withdrawn" %}<span class="tag tag-stale">Withdrawn</span>{% endif %}</p>
+      <p class="meta">{{ item.current.version.scope_label }} · {{ item.current.version.period_label }}</p>
+      {% else %}
+      <h3>{{ item.situation.title }}</h3>
+      <p class="meta">Nothing is published for this yet.</p>
+      {% endif %}
+      <form method="post" action="/s/{{ item.situation.slug }}/unfollow"><button class="secondary" type="submit">Unfollow</button></form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>You are not following anything yet. Open a situation and press Follow, for example from <a href="/explore">Explore</a>.</p>
+  {% endif %}
+</section>
+<p><a href="/account">Your account and weekly email</a></p>
+{% endblock %}

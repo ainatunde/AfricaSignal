@@ -29,6 +29,48 @@ pytest   # needs PostgreSQL 16 + PostGIS; set DATABASE_URL (default: localhost a
 source until an operator approves its permission. See the notes at the top of `config/*.yaml` for
 what is still unverified.
 
+## Operator console
+
+The console lives at `/admin` (password + authenticator code). There is no public sign-up: create
+the first operator on the host.
+
+```sh
+python -m africasignal.admin create-operator --email you@example.org --role admin
+# prompts for a password (12+ characters) and prints the TOTP secret once; add it to an authenticator app
+python -m africasignal.admin disable-operator --email you@example.org   # or enable-operator
+```
+
+`admin` operators approve source permissions, publish new versions and resume sources; `editor`
+operators can view everything and pause a source. Every change writes an `audit_log` row (see
+`/admin/audit`). Behind a TLS-terminating proxy, set `ADMIN_TRUSTED_ORIGINS` to the public origin
+(for example `https://console.example.org`) so form posts pass the origin check. `SECRET_KEY`
+signs the session cookie and encrypts TOTP secrets and the secrets saved under Settings, so
+changing it signs everyone out and makes all of those unreadable (recreate operators, re-enter the
+secrets). Scripts on the host can read a setting with
+`python -m africasignal.admin get-setting backup_s3_bucket` (add `--reveal` for a secret).
+
+## Accounts, feedback and metrics
+
+Readers sign in with an emailed link (`/signin`). The link opens `/signin/verify`, which only shows
+a button; the token is spent by the POST behind it, because mail scanners open links. A signed-in
+reader can follow situations (`/following`), see in-site notifications, choose the weekly email,
+download their data and delete their account (`/account`). `/unsubscribe` works the same way and
+also answers a mail client's one-click POST.
+
+Feedback ("Was this useful?", "Report an error") is limited to 10 submissions per visitor per day.
+The site records page views, follows, feedback, share clicks and (for readers who opted in) digest
+opens as `event` rows keyed by a random `anon_id` cookie. No IP address or user agent is stored,
+crawlers and link previews are not counted, and events are deleted after 13 months.
+
+In the operator console, **Feedback** is the inbox (status and a resolution note, audited) and
+**Metrics** shows the plan's D1 demand-test numbers by ISO week against the proposed thresholds.
+Two numbers come from outside the app and are entered there by an admin: WhatsApp channel
+followers and the monthly infrastructure bill.
+
+The email provider, sender, API key and public address are read from the console **Settings** page
+on every use (environment variables are the fallback). With no provider configured, development
+logs mail and every other environment leaves it waiting in the outbox.
+
 ## Load places
 
 ```sh
@@ -41,9 +83,12 @@ pinned by SHA-256 in `src/africasignal/places/load.py`. Extra names live in
 
 ## Configuration
 
-Set through environment variables (see `src/africasignal/config.py`). With `ENV=staging` or
-`ENV=production`, startup fails with `RuntimeError` if `DATABASE_URL`, `S3_*`, `ANTHROPIC_API_KEY`,
-`EMAIL_*` or `SECRET_KEY` is missing.
+Only `DATABASE_URL` and `SECRET_KEY` must be environment variables (with `ENV=staging` or
+`ENV=production`, startup fails with `RuntimeError` if either is missing). Everything else an
+operator can set in the console under **Settings** (Anthropic key, public address, email provider
+and sender, evidence and backup storage); an environment variable of the same name in capitals
+(`ANTHROPIC_API_KEY`, `PUBLIC_BASE_URL`, `S3_BUCKET`, ...) is used when nothing is saved there.
+See `src/africasignal/settings_store.py` for the list.
 
 ## NBS price data
 
@@ -58,3 +103,8 @@ Real files from both are saved in `tests/fixtures/nbs` with their URLs, dates an
 (vintages, restatements, the range-check queue) are described at the top of `sources/nbs.py`.
 Assessments (`publish/situations.py`) are computed in `assess/price_change.py` and are stored as
 drafts until the publication policy decides them.
+
+Email: `EMAIL_PROVIDER` is `console` (logs, the development default), `postmark` or `resend`, with
+`EMAIL_API_KEY` and `EMAIL_FROM`. `PUBLIC_BASE_URL` is the origin used in links inside emails.
+The provider is chosen behind `publish/email.py`; the Postmark and Resend adapters have only been
+tested against a mocked transport.

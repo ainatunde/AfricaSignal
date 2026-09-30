@@ -1,0 +1,41 @@
+{% extends "admin/base.html" %}
+{% block title %}Feedback{% endblock %}
+{% block content %}
+<h1>Feedback</h1>
+<p class="muted">First response target: 3 working days. The 200 newest that match.</p>
+<form method="get" action="/admin/feedback">
+  <label for="show">Status</label>
+  <select id="show" name="show">
+    <option value="open"{% if show == "open" %} selected{% endif %}>Open (received, triaged, investigating)</option>
+    <option value="all"{% if show == "all" %} selected{% endif %}>All</option>
+    {% for s in statuses %}<option value="{{ s }}"{% if show == s %} selected{% endif %}>{{ status_words[s] }}</option>{% endfor %}
+  </select>
+  <label for="kind">Kind</label>
+  <select id="kind" name="kind">
+    <option value="reports"{% if kind == "reports" %} selected{% endif %}>Error reports</option>
+    <option value="all"{% if kind == "all" %} selected{% endif %}>All kinds</option>
+    <option value="useful_yes"{% if kind == "useful_yes" %} selected{% endif %}>Useful: yes</option>
+    <option value="useful_no"{% if kind == "useful_no" %} selected{% endif %}>Useful: no</option>
+  </select>
+  <p><button type="submit">Filter</button></p>
+</form>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">When</th><th scope="col">Kind</th><th scope="col">Situation</th><th scope="col">Text</th><th scope="col">Reply to</th><th scope="col">Status</th></tr></thead>
+  <tbody>
+  {% for f, s in rows %}
+  <tr>
+    <td><a href="/admin/feedback/{{ f.id }}">{{ f.created_at|when }}</a></td>
+    <td>{{ kind_words[f.kind] }}</td>
+    <td>{{ s.title }}</td>
+    <td>{{ (f.text or "")[:140] }}{% if f.text and f.text|length > 140 %}…{% endif %}</td>
+    <td>{% if f.contact_email or f.user_id %}yes{% else %}<span class="muted">no</span>{% endif %}</td>
+    <td>{{ status_words[f.status] }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6">Nothing here.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

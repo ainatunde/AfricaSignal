@@ -14,6 +14,8 @@ from botocore.client import Config
 from botocore.exceptions import ClientError
 
 from africasignal.config import get_settings
+from africasignal.db import session_scope
+from africasignal.settings_store import StorageConfig, storage_config
 
 
 class ObjectStore(Protocol):
@@ -90,6 +92,22 @@ class S3Store:
         self._client.delete_object(Bucket=self._bucket, Key=key)
 
 
-@lru_cache
+@lru_cache(maxsize=4)
+def _store_for(config: StorageConfig) -> S3Store:
+    client = boto3.client(
+        "s3",
+        endpoint_url=config.endpoint_url or None,
+        aws_access_key_id=config.access_key_id,
+        aws_secret_access_key=config.secret_access_key,
+        region_name="auto",
+        config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+    )
+    return S3Store(client, config.bucket)
+
+
 def get_store() -> S3Store:
-    return S3Store.from_settings()
+    """The evidence store, from the console settings (environment variables as the fallback).
+    Read on each call, so a change in the console applies without a restart."""
+    with session_scope() as session:
+        config = storage_config(session)
+    return _store_for(config)

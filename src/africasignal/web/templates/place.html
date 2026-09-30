@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "_badge.html" import situation_card %}
+{% block title %}{{ place.name }} · AfricaSignal{% endblock %}
+{% block content %}
+<h1>{{ place.name }}</h1>
+{% if place.kind in ("lga", "city") %}
+<p class="callout" role="note">We publish figures for {{ scope_place.name if scope_place else "the state" }} as a whole, not for {{ place.name }} itself. Prices where you live can differ from the state average.</p>
+{% endif %}
+
+<section aria-labelledby="h-here">
+  <h2 id="h-here">{% if scope_place and scope_place.id != place.id %}State average: {{ scope_place.name }}{% elif place.kind == "country" %}Nigeria as a whole{% else %}In {{ place.name }}{% endif %}</h2>
+  {% if local_items %}
+  <ul class="cards">{% for c, b in local_items %}{{ situation_card(c, b) }}{% endfor %}</ul>
+  {% else %}
+  <p>No published figures for this place yet. <a href="/coverage">See what we cover</a>.</p>
+  {% endif %}
+</section>
+
+{% if national_items %}
+<section aria-labelledby="h-ng">
+  <h2 id="h-ng">Across Nigeria</h2>
+  <ul class="cards">{% for c, b in national_items %}{{ situation_card(c, b) }}{% endfor %}</ul>
+</section>
+{% endif %}
+{% endblock %}
