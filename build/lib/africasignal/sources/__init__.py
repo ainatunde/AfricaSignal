@@ -1,1 +1,0 @@
-"""Source registry and adapters."""
