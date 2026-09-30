@@ -28,6 +28,7 @@ log = logging.getLogger("africasignal.evidence.capture")
 
 # Excerpt length when a source has no quotation limit (``max_quote_chars`` is null).
 DEFAULT_EXCERPT_CHARS = 500
+MAX_BYLINE_CHARS = 200  # a feed's author field is untrusted text
 
 Fetcher = Callable[..., FetchResult]
 
@@ -56,6 +57,7 @@ def capture(
     fetch: Fetcher = fetch_document,
     published_at: datetime | None = None,
     title: str | None = None,
+    byline: str | None = None,
     now: datetime | None = None,
 ) -> EvidenceDocument:
     """Fetch ``url`` for ``source`` and return its evidence record.
@@ -83,6 +85,7 @@ def capture(
         content_type=result.headers.get("content-type"),
         published_at=published_at,
         title=title,
+        byline=byline,
         now=now,
     )
 
@@ -99,6 +102,7 @@ def record_document(
     final_url: str | None = None,
     published_at: datetime | None = None,
     title: str | None = None,
+    byline: str | None = None,
     now: datetime | None = None,
 ) -> EvidenceDocument:
     """Store ``content`` and record it as evidence for ``source``.
@@ -140,6 +144,7 @@ def record_document(
         storage_key=key,
         mime=mime,
         title=title or extracted.title,
+        byline=(byline or "").strip()[:MAX_BYLINE_CHARS] or None,
         text_content=extracted.text if permission.may_store_full_text else None,
         excerpt=_excerpt(extracted.text, permission),
         simhash=simhash(extracted.text) if extracted.text else None,

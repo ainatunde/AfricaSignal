@@ -54,7 +54,7 @@ from africasignal.assess.corroboration import (
     ClaimPoint,
     claim_text,
     document_ids,
-    independent_origins,
+    independent_groups,
     is_news,
     is_official,
 )
@@ -169,6 +169,9 @@ def _fact(
     place_code: str,
     claims: list[ClaimPoint],
 ) -> dict[str, Any]:
+    outlets = sorted({c.source_name for c in claims})
+    # News is named by outlet, so readers see who reported it; a primary document by its title.
+    names = outlets if all(is_news(c) for c in claims) else sorted({c.origin_label for c in claims})
     return {
         "label": label,
         "value": float(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
@@ -177,7 +180,8 @@ def _fact(
         "unit": unit,
         "period": period,
         "place_code": place_code,
-        "source_label": ", ".join(sorted({c.origin_label for c in claims})),
+        "source_label": ", ".join(names),
+        "outlets": outlets,
         "evidence_ids": document_ids(claims),
     }
 
@@ -438,8 +442,8 @@ def _evidence_state(
         facts.append(
             _fact(
                 "Independent reports that the rate is applied",
-                len(independent_origins(implementing)),
-                "reporting origins",
+                len(independent_groups(implementing)),
+                "independent outlets",
                 f"from {_day(current.effective)}",
                 place,
                 implementing,

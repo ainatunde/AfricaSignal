@@ -58,7 +58,7 @@ from africasignal.assess.corroboration import (
     claim_text,
     document_ids,
     in_window,
-    independent_origins,
+    independent_groups,
     is_news,
     is_official,
     matches_any,
@@ -276,7 +276,11 @@ def _supported_factors(inputs: PriceInputs) -> list[dict[str, Any]]:
     """Possible factors, each ``supported`` only by a valid claim that names it (spec B8.2)."""
     cur = inputs.current
     start, end = add_months(cur.period_start, -1), month_end(add_months(cur.period_start, 1))
-    nearby = [c for c in inputs.claims if in_window(c, start, end)]
+    # Only claims from vetted sources can support a factor; an unvetted site could otherwise plant
+    # its own explanation.
+    nearby = [
+        c for c in inputs.claims if (is_news(c) or is_official(c)) and in_window(c, start, end)
+    ]
     factors: list[dict[str, Any]] = []
     for spec in inputs.factors:
         linked = [c for c in nearby if matches_any(claim_text(c), spec.keywords)]
@@ -448,13 +452,13 @@ def compute_price_change(inputs: PriceInputs) -> PriceAssessment:
     facts += national_facts
     used += national_used
 
-    origins = independent_origins(weighed.corroborating)
-    if origins:
+    groups = independent_groups(weighed.corroborating)
+    if groups:
         facts.append(
             _claim_fact(
                 "Independent reports",
-                len(origins),
-                "reporting origins",
+                len(groups),
+                "independent outlets",
                 weighed.corroborating,
                 inputs.place_code,
                 period,
@@ -565,12 +569,14 @@ def _claim_fact(
     place_code: str,
     period: str,
 ) -> dict[str, Any]:
+    outlets = sorted({c.source_name for c in claims})  # shown on the page beside the figure
     return {
         "label": label,
         "value": value,
         "unit": unit,
         "period": period,
         "place_code": place_code,
-        "source_label": ", ".join(sorted({c.origin_label for c in claims})),
+        "source_label": ", ".join(outlets),
+        "outlets": outlets,
         "evidence_ids": document_ids(claims),
     }

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from sqlalchemy import select
@@ -31,7 +32,8 @@ from africasignal.publish.policy_situations import (
 )
 from africasignal.publish.situations import assess_situation
 from africasignal.publish.versions import apply_policy, release_held
-from tests.integration.test_origins import WIRE_STORY, _doc, _source
+from tests.integration.outlet_support import approved_source
+from tests.integration.test_origins import WIRE_STORY, _doc
 
 IKEJA = "electricity_tariff_band_a:ikeja-electric"
 EKO = "electricity_tariff_band_a:eko"
@@ -41,6 +43,11 @@ ORDER = (
     "order for Ikeja Electric. Band A customers will pay a tariff of N209.50 per kWh from "
     "1 September 2026, up from N200.00 per kWh in August 2026, following the review of costs."
 )
+
+
+def vetted(session: Session, slug: str, **kwargs: Any) -> Source:
+    """A source approved long enough before the assessment clock to be trusted."""
+    return approved_source(session, slug, now=NOW, **kwargs)
 
 
 @pytest.fixture
@@ -59,7 +66,7 @@ def places(session: Session) -> dict[str, int]:
 
 @pytest.fixture
 def nerc(session: Session) -> Source:
-    source = _source(session, "nerc", kind="regulator")
+    source = vetted(session, "nerc", kind="regulator")
     source.owner = "Nigerian Electricity Regulatory Commission"
     session.flush()
     return source
@@ -67,7 +74,7 @@ def nerc(session: Session) -> Source:
 
 @pytest.fixture
 def outlet(session: Session) -> Source:
-    return _source(session, "punch")
+    return vetted(session, "punch")
 
 
 def order(
@@ -89,7 +96,7 @@ def order(
         evidence_document_id=doc.id,
         claim_type="policy_statement",
         text=claim_text or f"Band A tariff is N{value} per kWh.",
-        passage=f"N{value}",
+        passage=(claim_text or f"Band A tariff is N{value} per kWh").rstrip("."),
         policy_series=series,
         stated_value=Decimal(value),
         stated_unit="NGN/kWh",
@@ -267,7 +274,7 @@ def test_syndicated_copies_of_the_report_are_one_origin(
     order(session, nerc, "209.50", date(2026, 9, 1))
     order(session, nerc, "200.00", date(2026, 8, 1), text=ORDER + " (Aug)")
     for slug in ("punch", "vanguard", "thisday"):
-        report(session, _source(session, slug), text=WIRE_STORY + " (Reuters)")
+        report(session, vetted(session, slug), text=WIRE_STORY + " (Reuters)")
     ensure_policy_situations(session, {IKEJA})
     version = assess(session, situation(session))
     fact = next(f for f in version.facts if f["label"].startswith("Independent reports"))
@@ -433,3 +440,107 @@ def test_every_fact_is_backed_by_active_documents(
         session.scalars(select(EvidenceDocument.id).where(EvidenceDocument.status == "active"))
     )
     assert all(f["evidence_ids"] and set(f["evidence_ids"]) <= active for f in version.facts)
+
+
+# --- look-alike sources (security review S-08) -------------------------------------------------
+
+
+def _stories(n: int) -> list[str]:
+    """Different wording each time, so SimHash clustering cannot merge them into one origin."""
+    return [
+        f"Report {i}: " + " ".join(f"{word}{i}x{j}" for j, word in enumerate(["tariff"] * 60))
+        for i in range(n)
+    ]
+
+
+def _two_orders(session: Session, nerc: Source) -> None:
+    order(session, nerc, "209.50", date(2026, 9, 1))
+    order(session, nerc, "200.00", date(2026, 8, 1), text=ORDER + " (Aug)")
+
+
+def test_a_swarm_of_unapproved_look_alike_sites_does_not_corroborate(
+    session: Session, places: dict[str, int], nerc: Source
+) -> None:
+    _two_orders(session, nerc)
+    for i, story in enumerate(_stories(6)):
+        fake = approved_source(
+            session, f"fake-{i}", now=NOW, approved_days_ago=None, home_url=f"https://fake{i}.ng"
+        )
+        report(session, fake, text=story)
+    ensure_policy_situations(session, {IKEJA})
+    version = assess(session, situation(session))
+    assert version.evidence_state == "reported"
+    assert "No independent report that this rate is being applied" in version.unknowns
+
+
+def test_outlets_inside_the_probation_period_do_not_corroborate(
+    session: Session, places: dict[str, int], nerc: Source
+) -> None:
+    _two_orders(session, nerc)
+    for i, story in enumerate(_stories(3)):
+        new = vetted(session, f"new-{i}", approved_days_ago=29, home_url=f"https://new{i}.ng")
+        report(session, new, text=story)
+    ensure_policy_situations(session, {IKEJA})
+    assert assess(session, situation(session)).evidence_state == "reported"
+
+
+def test_outlets_of_one_owner_count_as_one_voice(
+    session: Session, places: dict[str, int], nerc: Source
+) -> None:
+    _two_orders(session, nerc)
+    for i, story in enumerate(_stories(4)):
+        site = vetted(
+            session, f"network-{i}", owner="Shady Media Ltd", home_url=f"https://net{i}.example.ng"
+        )
+        report(session, site, text=story)
+    ensure_policy_situations(session, {IKEJA})
+    version = assess(session, situation(session))
+    fact = next(f for f in version.facts if f["label"].startswith("Independent reports"))
+    assert version.evidence_state == "corroborated" and fact["value"] == 1
+
+
+def test_separate_outlets_count_separately_and_are_named(
+    session: Session, places: dict[str, int], nerc: Source
+) -> None:
+    _two_orders(session, nerc)
+    for slug, story in zip(("punch", "vanguard"), _stories(2), strict=True):
+        report(
+            session,
+            vetted(session, slug, owner=f"{slug} publishers", home_url=f"https://{slug}.ng"),
+            text=story,
+        )
+    ensure_policy_situations(session, {IKEJA})
+    version = assess(session, situation(session))
+    fact = next(f for f in version.facts if f["label"].startswith("Independent reports"))
+    assert fact["value"] == 2
+    assert sorted(fact["outlets"]) == ["Punch", "Vanguard"]
+    assert fact["source_label"] == "Punch, Vanguard"
+
+
+def test_an_unapproved_regulator_cannot_suspend_the_order(
+    session: Session, places: dict[str, int], nerc: Source
+) -> None:
+    _two_orders(session, nerc)
+    rogue = approved_source(session, "rogue-gov", kind="regulator", now=NOW, approved_days_ago=None)
+    order(
+        session,
+        rogue,
+        "209.50",
+        date(2026, 9, 1),
+        text="NERC suspends the September 2026 Band A tariff order pending review.",
+        published=datetime(2026, 9, 15, 9, tzinfo=UTC),
+        claim_text="NERC suspends the new Band A tariff.",
+    )
+    ensure_policy_situations(session, {IKEJA})
+    assert assess(session, situation(session)).evidence_state != "disputed"
+
+
+def test_wording_is_read_from_the_passage_not_the_model_text(
+    session: Session, places: dict[str, int], nerc: Source, outlet: Source
+) -> None:
+    _two_orders(session, nerc)
+    news = report(session, outlet, claim_text="Nothing was said about the tariff here.")
+    news.text = "Customers are now being charged the new Band A rate."
+    session.flush()
+    ensure_policy_situations(session, {IKEJA})
+    assert assess(session, situation(session)).evidence_state == "reported"

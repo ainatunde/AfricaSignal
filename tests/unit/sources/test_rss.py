@@ -332,3 +332,24 @@ def test_a_200_page_that_is_not_a_feed_fails() -> None:
 def test_loading_the_handlers_registers_the_rss_adapter() -> None:
     handlers.load_all()
     assert isinstance(base.get_adapter("rss"), RssAdapter)
+
+
+def test_an_entrys_author_is_its_byline() -> None:
+    feed = xml_feed(
+        "<item><title>Petrol price</title><link>https://example.ng/a</link>"
+        "<author>desk@example.ng (Ada Obi)</author><description>d</description></item>",
+        item("No author", "https://example.ng/b"),
+    )
+    entries = parse_feed(feed, "https://example.ng/feed")
+    assert [e["byline"] for e in entries] == ["desk@example.ng (Ada Obi)", None]
+
+
+def test_selected_items_carry_the_byline() -> None:
+    feed = xml_feed(
+        "<item><title>Petrol price rises</title><link>https://example.ng/a</link>"
+        "<author>Reuters</author><description>d</description></item>"
+    )
+    site = Source(slug="x", name="x", home_url="https://example.ng", max_requests_per_hour=60)
+    matcher = KeywordMatcher({"energy": ["petrol"]})
+    items, _, _ = select_items(parse_feed(feed, "https://example.ng/feed"), site, matcher)
+    assert [i.byline for i in items] == ["Reuters"]

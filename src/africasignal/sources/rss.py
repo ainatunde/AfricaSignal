@@ -144,6 +144,7 @@ def parse_feed(content: bytes, feed_url: str) -> list[dict[str, Any]]:
                 "title": _plain(entry.get("title")) or None,
                 "summary": _plain(entry.get("summary")),
                 "published_at": _entry_time(entry),
+                "byline": _plain(entry.get("author")) or None,
             }
         )
     return entries
@@ -174,7 +175,12 @@ def select_items(
             not_matching += 1
             continue
         items.append(
-            DiscoveredItem(url=url, title=entry["title"], published_at=entry["published_at"])
+            DiscoveredItem(
+                url=url,
+                title=entry["title"],
+                published_at=entry["published_at"],
+                byline=entry.get("byline"),
+            )
         )
     return items, not_matching, off_site
 

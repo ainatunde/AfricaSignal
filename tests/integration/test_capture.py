@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from africasignal.evidence.capture import (
     DEFAULT_EXCERPT_CHARS,
+    MAX_BYLINE_CHARS,
     CaptureError,
     SourceNotApproved,
     capture,
@@ -113,6 +114,21 @@ def test_capture_stores_raw_bytes_and_a_row(session: Session, store: S3Store, ne
     assert doc.canonical_url == "https://punch.example/a"
     assert doc.title == HEADLINE
     assert doc.simhash is not None
+
+
+def test_a_byline_is_stored_trimmed_and_capped(
+    session: Session, store: S3Store, news: Source
+) -> None:
+    fetcher = FakeFetcher()
+    fetcher.page("https://punch.example/a", HTML.encode())
+    fetcher.page("https://punch.example/b", HTML.encode() + b"<!-- b -->")
+    fetcher.page("https://punch.example/c", HTML.encode() + b"<!-- c -->")
+    named = capture(session, store, news, "https://punch.example/a", fetch=fetcher, byline="  Jo  ")
+    long = capture(session, store, news, "https://punch.example/b", fetch=fetcher, byline="x" * 900)
+    blank = capture(session, store, news, "https://punch.example/c", fetch=fetcher, byline="  ")
+    assert named.byline == "Jo"
+    assert long.byline == "x" * MAX_BYLINE_CHARS
+    assert blank.byline is None
 
 
 def test_fetch_uses_the_sources_request_budget(
