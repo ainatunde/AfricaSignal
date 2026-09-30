@@ -187,7 +187,9 @@ class NbsImport:
         return self.inserted + self.revised + self.historic
 
     def as_result(self) -> ProcessResult:
-        return ProcessResult(measurements=self.measurements, notes=self.notes)
+        return ProcessResult(
+            measurements=self.measurements, notes=self.notes, touched=set(self.touched)
+        )
 
 
 class _Places:

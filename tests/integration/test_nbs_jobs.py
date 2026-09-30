@@ -15,15 +15,18 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from africasignal.evidence.capture import capture
 from africasignal.jobs import handlers, queue
+from africasignal.jobs.handlers import assess_situation as assess_situation_module
 from africasignal.jobs.handlers import fetch_source as fetch_source_module
 from africasignal.jobs.handlers import import_nbs_file as import_nbs_file_module
 from africasignal.jobs.handlers import process_document as process_document_module
 from africasignal.jobs.worker import Worker
 from africasignal.models import (
+    AssessmentVersion,
     EvidenceDocument,
     Measurement,
     Place,
     Series,
+    Situation,
     Source,
     SourcePermission,
 )
@@ -91,6 +94,7 @@ def wired(monkeypatch: pytest.MonkeyPatch, store: S3Store, site: Site) -> None:
     for kind, fn in (
         ("fetch_source", fetch_source_module.fetch_source),
         ("process_document", process_document_module.process_document),
+        ("assess_situation", assess_situation_module.assess_situation),
         ("import_nbs_file", import_nbs_file_module.import_nbs_file),
     ):
         monkeypatch.setitem(handlers.HANDLERS, kind, fn)
@@ -127,7 +131,7 @@ def _setup(factory: sessionmaker[Session], *, approved: bool = True) -> int:
         return source.id
 
 
-def _drain(factory: sessionmaker[Session], limit: int = 60) -> int:
+def _drain(factory: sessionmaker[Session], limit: int = 600) -> int:
     worker = Worker(factory, "test-worker")
     ran = 0
     while ran < limit and worker.run_once():
@@ -166,11 +170,27 @@ def test_fetching_the_source_imports_every_release_in_the_window_and_then_goes_q
     _enqueue(factory, "fetch_source", {"source_id": source_id})
     _drain(factory)
 
-    assert _job_states(factory) == {("fetch_source", "done"): 1, ("process_document", "done"): 10}
+    # Each of the 10 documents queues an assessment for every situation it touched: two jobs for
+    # each of the 5 x 38 petrol/diesel/kerosene/gas situations and the 4 national food ones. The
+    # second job for a situation finds the inputs unchanged.
+    assert _job_states(factory) == {
+        ("fetch_source", "done"): 1,
+        ("process_document", "done"): 10,
+        ("assess_situation", "done"): 2 * (5 * 38 + 4),
+    }
     # Five state-table items (190 rows each: September, October, October 2023 for 38 places) and
     # four food items (September 3 values, October adds 2 new).
     assert _count(factory, Measurement) == 5 * 190 + 4 * 5
     assert _count(factory, EvidenceDocument) == 10
+    assert _count(factory, Situation) == 5 * 38 + 4
+    with factory() as s:
+        versions = s.scalars(select(AssessmentVersion)).all()
+    assert len(versions) == 5 * 38 + 4  # one per situation: the repeat jobs changed nothing
+    # The data is from 2024; the worker runs on the real clock, so every assessment is
+    # "insufficient evidence" and a draft until the publication policy (AS-012) decides.
+    assert {(v.status, v.evidence_state, v.severity) for v in versions} == {
+        ("draft", "insufficient", "none")
+    }
     src = _source(factory, source_id)
     assert src.health == "healthy" and src.last_success_at is not None and src.last_error is None
     with factory() as s:
@@ -238,7 +258,10 @@ def test_the_operator_upload_fallback_runs_the_same_parser_and_records_the_origi
     _enqueue(factory, "import_nbs_file", payload)
     _drain(factory)
 
-    assert _job_states(factory) == {("import_nbs_file", "done"): 1}
+    assert _job_states(factory) == {
+        ("import_nbs_file", "done"): 1,
+        ("assess_situation", "done"): 38,  # the country and 37 states
+    }
     assert _count(factory, Measurement) == 114
     with factory() as s:
         doc = s.scalars(select(EvidenceDocument)).one()

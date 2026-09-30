@@ -26,6 +26,8 @@ class ProcessResult:
     measurements: int = 0
     claims: int = 0
     notes: list[str] = field(default_factory=list)
+    # (item code, place id) pairs whose values changed: their situations need re-assessing
+    touched: set[tuple[str, int]] = field(default_factory=set)
 
 
 @dataclass(frozen=True)

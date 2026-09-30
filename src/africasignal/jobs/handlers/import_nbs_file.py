@@ -20,6 +20,7 @@ from africasignal.catalog import load_items
 from africasignal.evidence.capture import SourceNotApproved, record_document
 from africasignal.jobs.handlers import JobContext, register
 from africasignal.models import Source
+from africasignal.publish.situations import request_assessments
 from africasignal.sources.nbs import import_workbook, title_month
 from africasignal.sources.permissions import current_permission
 from africasignal.storage import get_store
@@ -65,12 +66,14 @@ def import_nbs_file(ctx: JobContext) -> None:
         vintage=vintage,
         expected_month=title_month(title) if title else None,
     )
+    queued = request_assessments(session, result.touched, document.id)
     if upload_key != document.storage_key:
         store.delete(upload_key)  # the evidence copy lives under its own hash-based key
     log.info(
-        "imported %s: %d measurements",
+        "imported %s: %d measurements, %d assessments queued",
         payload["original_url"],
         result.measurements,
+        len(queued),
         extra={"job_id": ctx.job.id},
     )
     for note in result.notes:

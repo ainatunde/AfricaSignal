@@ -8,6 +8,7 @@ from datetime import datetime
 from africasignal.evidence.capture import capture
 from africasignal.jobs.handlers import JobContext, register
 from africasignal.models import Source
+from africasignal.publish.situations import request_assessments
 from africasignal.sources.base import AdapterContext, get_adapter
 from africasignal.sources.health import record_failure
 from africasignal.storage import get_store
@@ -46,11 +47,13 @@ def process_document(ctx: JobContext) -> None:
     except Exception as exc:
         record_failure(session, source.id, f"{type(exc).__name__}: {exc}")
         raise
+    queued = request_assessments(session, result.touched, document.id)
     log.info(
-        "processed %s: %d measurements, %d claims",
+        "processed %s: %d measurements, %d claims, %d assessments queued",
         payload["url"],
         result.measurements,
         result.claims,
+        len(queued),
         extra={"job_id": ctx.job.id},
     )
     for note in result.notes:
