@@ -47,6 +47,8 @@ def load_all() -> None:
         expire_assessments,
         extract_claims,
         fetch_source,
+        gdelt_fetch_article,
+        gdelt_poll,
         import_nbs_file,
         invalidate,
         notify_followers,
