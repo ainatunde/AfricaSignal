@@ -6,7 +6,9 @@ In staging and production every required secret must be present; a missing one r
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
@@ -72,3 +74,12 @@ def get_settings() -> Settings:
     settings = Settings()
     settings.validate_required()
     return settings
+
+
+def config_dir() -> Path:
+    """Directory holding the YAML seed files (``sources.yaml``, ``place_aliases.yaml``, ...).
+
+    ``CONFIG_DIR`` overrides the default of ``config`` in the working directory (``/app`` in the
+    container, the repository root in development).
+    """
+    return Path(os.environ.get("CONFIG_DIR", "config"))

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from geoalchemy2 import Geometry
-from sqlalchemy import ForeignKey, Index, Integer, Text
+from sqlalchemy import ForeignKey, Index, Integer, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from africasignal.models.base import Base, CreatedMixin, pg_enum
@@ -26,7 +26,10 @@ class Place(CreatedMixin, Base):
 
 class PlaceAlias(CreatedMixin, Base):
     __tablename__ = "place_alias"
-    __table_args__ = (Index("ix_place_alias_alias_norm", "alias_norm"),)
+    __table_args__ = (
+        Index("ix_place_alias_alias_norm", "alias_norm"),
+        UniqueConstraint("place_id", "alias_norm"),
+    )
 
     place_id: Mapped[int] = mapped_column(ForeignKey("place.id"), nullable=False)
     alias: Mapped[str] = mapped_column(Text, nullable=False)

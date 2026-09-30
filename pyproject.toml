@@ -17,6 +17,8 @@ dependencies = [
     "boto3>=1.34,<2",
     "trafilatura>=2.0,<3",
     "pdfplumber>=0.11,<1",
+    "rapidfuzz>=3.9,<4",
+    "pyyaml>=6,<7",
 ]
 
 [project.optional-dependencies]

@@ -22,12 +22,17 @@ jobs:
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
       DATABASE_URL: postgresql+psycopg://africasignal:africasignal@localhost:5432/africasignal_test
+      RUN_NETWORK_TESTS: "1"  # downloads the real boundary files (see tests/integration/test_places_full.py)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+      - uses: actions/cache@v4
+        with:
+          path: data/places
+          key: places-boundaries-v1
       - run: pip install -e ".[dev]"
       - run: ruff check .
       - run: ruff format --check .

@@ -1,0 +1,47 @@
+# Extra names for places, applied by `python -m africasignal.places.load`.
+# Official names (states, LGAs, cities) are added automatically from the boundary data; this file
+# only holds spellings and short forms that people actually use. State codes are ISO 3166-2.
+
+countries:
+  NG:
+    - Federal Republic of Nigeria
+
+states:
+  NG-FC:
+    - FCT
+    - F.C.T.
+    - Abuja
+    - Abuja FCT
+    - Federal Capital Territory
+  NG-AK:
+    - Akwa-Ibom
+    - Akwaibom
+  NG-CR:
+    - Cross-River
+  NG-NA:
+    - Nassarawa
+  NG-KN:
+    - Kano State
+
+lgas:
+  # LGA names are matched to the boundary data (case-insensitive) within the given state.
+  - state: NG-RI
+    name: Port-Harcourt
+    aliases: ["PH", "P/H", "Port Harcourt"]
+  - state: NG-LA
+    name: Eti Osa
+    aliases: ["Eti-Osa"]
+  - state: NG-FC
+    name: Municipal Area Council
+    aliases: ["AMAC", "Abuja Municipal", "Abuja Municipal Area Council"]
+
+# Neighbourhoods resolve to the LGA that contains them. The point must lie inside that LGA; the
+# loader refuses the file otherwise. Only well-known areas whose LGA is not in doubt are listed.
+neighbourhoods:
+  - {name: Lekki, state: NG-LA, lga: Eti Osa, lat: 6.4478, lon: 3.4723}
+  - {name: Victoria Island, state: NG-LA, lga: Eti Osa, lat: 6.4281, lon: 3.4219}
+  - {name: Ikoyi, state: NG-LA, lga: Eti Osa, lat: 6.4549, lon: 3.4346}
+  - {name: Yaba, state: NG-LA, lga: Lagos Mainland, lat: 6.5095, lon: 3.3711}
+  - {name: Wuse, state: NG-FC, lga: Municipal Area Council, lat: 9.0765, lon: 7.4699}
+  - {name: Garki, state: NG-FC, lga: Municipal Area Council, lat: 9.0333, lon: 7.4833}
+  - {name: Maitama, state: NG-FC, lga: Municipal Area Council, lat: 9.0870, lon: 7.4941}
