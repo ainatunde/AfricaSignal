@@ -110,7 +110,7 @@ uses) sit in different splits. Any run starts with these checks.
 
 ## Sources and data
 
-- `data/places/` is a small cut of the Nigerian administrative boundaries, used to resolve place
+- `places/` is a small cut of the Nigerian administrative boundaries, used to resolve place
   names without the network. geoBoundaries gbOpen, CC BY 4.0, attribution: William & Mary geoLab.
   The same cut is in `tests/fixtures/places`.
 - The documents in the cases are written for the set. They do not contain text from any news site,

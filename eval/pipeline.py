@@ -78,7 +78,7 @@ from eval.sources import CODE_READ_KINDS, SOURCES
 
 log = logging.getLogger("eval.pipeline")
 
-PLACES_DIR = Path(__file__).resolve().parent / "data" / "places"
+PLACES_DIR = Path(__file__).resolve().parent / "places"
 _RANK = {"national": 0, "state": 1, "lga": 2, "city": 3, "unknown": 4}
 
 ModelMode = Literal["stand_in", "recorded", "live"]
@@ -232,7 +232,7 @@ def _boundary_files() -> dict[str, Any]:
 
 
 def load_places(session: Session) -> dict[str, int]:
-    """The country, 17 states and 22 LGAs of the fixture cut (see ``eval/data/places``), with
+    """The country, 17 states and 22 LGAs of the fixture cut (see ``eval/places``), with
     the aliases of ``config/place_aliases.yaml``. Returns place id by code."""
     load_boundaries(session, _boundary_files(), "eval-fixture", expected_counts=None)
     load_aliases(session)
