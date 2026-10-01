@@ -19,7 +19,8 @@ from datetime import date
 
 from africasignal.catalog import load_items
 from africasignal.evidence.capture import SourceNotApproved, record_document
-from africasignal.jobs.handlers import JobContext, register
+from africasignal.jobs.handlers import JobContext, on_dead, register
+from africasignal.jobs.queue import ClaimedJob
 from africasignal.models import Source
 from africasignal.publish.situations import request_assessments
 from africasignal.sources.nbs import import_workbook, title_month
@@ -85,3 +86,15 @@ def import_nbs_file(ctx: JobContext) -> None:
     )
     for note in result.notes:
         log.info("%s: %s", payload["original_url"], note, extra={"job_id": ctx.job.id})
+
+
+@on_dead("import_nbs_file")
+def discard_upload(job: ClaimedJob) -> None:
+    """A job that has used all its attempts will not read its upload again unless an operator
+    retries it, and the Jobs page refuses that retry once the file is gone. Without this the
+    workbook would stay in ``uploads/`` for good."""
+    key = str(job.payload.get("storage_key", ""))
+    if not UPLOAD_KEY.fullmatch(key):
+        return  # same rule as the handler: only ever delete a flat name under uploads/
+    get_store().delete(key)
+    log.info("removed the upload of dead job %d", job.id, extra={"job_id": job.id})

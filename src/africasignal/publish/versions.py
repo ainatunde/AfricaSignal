@@ -306,13 +306,33 @@ def release_held(session: Session, now: datetime) -> list[int]:
     return released
 
 
+NEWER_VERSION_REASON = "a newer version of this situation exists"
+
+
+def has_newer_version(session: Session, version: AssessmentVersion) -> bool:
+    """True when the situation has a later version in any state. Publishing this one would then
+    put older figures in place of whatever the later version says (or is still deciding)."""
+    newest = session.scalar(
+        select(func.max(AssessmentVersion.version)).where(
+            AssessmentVersion.situation_id == version.situation_id
+        )
+    )
+    return newest is not None and newest > version.version
+
+
 def release_version(session: Session, version: AssessmentVersion, now: datetime) -> str:
     """Judge a held draft as if something had been published already and act on it: ``published``,
-    or ``withheld`` when a withholding rule applies now. Used when the hold ends and when an
-    operator releases a version early; the rules apply either way, so an operator cannot publish
-    what the policy would withhold."""
+    or ``withheld`` when a withholding rule applies now or a newer version exists. Used when the
+    hold ends and when an operator releases a version early; the rules apply either way, so an
+    operator cannot publish what the policy would withhold."""
     situation = session.get(Situation, version.situation_id)
     assert situation is not None
+    if has_newer_version(session, version):
+        version.status = "withheld"
+        version.withheld_reasons = [NEWER_VERSION_REASON]
+        version.hold_until = None
+        session.flush()
+        return "withheld"
     draft = build_draft(session, version, now)
     decision = decide(VersionDraft(**{**draft.__dict__, "ever_published": True}))
     if decision.status == "published":

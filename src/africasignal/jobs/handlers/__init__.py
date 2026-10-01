@@ -22,6 +22,8 @@ class JobContext:
 Handler = Callable[[JobContext], None]
 
 HANDLERS: dict[str, Handler] = {}
+# What to tidy up when a job of this kind has used all its attempts and is marked ``dead``.
+DEAD_HOOKS: dict[str, Callable[[ClaimedJob], None]] = {}
 
 
 def register(kind: str) -> Callable[[Handler], Handler]:
@@ -31,6 +33,19 @@ def register(kind: str) -> Callable[[Handler], Handler]:
         if kind in HANDLERS:
             raise ValueError(f"handler already registered for {kind!r}")
         HANDLERS[kind] = fn
+        return fn
+
+    return decorator
+
+
+def on_dead(kind: str) -> Callable[[Callable[[ClaimedJob], None]], Callable[[ClaimedJob], None]]:
+    """Decorator: ``@on_dead("import_nbs_file")``. The function runs once, after the worker marks a
+    job of that kind dead, to release what the job was holding (an uploaded file, say)."""
+
+    def decorator(fn: Callable[[ClaimedJob], None]) -> Callable[[ClaimedJob], None]:
+        if kind in DEAD_HOOKS:
+            raise ValueError(f"dead-job hook already registered for {kind!r}")
+        DEAD_HOOKS[kind] = fn
         return fn
 
     return decorator

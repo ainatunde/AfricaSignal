@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from africasignal import audit
@@ -135,12 +135,7 @@ def release_early(
     now = now or datetime.now(UTC)
     reason = clean_reason(reason)
     situation, version = _held_version(session, version_id)
-    newest = session.scalar(
-        select(func.max(AssessmentVersion.version)).where(
-            AssessmentVersion.situation_id == situation.id
-        )
-    )
-    if newest is not None and newest > version.version:
+    if versions.has_newer_version(session, version):
         raise AssessmentError(
             "a newer version of this situation exists, so publishing this one would replace it "
             "with older figures; withhold this one and judge the newer version instead"

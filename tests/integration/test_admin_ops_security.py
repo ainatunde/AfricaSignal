@@ -26,6 +26,7 @@ from africasignal.models import (
 )
 from africasignal.operations import jobs as job_ops
 from africasignal.publish.situations import source_is_trusted
+from africasignal.publish.versions import NEWER_VERSION_REASON, release_held
 from africasignal.sources.nbs_workbook import NbsParseError, parse_workbook
 from africasignal.sources.seed import SeedSource, seed_sources
 from africasignal.storage import S3Store
@@ -338,6 +339,40 @@ def test_publishing_early_is_refused_when_a_newer_version_exists(
     assert "assessment.release_early" not in actions(session)
 
 
+def test_a_held_version_is_not_released_on_schedule_when_a_newer_version_exists(
+    session: Session, store: S3Store, source: Source
+) -> None:
+    """The scheduled release has the same case Publish now refuses: the hold ends, a newer
+    version exists, and the older figures must not replace it."""
+    version = held_version(session, store, source)
+    situation = session.get(Situation, version.situation_id)
+    assert situation is not None
+    add_version(
+        session,
+        situation,
+        version=version.version + 1,
+        status="withheld",
+        current=False,
+        published_at=None,
+    )
+    released = release_held(session, version.hold_until + timedelta(minutes=1))  # type: ignore[operator]
+    assert released == []
+    session.refresh(version)
+    assert version.status == "withheld" and version.hold_until is None
+    assert version.withheld_reasons == [NEWER_VERSION_REASON]
+    assert situation.current_version_id is None
+
+
+def test_a_held_version_is_still_released_on_schedule_when_it_is_the_newest(
+    session: Session, store: S3Store, source: Source
+) -> None:
+    version = held_version(session, store, source)
+    released = release_held(session, version.hold_until + timedelta(minutes=1))  # type: ignore[operator]
+    assert released == [version.id]
+    session.refresh(version)
+    assert version.status == "published"
+
+
 # --- the Jobs page -----------------------------------------------------------------------------
 
 DB_ERROR = (
@@ -373,3 +408,33 @@ def test_retrying_a_job_does_not_copy_its_error_text_into_the_audit_log(
 
 # Keep a reference so linters do not drop imports used only by fixtures.
 _ = (UTC, datetime, timedelta)
+
+
+# --- an uploaded NBS file whose import job died ----------------------------------------------
+
+
+def test_retrying_a_dead_import_job_is_refused_once_its_upload_is_gone(
+    admin: TestClient, session: Session, store: S3Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(job_ops, "get_store", lambda: store)
+    job = make_job(session, "dead", kind="import_nbs_file")
+    job.payload = {"storage_key": "uploads/nbs-gone.xlsx"}
+    session.flush()
+    response = post(admin, f"/admin/jobs/{job.id}/retry")
+    assert response.status_code == 400 and "upload it again" in response.text
+    session.refresh(job)
+    assert job.status == "dead"
+    assert "job.retry" not in actions(session)
+
+
+def test_retrying_a_failed_import_job_whose_upload_is_still_there_works(
+    admin: TestClient, session: Session, store: S3Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(job_ops, "get_store", lambda: store)
+    store.put("uploads/nbs-kept.xlsx", b"x")
+    job = make_job(session, "failed", kind="import_nbs_file")
+    job.payload = {"storage_key": "uploads/nbs-kept.xlsx"}
+    session.flush()
+    assert post(admin, f"/admin/jobs/{job.id}/retry").status_code == 303
+    session.refresh(job)
+    assert job.status == "queued"
