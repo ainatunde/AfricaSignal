@@ -174,3 +174,13 @@ def test_editors_and_other_origins_are_refused(
     )
     assert response.status_code == 403
     assert session.scalars(select(ChannelPost)).all() == []
+
+
+def test_control_characters_are_cleaned_not_a_server_error(
+    admin: TestClient, session: Session, version: AssessmentVersion
+) -> None:
+    response = mark(
+        admin, version.id, "wa", note="sent\x00 it\u202e", post_url="https://h.example/p\x00"
+    )
+    assert response.status_code == 303
+    assert "\x00" not in str(session.scalars(select(ChannelPost.note)).all())

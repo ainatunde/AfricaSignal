@@ -25,6 +25,7 @@ from africasignal.publish.whatsapp_text import (
     material_changes,
     write_post,
 )
+from africasignal.textclean import one_line
 
 CHANNELS = tuple(MAX_CHARS)  # ("wa", "x")
 CHANNEL_NAMES = {"wa": "WhatsApp", "x": "X"}
@@ -95,7 +96,7 @@ def recent_records(session: Session, limit: int = 20) -> list[tuple[ChannelPost,
 
 
 def _clean_url(url: str) -> str | None:
-    url = url.strip()
+    url = one_line(url)
     if not url:
         return None
     try:
@@ -124,7 +125,7 @@ def mark_posted(
         raise ChannelPostError("choose WhatsApp or X")
     if versions.publication_suspended(session):
         raise ChannelPostError("publication is suspended, so nothing is posted")
-    note = " ".join(note.split())
+    note = one_line(note)
     if len(note) > MAX_NOTE:
         raise ChannelPostError(f"keep the note under {MAX_NOTE} characters")
     url = _clean_url(post_url)
