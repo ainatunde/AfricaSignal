@@ -303,27 +303,27 @@ Until one does, watch the log or the audit log, and keep the external heartbeat 
 the thing that actually wakes a person. A backup job that is down and cannot even record its own
 failure shows up here as `backup_stale` once the limit passes.
 
-### 7.2 Uptime and other alerts (manual)
+### 7.2 Source, job and budget alerts (automated)
 
-The plan (AS-041) asks for an uptime check on `/healthz` and email alerts when a source is failing,
-jobs are dead, or the LLM budget is 80 % spent. **Those are not automated yet** (only the backup alerts
-above are). Until they exist, do the following.
+The scheduler runs `check_health` every 15 minutes. It keeps three more alerts in the same
+`ops.alert.*` rows, audit rows and log lines as 7.1, so they show on the **Alerts** page too:
+
+| Alert | When | Clears when |
+|---|---|---|
+| `sources_failing` | An active source is marked failing (the fetch job marks it after repeated failures). The alert lists up to 10 sources with their last error. | No active source is failing. |
+| `jobs_dead` | A job used up its attempts and died within the last 24 hours. The alert counts them by kind; payloads are never copied. | None died in the last 24 hours, or they were retried on the **Jobs** page. |
+| `llm_budget_80` | Today's model spend (Lagos day) is at 80 percent of the **Daily budget (USD)** setting or more. | The next budget day starts, or the limit is raised. |
+
+Nothing is sent to anyone (see 7.1); look at the Alerts page or the audit log.
+
+### 7.3 Uptime (manual)
+
+The plan (AS-041) also asks for an uptime check on `/healthz`. The app cannot check itself being
+down, so use an external monitor.
 
 - **Uptime:** point an external monitor (UptimeRobot, Better Stack or similar) at
   `https://<domain>/healthz` with a 1-minute interval and email alerts. The body must contain
   `"ok": true` (or `"ok":true` depending on the JSON encoder).
-- **By hand, daily** (or from a cron job that mails the output), run against the database:
-
-  ```sql
-  -- sources that are failing
-  SELECT slug, health, consecutive_failures, last_success_at, last_error FROM source WHERE active AND health = 'failing';
-  -- dead jobs (should be 0)
-  SELECT kind, count(*), max(last_error) FROM job WHERE status = 'dead' GROUP BY kind;
-  -- LLM spend today against LLM_DAILY_BUDGET_USD (default 10; alert at 8)
-  SELECT coalesce(sum(cost_usd), 0) AS spent_today_usd FROM llm_call WHERE ts >= date_trunc('day', now() AT TIME ZONE 'UTC');
-  ```
-
-  `docker compose exec db psql -U africasignal africasignal` opens a prompt.
 
 ## 8. Console access and client addresses
 

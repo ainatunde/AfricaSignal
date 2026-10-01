@@ -478,3 +478,15 @@ def test_held_versions_are_checked_every_minute(
     assert _kinds(factory) == ["release_held_versions"]
     _tick(factory, t.replace(minute=4))
     assert _kinds(factory) == ["release_held_versions"] * 2
+
+
+def test_check_health_is_enqueued_every_fifteen_minutes(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _register(monkeypatch, "check_health", lambda ctx: None)
+    t = datetime(2026, 10, 7, 10, 3, 10, tzinfo=UTC)
+    _tick(factory, t)
+    _tick(factory, t.replace(minute=10))
+    assert _kinds(factory) == ["check_health"]
+    _tick(factory, t.replace(minute=20))
+    assert _kinds(factory) == ["check_health", "check_health"]

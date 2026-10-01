@@ -45,6 +45,7 @@ def load_all() -> None:
         apply_retention,
         assess_situation,
         check_backups,
+        check_health,
         dispatch_outbox,
         expire_assessments,
         explain_version,

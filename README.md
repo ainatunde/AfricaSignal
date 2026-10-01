@@ -78,7 +78,7 @@ The rest of the operator console is admin only and every change on it is audited
 | **NBS upload** | Manual upload of an NBS Excel file (or ZIP) with the address it came from; stored under a server-chosen name and imported by the `import_nbs_file` job. |
 | **Domains** | News domains GDELT linked to that no approved outlet covers: reject, or add as an inactive source with a named owner. |
 | **Channel posts** | Draft WhatsApp and X text for recent material changes. Drafts only: nothing is sent. |
-| **Alerts** | The `ops.alert.*` backup and restore-drill alerts. |
+| **Alerts** | The `ops.alert.*` alerts: stale backup, failed restore drill, failing sources, dead jobs, model budget at 80 percent. |
 
 A news outlet cannot be approved until its owner is set (Sources page, security finding S-08).
 
