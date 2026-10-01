@@ -8,6 +8,7 @@ WORKDIR /app
 
 # tesseract reads the NERC tariff schedules, which are PDFs without a text layer
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends tesseract-ocr \
     && rm -rf /var/lib/apt/lists/*
 
