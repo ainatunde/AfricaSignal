@@ -15,12 +15,13 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from africasignal.catalog import load_items, load_policies
+from africasignal.catalog import load_items
 from africasignal.extract.validate import ValidatedClaim, validate_claims
 from africasignal.llm.adapter import LlmAdapter
 from africasignal.llm.config import load_llm_config
 from africasignal.llm.prompt_loader import load_prompt, render
 from africasignal.models import Claim, EvidenceDocument
+from africasignal.policy_series import all_series, series_codes
 
 PURPOSE = "claim_extract"
 PROMPT_VERSION = "claim_extract_v1"
@@ -131,13 +132,15 @@ def claim_schema() -> dict[str, Any]:
     }
 
 
-def allowed_codes() -> tuple[set[str], set[str]]:
-    return {i.code for i in load_items().items}, {s.code for s in load_policies().series}
+def allowed_codes(session: Session | None = None) -> tuple[set[str], set[str]]:
+    """Item codes and policy series codes the model may use. With a session, the series include
+    those operators added in the console."""
+    return {i.code for i in load_items().items}, series_codes(session)
 
 
-def system_prompt() -> str:
+def system_prompt(session: Session | None = None) -> str:
     items = "\n".join(f"- `{i.code}`: {i.label} ({i.unit})" for i in load_items().items)
-    series = "\n".join(f"- `{s.code}`: {s.title} ({s.unit})" for s in load_policies().series)
+    series = "\n".join(f"- `{s.code}`: {s.title} ({s.unit})" for s in all_series(session))
     return render(
         load_prompt(PROMPT_VERSION), ALLOWED_ITEM_CODES=items, ALLOWED_POLICY_SERIES=series
     )
@@ -171,6 +174,7 @@ def extract_claims(
     text: str,
     *,
     job_id: int | None = None,
+    session: Session | None = None,
 ) -> Extraction:
     """Ask the model for the claims in ``text`` and validate each one against it.
 
@@ -180,13 +184,13 @@ def extract_claims(
     answer = adapter.complete_json(
         PURPOSE,
         PROMPT_VERSION,
-        system_prompt(),
+        system_prompt(session),
         user_message(document, text[window[0] : window[1]]),
         claim_schema(),
         MAX_OUTPUT_TOKENS,
         job_id=job_id,
     )
-    items, series = allowed_codes()
+    items, series = allowed_codes(session)
     claims = validate_claims(answer["claims"], text, document.published_at, items, series)
     return Extraction(claims=claims, window=window)
 

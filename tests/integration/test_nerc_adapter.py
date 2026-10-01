@@ -244,7 +244,7 @@ def test_a_disco_without_a_policy_series_gets_no_claims(
     doc = _document(session, store, source, site, TARIFF_URL, "JED MYTO SEPTEMBER 2026")
     result = NercAdapter().process(doc, ctx(session, store))
     assert result.claims == 0
-    assert any("jos-electricity" in n and "policies.yaml" in n for n in result.notes)
+    assert any("jos-electricity" in n and "Policies" in n for n in result.notes)
 
 
 def test_a_plain_order_is_read_from_its_text_layer_and_makes_no_tariff_claims(

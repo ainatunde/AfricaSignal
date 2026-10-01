@@ -24,6 +24,7 @@ from africasignal.operations import costs as cost_ops
 from africasignal.operations import domains as domain_ops
 from africasignal.operations import jobs as job_ops
 from africasignal.operations import nbs_upload, range_review
+from africasignal.operations import policies as policy_ops
 from africasignal.publish import versions
 from africasignal.publish.whatsapp_text import PostError
 from africasignal.storage import store_for_session
@@ -42,6 +43,15 @@ NOTICES = {
     "upload_queued": "File stored and import queued. Watch the Jobs page for the result.",
     "domain_rejected": "Domain rejected. It no longer appears in the report.",
     "domain_added": "Source created, inactive, with no permission yet. Review it below.",
+    "policy_added": "Policy series added. Its situations are created and appear once a primary "
+    "document for it has been read.",
+    "policy_added_no_places": "Policy series added, but no situation could be created yet because "
+    "the places it covers are not loaded. They are created when the places list is loaded and "
+    "the next claim for the series arrives.",
+    "post_marked": "Recorded as posted. Nothing was sent by the app.",
+    "post_unmarked": "Record removed.",
+    "policy_retired": "Policy series retired. Published situations stay until you withdraw them.",
+    "policy_activated": "Policy series active again.",
 }
 
 
@@ -402,32 +412,149 @@ def domains_add(
     return _redirect(f"/admin/sources/{source.id}?notice=domain_added", auth)
 
 
+# --- policy situations --------------------------------------------------------------------------
+
+
+def _policies_page(
+    request: Request,
+    db: DbSession,
+    auth: AdminOperator,
+    status: int = 200,
+    error: str | None = None,
+    form: dict[str, Any] | None = None,
+) -> Response:
+    return _page(
+        request,
+        "admin/policies.html",
+        auth,
+        status,
+        rows=policy_ops.listing(db),
+        sources=policy_ops.source_choices(db),
+        topics=policy_ops.TOPICS,
+        form=form or {},
+        notice=_notice(request),
+        error=error,
+    )
+
+
+@router.get("/policies")
+def policies_view(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    return _policies_page(request, db, auth)
+
+
+@router.post("/policies")
+async def policies_add(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    form = await request.form()
+    text = {k: v for k, v in form.items() if isinstance(v, str)}
+    new = policy_ops.NewSeries(
+        code=text.get("code", ""),
+        title=text.get("title", ""),
+        topic=text.get("topic", ""),
+        unit=text.get("unit", ""),
+        primary_sources=[v for v in form.getlist("primary_sources") if isinstance(v, str)],
+        scope=text.get("scope", ""),
+        state_codes=text.get("state_codes", ""),
+        affected_groups=text.get("affected_groups", ""),
+        materiality_pct=text.get("materiality_pct", ""),
+    )
+    try:
+        _, created = policy_ops.add_series(db, auth.operator, new)
+    except policy_ops.PolicyError as exc:
+        shown: dict[str, Any] = {**text, "primary_sources": new.primary_sources}
+        return _policies_page(request, db, auth, 400, str(exc), shown)
+    return _back("/admin/policies", "policy_added" if created else "policy_added_no_places", auth)
+
+
+@router.post("/policies/{row_id}/{action}")
+def policies_toggle(
+    row_id: int, action: str, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    if action not in ("retire", "activate"):
+        raise HTTPException(status_code=404, detail="No such action")
+    try:
+        policy_ops.set_active(db, auth.operator, row_id, action == "activate")
+    except policy_ops.PolicyError as exc:
+        return _policies_page(request, db, auth, 400, str(exc))
+    return _back(
+        "/admin/policies", "policy_retired" if action == "retire" else "policy_activated", auth
+    )
+
+
 # --- channel posts ------------------------------------------------------------------------------
 
 
-@router.get("/channel-posts")
-def channel_posts_view(
-    request: Request, auth: AdminOperator, db: DbSession, days: int = 7
+def _channel_page(
+    request: Request,
+    db: DbSession,
+    auth: AdminOperator,
+    status: int = 200,
+    error: str | None = None,
 ) -> Response:
-    """Drafts of the WhatsApp and X posts for material changes. Nothing is sent: an operator
-    copies the text and posts it by hand."""
-    days = min(max(days, 1), 60)
-    error: str | None = None
+    days = min(max(_int(request.query_params.get("days"), 7), 1), 60)
     found = channel_ops.Drafts()
     try:
         found = channel_ops.drafts(db, datetime.now(UTC) - timedelta(days=days))
     except PostError as exc:
         error = str(exc)
+        status = 400
     return _page(
         request,
         "admin/channel_posts.html",
         auth,
-        400 if error else 200,
+        status,
         posts=found.posts,
         problems=found.problems,
+        suspended=found.suspended,
+        recorded=channel_ops.recent_records(db),
+        channels=channel_ops.CHANNEL_NAMES,
         days=days,
+        notice=_notice(request),
         error=error,
     )
+
+
+def _int(value: str | None, default: int) -> int:
+    try:
+        return int(value) if value is not None else default
+    except ValueError:
+        return default
+
+
+@router.get("/channel-posts")
+def channel_posts_view(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    """Drafts of the WhatsApp and X posts for material changes. Nothing is sent: an operator
+    copies the text and posts it by hand, then marks it as posted."""
+    return _channel_page(request, db, auth)
+
+
+@router.post("/channel-posts/versions/{version_id}/{channel}/posted")
+def channel_posts_mark(
+    version_id: int,
+    channel: str,
+    request: Request,
+    auth: AdminOperator,
+    db: DbSession,
+    post_url: Annotated[str, Form()] = "",
+    note: Annotated[str, Form()] = "",
+) -> Response:
+    try:
+        channel_ops.mark_posted(
+            db, auth.operator, version_id, channel, post_url=post_url, note=note
+        )
+    except channel_ops.ChannelPostError as exc:
+        return _channel_page(request, db, auth, 400, str(exc))
+    return _back("/admin/channel-posts", "post_marked", auth)
+
+
+@router.post("/channel-posts/records/{record_id}/undo")
+def channel_posts_unmark(
+    record_id: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    try:
+        channel_ops.unmark(db, auth.operator, record_id)
+    except channel_ops.ChannelPostError as exc:
+        return _channel_page(request, db, auth, 400, str(exc))
+    return _back("/admin/channel-posts", "post_unmarked", auth)
 
 
 # --- alerts -------------------------------------------------------------------------------------

@@ -1,14 +1,15 @@
 """T2 policy situations and their assessment versions (spec B8.1, B8.3, AS-027).
 
-``ensure_policy_situations`` creates the situations ``config/policies.yaml`` lists: one per policy
-series and scope place (the country, or each state of a ``states`` scope).
+``ensure_policy_situations`` creates the situations for the policy series in force (the file
+``config/policies.yaml`` plus those operators added in the console): one per series and scope
+place (the country, or each state of a ``states`` scope).
 ``assess_policy_situation`` loads the valid ``policy_statement`` claims for the series, runs the
 pure computation in ``assess.policy_change`` and stores a new draft version unless the inputs are
 unchanged. The publication policy (``publish.versions.apply_policy``) then decides what readers
 see, exactly as for T1.
 
 The place of a claim is not used: a policy series is about one regulator's rate, and who is
-affected comes from ``config/policies.yaml``, never from the claim.
+affected comes from the series definition, never from the claim.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from africasignal.assess.policy_change import (
     compute_policy_change,
 )
 from africasignal.assess.price_change import place_phrase
-from africasignal.catalog import PolicySeries, load_policies
+from africasignal.catalog import PolicySeries
 from africasignal.models import (
     AssessmentInput,
     AssessmentVersion,
@@ -37,6 +38,7 @@ from africasignal.models import (
     Place,
     Situation,
 )
+from africasignal.policy_series import all_series
 from africasignal.publish.situations import (
     POLICY_UNAPPLIED,
     AssessmentOutcome,
@@ -62,7 +64,7 @@ def ensure_policy_situations(
     """The T2 situations for the configured series (all of them, or just ``series_codes``),
     created when missing. A scope place that is not in the database yet is skipped."""
     found: list[Situation] = []
-    for series in load_policies().series:
+    for series in all_series(session):
         if series_codes is not None and series.code not in series_codes:
             continue
         codes = _scope_codes(series)
@@ -96,7 +98,7 @@ def load_policy_inputs(
     session: Session, situation: Situation, now: datetime
 ) -> PolicyInputs | None:
     """Everything the T2 computation needs, or None when the series or place is unknown."""
-    series = next((s for s in load_policies().series if s.code == situation.policy_series), None)
+    series = next((s for s in all_series(session) if s.code == situation.policy_series), None)
     place = session.get(Place, situation.place_id)
     if series is None or place is None or place.code is None:
         return None

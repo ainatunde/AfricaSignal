@@ -161,13 +161,21 @@ def evaluate(session: Session, now: datetime) -> list[Finding]:
 
 
 def check(session: Session, now: datetime | None = None) -> CheckResult:
-    """Open alerts for new findings, resolve alerts whose finding is gone, and log the ones still
-    open. The caller commits."""
+    """Backup and restore-drill alerts. The caller commits."""
     now = now or datetime.now(UTC)
+    return apply(session, now, ALERT_CODES, evaluate(session, now))
+
+
+def apply(
+    session: Session, now: datetime, codes: tuple[str, ...], found: list[Finding]
+) -> CheckResult:
+    """Open alerts for new findings, resolve alerts (among ``codes``) whose finding is gone, and
+    log the ones still open. Shared by every check that keeps ``ops.alert.*`` rows. The caller
+    commits."""
     result = CheckResult()
-    findings = {f.code: f for f in evaluate(session, now)}
+    findings = {f.code: f for f in found}
     stamp = now.isoformat()
-    for code in ALERT_CODES:
+    for code in codes:
         key = ALERT_PREFIX + code
         existing = _row(session, key)
         was_open = existing is not None and existing.get("state") == "open"

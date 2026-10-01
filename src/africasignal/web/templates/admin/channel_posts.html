@@ -2,22 +2,50 @@
 {% block title %}Channel posts{% endblock %}
 {% block content %}
 <h1>Channel posts</h1>
-<p><strong>Drafts only.</strong> The app never posts anything. Copy the text and post it yourself from the WhatsApp channel or X account. These are material changes published in the last {{ days }} days:
+<p><strong>Drafts only.</strong> The app never posts anything. Copy the text and post it yourself from the WhatsApp channel or X account, then mark it as posted so the demand test knows what went out. These are material changes published in the last {{ days }} days:
   {% for n in (7, 14, 30) %}{% if n == days %}<strong>{{ n }}</strong>{% else %}<a href="/admin/channel-posts?days={{ n }}">{{ n }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}.
 The links end in <code>?ref=wa</code> or <code>?ref=x</code> so the Metrics page can count visits from each channel.</p>
+{% if suspended %}
+<p class="error" role="alert">Publication is suspended, so there are no drafts and nothing can be marked as posted. Resume it on the <a href="/admin/publication">Publication</a> page.</p>
+{% endif %}
 {% for problem in problems %}
 <p class="error" role="alert">No draft for this one: {{ problem }}</p>
 {% endfor %}
 {% for item in posts %}
 <section>
-  <h2>{{ item.situation_slug }} · version {{ item.version }}</h2>
-  <p class="muted">Published {{ item.published_at|when }}</p>
-  <h3>WhatsApp ({{ item.whatsapp.text|length }} characters)</h3>
-  <textarea readonly rows="6" aria-label="WhatsApp post for {{ item.situation_slug }}">{{ item.whatsapp.text }}</textarea>
-  <h3>X ({{ item.x.text|length }} characters)</h3>
-  <textarea readonly rows="4" aria-label="X post for {{ item.situation_slug }}">{{ item.x.text }}</textarea>
+  <h2>{{ item.posts.situation_slug }} · version {{ item.posts.version }}</h2>
+  <p class="muted">Published {{ item.posts.published_at|when }}</p>
+  {% for ch, label, post in (("wa", "WhatsApp", item.posts.whatsapp), ("x", "X", item.posts.x)) %}
+  <h3>{{ label }} ({{ post.text|length }} characters)</h3>
+  <textarea readonly rows="{{ 6 if ch == 'wa' else 4 }}" aria-label="{{ label }} post for {{ item.posts.situation_slug }}">{{ post.text }}</textarea>
+  {% set done = item.posted.get(ch) %}
+  {% if done %}
+  <p>Posted on {{ label }} {{ done.posted_at|when }}{% if done.post_url %} (<a href="{{ done.post_url }}" rel="noopener noreferrer">the post</a>){% endif %}{% if done.note %}: {{ done.note }}{% endif %}.
+    <form method="post" action="/admin/channel-posts/records/{{ done.id }}/undo" class="inline"><button type="submit">Undo</button></form></p>
+  {% else %}
+  <form method="post" action="/admin/channel-posts/versions/{{ item.version_id }}/{{ ch }}/posted">
+    <label for="u-{{ item.version_id }}-{{ ch }}">Link to your post (optional, https)</label>
+    <input type="url" id="u-{{ item.version_id }}-{{ ch }}" name="post_url" maxlength="300">
+    <label for="n-{{ item.version_id }}-{{ ch }}">Note (optional)</label>
+    <input type="text" id="n-{{ item.version_id }}-{{ ch }}" name="note" maxlength="200">
+    <button type="submit">Mark as posted on {{ label }}</button>
+  </form>
+  {% endif %}
+  {% endfor %}
 </section>
 {% else %}
-{% if not error and not problems %}<p>No material change was published in this period.</p>{% endif %}
+{% if not error and not problems and not suspended %}<p>No material change was published in this period.</p>{% endif %}
 {% endfor %}
+
+<h2>Recently marked as posted</h2>
+<div class="scroll"><table>
+  <thead><tr><th scope="col">When</th><th scope="col">Channel</th><th scope="col">Situation</th><th scope="col">Link</th><th scope="col">Note</th></tr></thead>
+  <tbody>
+  {% for r, slug, number in recorded %}
+  <tr><td>{{ r.posted_at|when }}</td><td>{{ channels[r.channel] }}</td><td>{{ slug }} v{{ number }}</td><td>{% if r.post_url %}<a href="{{ r.post_url }}" rel="noopener noreferrer">post</a>{% endif %}</td><td>{{ r.note or '' }}</td></tr>
+  {% else %}
+  <tr><td colspan="5">Nothing marked yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
 {% endblock %}

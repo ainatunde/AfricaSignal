@@ -3,6 +3,7 @@
 from africasignal.models.assessments import (
     AssessmentInput,
     AssessmentVersion,
+    OperatorPolicySeries,
     Situation,
 )
 from africasignal.models.base import Base
@@ -12,6 +13,7 @@ from africasignal.models.llm_cache import LlmResponseCache
 from africasignal.models.measurements import Measurement, MeasurementReview, Series
 from africasignal.models.ops import (
     AuditLog,
+    ChannelPost,
     Event,
     Feedback,
     Job,
@@ -40,6 +42,7 @@ __all__ = [
     "AssessmentVersion",
     "AuditLog",
     "Base",
+    "ChannelPost",
     "Claim",
     "DiscoveredDomainDecision",
     "Event",
@@ -55,6 +58,7 @@ __all__ = [
     "MeasurementReview",
     "Notification",
     "Operator",
+    "OperatorPolicySeries",
     "OperatorSignInFailure",
     "Outbox",
     "Place",

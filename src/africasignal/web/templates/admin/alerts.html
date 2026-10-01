@@ -1,8 +1,8 @@
 {% extends "admin/base.html" %}
 {% block title %}Alerts{% endblock %}
 {% block content %}
-<h1>Backup alerts</h1>
-<p>Raised by the hourly backup check. An alert closes by itself when the check next finds nothing wrong. Nothing is sent anywhere, so look here, or at the <a href="/admin/audit">audit log</a>.</p>
+<h1>Alerts</h1>
+<p>Raised by the hourly backup check (stale backup, failed restore drill) and the 15-minute health check (failing sources, dead jobs, model budget at 80 percent). An alert closes by itself when the check next finds nothing wrong. Nothing is sent anywhere, so look here, or at the <a href="/admin/audit">audit log</a>.</p>
 
 <h2>Alerts</h2>
 {% for a in alerts %}
@@ -14,7 +14,7 @@
 {% endfor %}</pre></details>{% endif %}
 </section>
 {% else %}
-<p>No alert has been raised. Either backups are healthy, or the check has not run yet.</p>
+<p>No alert has been raised. Either everything is healthy, or the checks have not run yet.</p>
 {% endfor %}
 
 <h2>Last backup</h2>
