@@ -32,6 +32,7 @@ from urllib.parse import urljoin, urlparse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from africasignal.evidence.capture import excerpt
 from africasignal.evidence.ocr import has_text_layer, ocr_pdf
 from africasignal.evidence.simhash import simhash
 from africasignal.evidence.text import extract_text
@@ -244,9 +245,14 @@ class NercAdapter:
 
     @staticmethod
     def _keep_text(session: Session, doc: EvidenceDocument, text: str) -> None:
-        """Keep the OCR text on the document when the permission allows full text."""
+        """Keep the OCR text on the document when the permission allows full text, and quote from
+        it. Capture took the excerpt from the PDF's text layer, which on a scanned schedule holds
+        only a few stray naira signs."""
         permission = current_permission(session, doc.source_id)
-        if permission is not None and permission.may_store_full_text:
+        if permission is None:
+            return
+        doc.excerpt = excerpt(text, permission)
+        if permission.may_store_full_text:
             doc.text_content = text
             doc.simhash = simhash(text)
 

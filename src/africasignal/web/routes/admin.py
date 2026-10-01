@@ -63,11 +63,14 @@ NOTICES = {
     "resumed_publication": "Publication resumed.",
 }
 
+# Not ``no-referrer``: with that policy browsers send ``Origin: null`` on a same-origin form POST,
+# which the origin guard (``csrf.py``) refuses, so nobody could sign in. ``same-origin`` still
+# sends nothing to other sites.
 _SECURITY_HEADERS = {
     "Cache-Control": "no-store",
     "X-Frame-Options": "DENY",
     "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
+    "Referrer-Policy": "same-origin",
     "Content-Security-Policy": (
         "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
         "frame-ancestors 'none'; base-uri 'none'"

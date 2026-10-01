@@ -157,6 +157,20 @@ def test_an_unreachable_listing_is_an_error_carrying_the_reason(
 
 
 @needs_tesseract
+def test_a_drawn_schedule_is_quoted_from_its_ocr_text_not_its_stray_text_layer(
+    session: Session, store: S3Store, source: Source, site: FakeSite, cached_ocr: None
+) -> None:
+    doc = _document(session, store, source, site, TARIFF_URL, "IE MYTO SEPTEMBER 2026")
+    assert sum(ch.isalpha() for ch in doc.excerpt or "") < 20  # capture saw only naira signs
+
+    NercAdapter().process(doc, ctx(session, store))
+
+    assert doc.excerpt is not None
+    assert sum(ch.isalpha() for ch in doc.excerpt) > 100
+    assert doc.text_content is not None and doc.text_content.startswith(doc.excerpt[:50])
+
+
+@needs_tesseract
 def test_the_drawn_tariff_schedule_gives_band_a_claims_read_in_code(
     session: Session, store: S3Store, source: Source, site: FakeSite, cached_ocr: None
 ) -> None:

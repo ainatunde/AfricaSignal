@@ -41,7 +41,8 @@ class SourceNotApproved(CaptureError):
     """The source has no approved permission, or its permission forbids collecting."""
 
 
-def _excerpt(text: str | None, permission: SourcePermission) -> str | None:
+def excerpt(text: str | None, permission: SourcePermission) -> str | None:
+    """The part of ``text`` the source's permission lets readers see as a quotation."""
     if not text:
         return None
     limit = permission.max_quote_chars
@@ -146,7 +147,7 @@ def record_document(
         title=title or extracted.title,
         byline=(byline or "").strip()[:MAX_BYLINE_CHARS] or None,
         text_content=extracted.text if permission.may_store_full_text else None,
-        excerpt=_excerpt(extracted.text, permission),
+        excerpt=excerpt(extracted.text, permission),
         simhash=simhash(extracted.text) if extracted.text else None,
         retention_until=(
             retrieved_at + timedelta(days=permission.retention_days)

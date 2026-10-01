@@ -92,9 +92,11 @@ def remember_next(response: Response, next_path: str | None) -> None:
 
 def private_headers(response: Response, *, sensitive: bool = False) -> Response:
     """Personal pages are never stored by a shared cache. ``sensitive`` pages (a sign-in link, an
-    unsubscribe link) also stop the browser sending their address on as a referrer."""
+    unsubscribe link) also stop the browser sending their address to another site as a referrer.
+    ``same-origin``, not ``no-referrer``: with ``no-referrer`` browsers send ``Origin: null`` on the
+    page's own form post and the origin guard refuses it."""
     response.headers["Cache-Control"] = "no-store" if sensitive else "private, no-cache"
     if sensitive:
-        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Referrer-Policy"] = "same-origin"
         response.headers["X-Robots-Tag"] = "noindex, nofollow"
     return response

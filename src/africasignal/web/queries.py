@@ -288,7 +288,10 @@ def chart_points(session: Session, situation: Situation) -> list[ChartPoint]:
 
 
 def place_by_code(session: Session, code: str) -> Place | None:
-    return session.scalars(select(Place).where(Place.code == code.upper())).one_or_none()
+    """The place with this code, ignoring case: state codes are upper case (``NG-LA``) but LGA and
+    city codes end in a lower-case slug (``NG-LA-ikeja``), so upper-casing the input alone would
+    never find them."""
+    return session.scalars(select(Place).where(func.lower(Place.code) == code.lower())).first()
 
 
 def ancestor_of_kind(session: Session, place: Place, kind: str) -> Place | None:
