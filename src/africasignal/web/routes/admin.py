@@ -58,6 +58,7 @@ NOTICES = {
     "signed_out": "You have signed out.",
     "saved": "Settings saved.",
     "unchanged": "Nothing to change.",
+    "owner_saved": "Owner saved.",
     "suspended": "Publication suspended. Nothing new is published and no notification goes out.",
     "resumed_publication": "Publication resumed.",
 }
@@ -353,6 +354,21 @@ def new_permission_version(
     except ConsoleError as exc:
         return _source_page(request, db, auth, source_id, 400, error=str(exc), form=form)
     return _redirect(f"/admin/sources/{source_id}?notice=new_version", auth)
+
+
+@router.post("/sources/{source_id}/owner")
+def set_owner(
+    source_id: int,
+    request: Request,
+    auth: AdminOperator,
+    db: DbSession,
+    owner: Annotated[str, Form()] = "",
+) -> Response:
+    try:
+        console.set_source_owner(db, auth.operator, source_id, owner)
+    except ConsoleError as exc:
+        return _source_page(request, db, auth, source_id, 400, error=str(exc))
+    return _redirect(f"/admin/sources/{source_id}?notice=owner_saved", auth)
 
 
 @router.post("/sources/{source_id}/pause")

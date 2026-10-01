@@ -13,6 +13,7 @@ from sqlalchemy import (
     Integer,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -78,3 +79,22 @@ class SourcePermission(CreatedMixin, Base):
     )
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     review_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+discovered_domain_status = pg_enum("discovered_domain_status", "rejected", "added")
+
+
+class DiscoveredDomainDecision(CreatedMixin, Base):
+    """What an operator decided about a domain GDELT pointed to (B6.7): ``rejected`` hides it from
+    the report; ``added`` means a source was created for it (inactive, with no permission yet)."""
+
+    __tablename__ = "discovered_domain_decision"
+
+    domain: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    status: Mapped[str] = mapped_column(discovered_domain_status, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    decided_by_operator_id: Mapped[int] = mapped_column(ForeignKey("operator.id"), nullable=False)
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("source.id"))
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

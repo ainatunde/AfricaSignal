@@ -287,7 +287,8 @@ result in the app database (settings `ops.backup_status` and `ops.restore_drill_
 | `backup_stale` | The last successful backup is older than **Settings > Backup storage > Alert when the last backup is older than** (default 36 hours), or, outside development, none has been recorded in that long since the job first ran. | A backup succeeds. |
 | `restore_drill_failed` | The last restore drill did not pass (the alert text says why). | A later drill passes. |
 
-Where to see them: the console's **Audit log** has an `alert.opened` row (operator "system") when an
+Where to see them: the console's **Alerts** page (admin only) lists every alert, open ones first, with
+the last backup and restore-drill results. The **Audit log** also has an `alert.opened` row (operator "system") when an
 alert opens and `alert.resolved` when it clears, and the app logs an `ALERT ... still open` error line
 every hour while it stays open. The current state is the `ops.alert.backup_stale` and
 `ops.alert.restore_drill_failed` rows of the `setting` table:

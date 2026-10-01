@@ -1,0 +1,23 @@
+{% extends "admin/base.html" %}
+{% block title %}Channel posts{% endblock %}
+{% block content %}
+<h1>Channel posts</h1>
+<p><strong>Drafts only.</strong> The app never posts anything. Copy the text and post it yourself from the WhatsApp channel or X account. These are material changes published in the last {{ days }} days:
+  {% for n in (7, 14, 30) %}{% if n == days %}<strong>{{ n }}</strong>{% else %}<a href="/admin/channel-posts?days={{ n }}">{{ n }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}.
+The links end in <code>?ref=wa</code> or <code>?ref=x</code> so the Metrics page can count visits from each channel.</p>
+{% for problem in problems %}
+<p class="error" role="alert">No draft for this one: {{ problem }}</p>
+{% endfor %}
+{% for item in posts %}
+<section>
+  <h2>{{ item.situation_slug }} · version {{ item.version }}</h2>
+  <p class="muted">Published {{ item.published_at|when }}</p>
+  <h3>WhatsApp ({{ item.whatsapp.text|length }} characters)</h3>
+  <textarea readonly rows="6" aria-label="WhatsApp post for {{ item.situation_slug }}">{{ item.whatsapp.text }}</textarea>
+  <h3>X ({{ item.x.text|length }} characters)</h3>
+  <textarea readonly rows="4" aria-label="X post for {{ item.situation_slug }}">{{ item.x.text }}</textarea>
+</section>
+{% else %}
+{% if not error and not problems %}<p>No material change was published in this period.</p>{% endif %}
+{% endfor %}
+{% endblock %}

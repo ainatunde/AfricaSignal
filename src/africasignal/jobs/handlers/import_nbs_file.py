@@ -14,6 +14,7 @@ with the operator's original URL.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date
 
 from africasignal.catalog import load_items
@@ -29,11 +30,17 @@ log = logging.getLogger("africasignal.import_nbs_file")
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
+# The only objects this job may read and then delete: a flat name under ``uploads/``, as the
+# console writes it. A payload cannot point it at evidence or backups (security review S-19).
+UPLOAD_KEY = re.compile(r"uploads/[A-Za-z0-9._-]{1,120}\.xlsx")
+
 
 @register("import_nbs_file")
 def import_nbs_file(ctx: JobContext) -> None:
     session = ctx.session
     payload = ctx.job.payload
+    if not UPLOAD_KEY.fullmatch(str(payload.get("storage_key", ""))):
+        raise ValueError("storage_key must be a file name under uploads/")
     source = session.get(Source, payload["source_id"])
     if source is None:
         raise ValueError(f"source {payload['source_id']} does not exist")
