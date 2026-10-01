@@ -360,6 +360,29 @@ def test_choosing_a_place_sets_a_cookie_and_shows_its_situations(
     assert client.get("/?place=nowhere", follow_redirects=False).status_code == 200
 
 
+def test_a_place_with_a_lower_case_slug_code_can_be_chosen(
+    session: Session, store: S3Store, source: Source, places: dict[str, int], client: TestClient
+) -> None:
+    """The loader gives LGAs codes like ``NG-LA-ikeja`` (state code plus a lower-case slug). The
+    picker, the locate button and the place page all pass that code back; looking it up in upper
+    case found nothing, so choosing a local government area silently did nothing."""
+    from africasignal.models import Place
+    from africasignal.places.load import add_alias
+
+    seed_petrol(session, store, source)
+    ikeja = Place(kind="lga", name="Ikeja", code="NG-LA-ikeja", parent_id=places["NG-LA"])
+    session.add(ikeja)
+    session.flush()
+    add_alias(session, ikeja.id, "Ikeja")
+    found = client.get("/?q=ikeja")
+    assert 'href="/?place=NG-LA-ikeja"' in found.text
+    chosen = client.get("/?place=NG-LA-ikeja", follow_redirects=False)
+    assert chosen.status_code == 303 and "place=NG-LA-ikeja" in chosen.headers["set-cookie"]
+    assert "For you in Ikeja" in text_of(client.get("/").text)
+    assert "not for Ikeja itself" in text_of(client.get("/places/NG-LA-ikeja").text)
+    assert client.get("/places/ng-la-IKEJA").status_code == 200
+
+
 def test_a_state_user_does_not_see_other_states(
     session: Session, store: S3Store, source: Source, client: TestClient
 ) -> None:

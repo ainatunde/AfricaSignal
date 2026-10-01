@@ -55,7 +55,9 @@ def test_a_refused_cross_origin_post_still_gets_the_headers(client: TestClient) 
 def test_the_consoles_own_headers_are_not_replaced(client: TestClient) -> None:
     response = client.get("/admin/login")
     assert response.headers["content-security-policy"].startswith("default-src 'none'")
-    assert response.headers["referrer-policy"] == "no-referrer"
+    # Never "no-referrer": browsers then send "Origin: null" on a same-origin form post, which the
+    # origin guard refuses, so the sign-in form would not work in a real browser.
+    assert response.headers["referrer-policy"] == "same-origin"
 
 
 def test_hsts_is_sent_outside_development_only(

@@ -96,7 +96,8 @@ def test_a_mail_scanner_opening_the_link_does_not_use_it_up(
     for _ in range(3):  # a scanner, then a preview, then the person's mail app
         page = client.get("/signin/verify", params={"token": token})
         assert page.status_code == 200 and "Press the button" in page.text
-        assert page.headers["referrer-policy"] == "no-referrer"
+        # not no-referrer: see test_web_security
+        assert page.headers["referrer-policy"] == "same-origin"
         assert page.headers["cache-control"] == "no-store"
     assert "as_session" not in page.headers.get("set-cookie", "")
     assert client.get("/account", follow_redirects=False).status_code == 303  # not signed in yet
