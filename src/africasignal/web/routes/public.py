@@ -263,13 +263,33 @@ def explore(
 
 
 def _summary(version: Any) -> dict[str, Any] | None:
+    if version.template == "T2_policy_change":
+        return _policy_summary(version)
     current = queries.fact_by_label(version, "Current price")
     if current is None:
         return None
     return {
+        "kind": "price",
         "current": current,
         "mom": queries.fact_by_label(version, "Month-on-month change"),
         "yoy": queries.fact_by_label(version, "Year-on-year change"),
+    }
+
+
+def _policy_summary(version: Any) -> dict[str, Any] | None:
+    """Rate in force, the one before it, the change and any rate announced but not yet in force."""
+    current = queries.fact_by_label(version, "Current rate")
+    announced = queries.fact_by_label(version, "Announced rate")
+    if current is None and announced is None:
+        return None
+    change = queries.fact_by_label(version, "Change in rate")
+    return {
+        "kind": "policy",
+        "current": current,
+        "previous": queries.fact_by_label(version, "Previous rate"),
+        "change": change,
+        "announced": announced,
+        "source": next((f.get("source_label") for f in version.facts if f.get("source_label")), ""),
     }
 
 

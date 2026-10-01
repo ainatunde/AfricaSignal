@@ -490,3 +490,32 @@ def test_check_health_is_enqueued_every_fifteen_minutes(
     assert _kinds(factory) == ["check_health"]
     _tick(factory, t.replace(minute=20))
     assert _kinds(factory) == ["check_health", "check_health"]
+
+
+def test_load_all_imports_every_handler_and_source_module() -> None:
+    """A new handler file is picked up without being listed anywhere (run in a fresh interpreter
+    because the other tests here swap out the registry)."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import africasignal
+
+    root = Path(africasignal.__file__).parent
+    expected = {
+        f"africasignal.{package}.{path.stem}"
+        for package in ("jobs.handlers", "sources")
+        for path in (root / package.replace(".", "/")).glob("*.py")
+        if not path.stem.startswith("_")
+    }
+    code = (
+        "import sys; from africasignal.jobs.handlers import HANDLERS, load_all; load_all();"
+        "print('\\n'.join(sorted(m for m in sys.modules if m.startswith('africasignal.'))));"
+        "print('--'); print('\\n'.join(sorted(HANDLERS)))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    ).stdout
+    modules, kinds = (part.split() for part in out.split("--\n"))
+    assert expected <= set(modules)
+    assert {"fetch_source", "check_health", "check_backups", "gdelt_poll"} <= set(kinds)

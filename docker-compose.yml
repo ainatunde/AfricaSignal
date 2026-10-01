@@ -51,6 +51,15 @@ services:
       db:
         condition: service_healthy
 
+  # One-off: load Nigeria's places (country, states, LGAs, cities of 50,000 or more). Safe to re-run.
+  # `docker compose --profile setup run --rm places`. Needs outbound access to
+  # media.githubusercontent.com and download.geonames.org. A fresh deployment has no places until
+  # this has run (docs/runbook.md, "Places").
+  places:
+    <<: *app
+    profiles: ["setup"]
+    command: ["python", "-m", "africasignal.places.load", "--cache", "/tmp/places", "--geonames"]
+
   web:
     <<: *app
     # Same as the image's default, spelled out so `docker compose config` shows it: uvicorn's

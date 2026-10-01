@@ -12,9 +12,11 @@ change before it goes in.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 import time
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -119,6 +121,33 @@ def download_boundaries(cache_dir: Path | None = None) -> dict[str, bytes]:
             )
         out[spec.level] = content
     return out
+
+
+GEONAMES_URL = "https://download.geonames.org/export/dump/NG.zip"
+GEONAMES_ATTRIBUTION = "GeoNames (geonames.org, CC BY 4.0)"
+
+
+def download_geonames(cache_dir: Path | None = None) -> str:
+    """The text of GeoNames' ``NG.txt``: from ``cache_dir/NG.txt`` if there, else downloaded from
+    the NG.zip dump. The dump changes daily, so it cannot be pinned by hash like the boundaries;
+    ``load_cities`` keeps only populated places of 50,000 people or more."""
+    cached = cache_dir / "NG.txt" if cache_dir else None
+    if cached is not None and cached.exists():
+        return cached.read_text(encoding="utf-8")
+    result = _fetch_politely(GEONAMES_URL)
+    if not result.success:
+        raise PlacesDataError(
+            f"could not download {GEONAMES_URL}: {result.error or result.status_code}"
+        )
+    try:
+        with zipfile.ZipFile(io.BytesIO(result.content)) as archive:
+            text_ = archive.read("NG.txt").decode("utf-8")
+    except (zipfile.BadZipFile, KeyError) as exc:
+        raise PlacesDataError(f"{GEONAMES_URL} is not a GeoNames NG.zip: {exc}") from exc
+    if cached is not None:
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        cached.write_text(text_, encoding="utf-8")
+    return text_
 
 
 def _features(
@@ -400,7 +429,7 @@ def load_aliases(session: Session, path: Path | None = None) -> dict[str, int]:
 
 
 def main() -> None:
-    """``python -m africasignal.places.load [--cache DIR] [--cities NG.txt]``"""
+    """``python -m africasignal.places.load [--cache DIR] [--cities NG.txt | --geonames]``"""
     import argparse
 
     from africasignal.db import session_scope
@@ -409,6 +438,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Load Nigerian places into the database.")
     parser.add_argument("--cache", type=Path, default=Path("data/places"), help="download cache")
     parser.add_argument("--cities", type=Path, help="a GeoNames NG.txt file (optional)")
+    parser.add_argument(
+        "--geonames",
+        action="store_true",
+        help="download GeoNames' NG.zip and load cities of 50,000 or more (CC BY 4.0)",
+    )
     args = parser.parse_args()
     configure_logging()
 
@@ -417,10 +451,15 @@ def main() -> None:
     with session_scope() as session:
         counts = load_boundaries(session, dict(files), version)
         log.info("boundaries loaded: %s", counts)
-        if args.cities:
-            log.info(
-                "cities loaded: %d", load_cities(session, args.cities.read_text(encoding="utf-8"))
-            )
+        cities = (
+            args.cities.read_text(encoding="utf-8")
+            if args.cities
+            else download_geonames(args.cache)
+            if args.geonames
+            else None
+        )
+        if cities is not None:
+            log.info("cities loaded: %d (%s)", load_cities(session, cities), GEONAMES_ATTRIBUTION)
         log.info("aliases loaded: %s", load_aliases(session))
 
 

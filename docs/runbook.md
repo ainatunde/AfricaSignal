@@ -346,3 +346,20 @@ everyone after 50 failures on one account in 15 minutes (refused attempts are no
 never gets longer by being tried). To let the operator in at once:
 `python -m africasignal.admin unlock-operator --email ...`. Failures and lockouts are in the audit log
 (`operator.sign_in_failed`, `operator.sign_in_locked`).
+
+## 9. Places (first deployment)
+
+A fresh deployment has no places: situations, the place picker and claim extraction all need them.
+After the first `docker compose up` (migrations run in the `migrate` service), load them once:
+
+```sh
+docker compose --profile setup run --rm places
+```
+
+This loads the country, the 37 states, the 774 LGAs (geoBoundaries gbOpen, CC BY 4.0, pinned by
+SHA-256), the place aliases in `config/place_aliases.yaml`, and the GeoNames cities of 50,000 people
+or more (CC BY 4.0; the dump is not pinned because GeoNames updates it daily). It needs outbound
+access to `media.githubusercontent.com` and `download.geonames.org`, and is safe to re-run, for
+example after adding an alias. If the boundary hash check fails, upstream has republished the files:
+read the new files, then update `BOUNDARY_FILES` in `src/africasignal/places/load.py`. Outside
+Docker: `scripts/load_places.sh --geonames`.

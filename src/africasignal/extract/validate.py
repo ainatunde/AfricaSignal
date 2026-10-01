@@ -15,6 +15,9 @@ Checks, in this order (the first failure is the stored reason):
    future" when it has a future marker such as "will", "is expected to" or "from next month";
    those may carry a future date (a tariff taking effect next month).
 5. ``unknown_item_code`` / ``unknown_policy_series``: a code that is not in the allowed lists.
+6. ``invalid_field``: ``claim_type``, ``direction`` or ``time_precision`` is not one of the allowed
+   words (S-09). The claim is kept as invalid with that field set to its neutral value, so a
+   model that slips a new word in cannot fail the whole document at the database.
 """
 
 from __future__ import annotations
@@ -31,6 +34,11 @@ INVALID_DATE = "invalid_date"
 FUTURE_DATE = "future_date"
 UNKNOWN_ITEM_CODE = "unknown_item_code"
 UNKNOWN_POLICY_SERIES = "unknown_policy_series"
+INVALID_FIELD = "invalid_field"
+
+CLAIM_TYPES = ("price_statement", "policy_statement", "other")
+DIRECTIONS = ("up", "down", "unchanged", "unknown")
+TIME_PRECISIONS = ("day", "month", "year", "unknown")
 
 _SCALES = {
     "thousand": Decimal(10) ** 3,
@@ -120,6 +128,11 @@ def _stated_value(raw: Any) -> Decimal | None:
         return Decimal("NaN")
 
 
+def _word(raw: dict[str, Any], name: str, allowed: tuple[str, ...], neutral: str) -> str:
+    value = raw.get(name)
+    return value if isinstance(value, str) and value in allowed else neutral
+
+
 def validate_claim(
     raw: dict[str, Any],
     document_text: str,
@@ -154,8 +167,17 @@ def validate_claim(
     elif raw.get("policy_series") is not None and raw["policy_series"] not in allowed_policy_series:
         reason = UNKNOWN_POLICY_SERIES
 
+    claim_type = _word(raw, "claim_type", CLAIM_TYPES, "other")
+    direction = _word(raw, "direction", DIRECTIONS, "unknown")
+    time_precision = _word(raw, "time_precision", TIME_PRECISIONS, "unknown")
+    if reason is None and (
+        (claim_type, direction, time_precision)
+        != (raw.get("claim_type"), raw.get("direction"), raw.get("time_precision"))
+    ):
+        reason = INVALID_FIELD
+
     return ValidatedClaim(
-        claim_type=raw["claim_type"],
+        claim_type=claim_type,
         text=raw["text"],
         passage=passage,
         passage_start=span[0] if span else None,
@@ -164,10 +186,10 @@ def validate_claim(
         policy_series=raw.get("policy_series"),
         stated_value=value if value is not None and value.is_finite() else None,
         stated_unit=raw.get("stated_unit"),
-        direction=raw["direction"],
+        direction=direction,
         occurred_from=occurred_from,
         occurred_to=occurred_to,
-        time_precision=raw["time_precision"],
+        time_precision=time_precision,
         place_candidates=[str(p) for p in raw.get("place_candidates", [])],
         valid=reason is None,
         invalid_reason=reason,

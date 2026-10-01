@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+import pkgutil
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -39,33 +41,11 @@ def get_handler(kind: str) -> Handler | None:
 
 
 def load_all() -> None:
-    """Import every handler module so its ``@register`` runs. Called by the worker and the
-    scheduler at startup."""
-    from africasignal.jobs.handlers import (  # noqa: F401
-        apply_retention,
-        assess_situation,
-        check_backups,
-        check_health,
-        dispatch_outbox,
-        expire_assessments,
-        explain_version,
-        extract_claims,
-        fetch_source,
-        gdelt_fetch_article,
-        gdelt_poll,
-        import_nbs_file,
-        invalidate,
-        notify_followers,
-        process_document,
-        prune_events,
-        release_held_versions,
-        resolve_places,
-        weekly_digest,
-    )
-    from africasignal.sources import (  # noqa: F401  (register the source adapters)
-        gdelt,
-        nbs,
-        nerc,
-        price_announcements,
-        rss,
-    )
+    """Import every handler module, and every source adapter module, so its ``@register`` runs.
+    Called by the worker and the scheduler at startup. Modules are found, not listed, so a new
+    handler file cannot be forgotten here and left as a job kind nobody runs."""
+    for name in (__name__, "africasignal.sources"):
+        package = importlib.import_module(name)
+        for module in pkgutil.iter_modules(package.__path__):
+            if not module.name.startswith("_"):
+                importlib.import_module(f"{name}.{module.name}")

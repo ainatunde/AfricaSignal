@@ -125,7 +125,9 @@ scripts/load_places.sh    # 1 country, 37 states, 774 LGAs and place aliases; sa
 
 Boundaries are geoBoundaries gbOpen for Nigeria (CC BY 4.0, attribution: William & Mary geoLab),
 pinned by SHA-256 in `src/africasignal/places/load.py`. Extra names live in
-`config/place_aliases.yaml`. Pass `--cities NG.txt` to add GeoNames cities of 50,000 or more.
+`config/place_aliases.yaml`. Pass `--geonames` to download GeoNames' Nigeria dump and add cities of 50,000 or more (or
+`--cities NG.txt` for a file you already have). In Docker:
+`docker compose --profile setup run --rm places` (see `docs/runbook.md`, section 9).
 
 ## Configuration
 
