@@ -3,6 +3,7 @@
 from africasignal.models.assessments import (
     AssessmentInput,
     AssessmentVersion,
+    OperatorPolicySeries,
     Situation,
 )
 from africasignal.models.base import Base
@@ -55,6 +56,7 @@ __all__ = [
     "MeasurementReview",
     "Notification",
     "Operator",
+    "OperatorPolicySeries",
     "OperatorSignInFailure",
     "Outbox",
     "Place",
