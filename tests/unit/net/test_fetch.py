@@ -1,4 +1,5 @@
 import socket
+from collections.abc import Iterator
 
 import httpx
 import pytest
@@ -303,6 +304,62 @@ def test_payload_within_limit_is_returned(web: FakeWeb) -> None:
 def test_body_exactly_at_limit_is_allowed(web: FakeWeb) -> None:
     web.add(URL, content=b"x" * 100)
     assert fetch_document(URL, max_bytes=100).success is True
+
+
+# --- a deadline for the whole fetch (security review S-14) -----------------------------------------
+
+
+class SlowStream(httpx.SyncByteStream):
+    """A body that trickles in: each chunk takes ``seconds`` of the fake clock."""
+
+    def __init__(self, clock: list[float], seconds: float, chunks: int) -> None:
+        self._clock, self._seconds, self._chunks = clock, seconds, chunks
+        self.sent = 0
+
+    def __iter__(self) -> Iterator[bytes]:
+        for _ in range(self._chunks):
+            self._clock[0] += self._seconds
+            self.sent += 1
+            yield b"x"
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    now = [1000.0]
+    monkeypatch.setattr(fetch_mod, "_monotonic", lambda: now[0])
+    return now
+
+
+def test_a_trickling_body_is_cut_off_at_the_deadline(web: FakeWeb, clock: list[float]) -> None:
+    stream = SlowStream(clock, seconds=14.0, chunks=10_000)
+    web.add(URL, stream=stream)
+    result = fetch_document(URL, deadline=60.0)
+    assert result.success is False and "took longer than 60 seconds" in (result.error or "")
+    assert stream.sent <= 6  # stopped within the deadline, not after ten thousand chunks
+    assert result.content == b""
+
+
+def test_a_slow_redirect_chain_is_cut_off_at_the_deadline(web: FakeWeb, clock: list[float]) -> None:
+    def slow_redirect(request: httpx.Request) -> httpx.Response:
+        clock[0] += 40.0
+        return httpx.Response(302, headers={"Location": URL + "/next"})
+
+    def second_hop(request: httpx.Request) -> httpx.Response:
+        clock[0] += 40.0
+        return httpx.Response(302, headers={"Location": URL + "/last"})
+
+    web.add(URL, handler=slow_redirect)
+    web.add(URL + "/next", handler=second_hop)
+    web.add(URL + "/last", content=b"never reached")
+    result = fetch_document(URL, deadline=60.0)
+    assert result.success is False and "took longer than 60 seconds" in (result.error or "")
+    assert URL + "/last" not in web.fetched()
+
+
+def test_a_fetch_inside_the_deadline_is_untouched(web: FakeWeb, clock: list[float]) -> None:
+    web.add(URL, stream=SlowStream(clock, seconds=1.0, chunks=5))
+    result = fetch_document(URL, deadline=60.0)
+    assert result.success and result.content == b"xxxxx"
 
 
 # --- failures never raise ------------------------------------------------------------------------

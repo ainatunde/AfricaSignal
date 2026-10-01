@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from africasignal import metrics, settings_store
 from africasignal.net.netutil import USER_AGENT
 from africasignal.publish import deletions, retention
-from africasignal.publish.login_tokens import LOGIN_TOKEN_TTL, SESSION_TTL
+from africasignal.publish.login_tokens import IDLE_LIMIT, LOGIN_TOKEN_TTL, SESSION_TTL
 from africasignal.web import queries
 from africasignal.web.analytics import SESSION_COOKIE
 from africasignal.web.render import render
@@ -122,6 +122,7 @@ def privacy(request: Request, db: Db) -> Response:
         event_retention=f"{metrics.RETENTION.days // 31} months",
         login_link_minutes=int(LOGIN_TOKEN_TTL.total_seconds() // 60),
         session_days=SESSION_TTL.days,
+        idle_days=IDLE_LIMIT.days,
         backup_days=retention_days,
         ledger_days=(timedelta(days=retention_days or 30) + deletions.LEDGER_MARGIN).days,
         feedback_months=retention.feedback_retention_months(db),

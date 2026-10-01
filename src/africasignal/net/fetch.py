@@ -9,11 +9,14 @@ Enforces:
 - robots.txt and per-domain rate limits: abstains when disallowed.
 - Conditional GET (RFC 9110): If-None-Match / If-Modified-Since, payload restored on 304.
 - ``max_bytes`` limit on declared and streamed size.
+- A deadline for the whole fetch (redirects and body), on top of the per-operation ``timeout``, so
+  a server that sends one byte every few seconds cannot hold a worker for hours.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
 
@@ -28,6 +31,8 @@ log = logging.getLogger("africasignal.net.fetch")
 
 REDIRECT_STATUSES = (301, 302, 303, 307, 308)  # not 304 Not Modified
 MAX_REDIRECTS = 5
+DEFAULT_DEADLINE_SECONDS = 60.0
+_monotonic = time.monotonic  # a name of our own so tests can move the clock
 
 
 @dataclass
@@ -47,6 +52,10 @@ class FetchResult:
     def success(self) -> bool:
         """True strictly when the response was 200 OK without errors or abstention."""
         return self.status_code == 200 and self.error is None and not self.abstained
+
+
+def _deadline_error(deadline: float) -> str:
+    return f"Request timed out: the whole fetch took longer than {deadline:g} seconds"
 
 
 def _cached_result(
@@ -76,8 +85,13 @@ def fetch_document(
     use_cache: bool = True,
     http_cache: HttpCache | None = None,
     max_requests_per_hour: int | None = None,
+    deadline: float = DEFAULT_DEADLINE_SECONDS,
 ) -> FetchResult:
     """Fetch an HTTP document with SSRF protection, politeness gating, caching and size bounds.
+
+    ``timeout`` limits each network operation; ``deadline`` limits the whole fetch. It is checked
+    between redirect hops and between body chunks, so a fetch can overrun it by at most one
+    ``timeout``.
 
     ``max_requests_per_hour`` sets the per-domain rate for this request's host (pass the source's
     ``max_requests_per_hour``); by default a domain is limited to one request per second.
@@ -120,6 +134,11 @@ def fetch_document(
         req_headers.update(cache.get_conditional_headers(url))
 
     # 4. Request, following redirects by hand so every hop is checked
+    started = _monotonic()
+
+    def out_of_time() -> bool:
+        return _monotonic() - started > deadline
+
     try:
         with httpx.Client(
             timeout=timeout,
@@ -137,6 +156,10 @@ def fetch_document(
 
                 if resp.status_code not in REDIRECT_STATUSES:
                     break
+
+                if out_of_time():
+                    resp.close()
+                    return FetchResult(url=current_url, error=_deadline_error(deadline))
 
                 if hops >= MAX_REDIRECTS:
                     resp.close()
@@ -229,6 +252,13 @@ def fetch_document(
             chunks: list[bytes] = []
             total_size = 0
             for chunk in resp.iter_bytes():
+                if out_of_time():
+                    resp.close()
+                    return FetchResult(
+                        url=current_url,
+                        status_code=resp.status_code,
+                        error=_deadline_error(deadline),
+                    )
                 total_size += len(chunk)
                 if total_size > max_bytes:
                     resp.close()

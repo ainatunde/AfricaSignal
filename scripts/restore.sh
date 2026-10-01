@@ -13,6 +13,7 @@
 #   --recreate          drop and create the target database first (otherwise it must be empty)
 #   --restore-objects   copy the backed-up objects into the RESTORE_S3_* bucket
 #   --verify-objects N  check that N random evidence_document.storage_key objects exist in the RESTORE_S3_* bucket
+#   --no-verify         restore a dump that has no .sha256 beside it (otherwise a missing checksum is an error)
 #   --overwrite-live    allow the target to be the same database as DATABASE_URL, or ENV=production
 #
 # Where the backups are comes from the console settings or the BACKUP_* variables, exactly as in
@@ -34,7 +35,7 @@ OPS_LOG_FILE="${RESTORE_LOG_FILE:-}"
 target_url="${RESTORE_DATABASE_URL:-}"
 backup_name=latest
 local_file=""
-do_list=0 recreate=0 restore_objects=0 overwrite_live=0
+do_list=0 recreate=0 restore_objects=0 overwrite_live=0 no_verify=0
 verify_objects=0
 
 while [ $# -gt 0 ]; do
@@ -47,6 +48,7 @@ while [ $# -gt 0 ]; do
     --restore-objects) restore_objects=1 ;;
     --verify-objects) verify_objects="${2:?--verify-objects needs a value}"; shift ;;
     --overwrite-live) overwrite_live=1 ;;
+    --no-verify) no_verify=1 ;;
     -h | --help)
       sed -n '2,/^set -Eeuo/p' "$0" | sed '$d; s/^# \{0,1\}//'
       exit 0
@@ -60,6 +62,7 @@ WORKDIR=""
 trap '[ -z "$WORKDIR" ] || rm -rf "$WORKDIR"' EXIT
 umask 077
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/africasignal-restore.XXXXXX")"
+pgpass_init # database passwords go in a private file, not on the command line
 passphrase_init
 
 case "$verify_objects" in '' | *[!0-9]*) die "--verify-objects needs a number" ;; esac
@@ -112,7 +115,8 @@ if [ -f "$WORKDIR/$name.sha256" ]; then
   [ "$expected" = "$actual" ] || die "checksum mismatch for $name (expected $expected, got $actual)"
   log "checksum ok"
 else
-  log "warning: no .sha256 alongside $name; skipping checksum"
+  [ "$no_verify" -eq 1 ] || die "no .sha256 alongside $name, so the dump cannot be checked; pass --no-verify to restore it anyway"
+  log "warning: no .sha256 alongside $name; checksum not verified (--no-verify)"
 fi
 
 dump="$WORKDIR/$name"

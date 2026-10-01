@@ -25,9 +25,75 @@ require_cmd() {
 
 # The app's DATABASE_URL uses the SQLAlchemy driver suffix (postgresql+psycopg://); libpq tools
 # want a plain postgresql:// URL.
+# When pgpass_init has run, a password in the URL is moved to the pgpass file and left out of the
+# URL, so it does not appear in the command line (`ps`) of pg_dump, pg_restore or psql.
 libpq_url() {
-  local url="$1"
-  printf '%s' "$url" | sed -E 's#^postgres(ql)?\+[a-z0-9_]+://#postgresql://#; s#^postgres://#postgresql://#'
+  local url
+  url="$(printf '%s' "$1" | sed -E 's#^postgres(ql)?\+[a-z0-9_]+://#postgresql://#; s#^postgres://#postgresql://#')"
+  if [ -n "${OPS_PGPASSFILE:-}" ]; then
+    url="$(pgpass_move_password "$url")"
+  fi
+  printf '%s' "$url"
+}
+
+# Needs $WORKDIR (a private directory). Exports PGPASSFILE, which libpq tools read the password from.
+pgpass_init() {
+  OPS_PGPASSFILE="$WORKDIR/pgpass"
+  : >"$OPS_PGPASSFILE"
+  # Keep what a caller already provided (restore-drill.sh runs restore.sh with URLs that carry no
+  # password; a PGPASSFILE the operator set is honoured too).
+  if [ -n "${PGPASSFILE:-}" ] && [ -f "$PGPASSFILE" ] && [ "$PGPASSFILE" != "$OPS_PGPASSFILE" ]; then
+    cat "$PGPASSFILE" >>"$OPS_PGPASSFILE"
+  fi
+  chmod 600 "$OPS_PGPASSFILE"
+  export PGPASSFILE="$OPS_PGPASSFILE"
+}
+
+# Percent-decode a URL component.
+pct_decode() {
+  local s="${1//\\/\\\\}"
+  printf '%b' "${s//%/\\x}"
+}
+
+# pgpass_move_password URL: append the URL's password to the pgpass file and print the URL without
+# it. A URL with no password is printed unchanged.
+pgpass_move_password() {
+  local url="$1" rest authority tail creds hostport user pass host port
+  case "$url" in *://*:*@*) ;; *)
+    printf '%s' "$url"
+    return 0
+    ;;
+  esac
+  rest="${url#*://}"
+  authority="${rest%%/*}"
+  tail="${rest#"$authority"}"
+  case "$authority" in *:*@*) ;; *)
+    printf '%s' "$url"
+    return 0
+    ;;
+  esac
+  creds="${authority%@*}"
+  hostport="${authority##*@}"
+  user="${creds%%:*}"
+  pass="${creds#*:}"
+  host="*"
+  port="*"
+  case "$hostport" in
+    \[*) ;; # an IPv6 literal: leave host and port as wildcards
+    *:*)
+      host="${hostport%:*}"
+      port="${hostport##*:}"
+      ;;
+    *) host="$hostport" ;;
+  esac
+  [ -n "$host" ] || host="*"
+  [ -n "$port" ] || port="*"
+  user="$(pct_decode "$user")"
+  pass="$(pct_decode "$pass")"
+  pgpass_field() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/:/\\:/g'; }
+  printf '%s:%s:*:%s:%s\n' "$(pgpass_field "$host")" "$(pgpass_field "$port")" \
+    "$(pgpass_field "$user")" "$(pgpass_field "$pass")" >>"$OPS_PGPASSFILE"
+  printf '%s://%s@%s%s' "${url%%://*}" "${creds%%:*}" "$hostport" "$tail"
 }
 
 # Database name of a libpq URL (path component, without query string).

@@ -21,7 +21,8 @@
 #   BACKUP_S3_PREFIX                 key prefix (default africasignal/$ENV)
 #   BACKUP_DIR                       use a local directory instead of S3 (development, tests)
 #   BACKUP_RETAIN_DAYS               keep dumps this many days (default 30)
-#   BACKUP_PASSPHRASE_FILE           encrypt dumps with AES-256 using the passphrase in this file
+#   BACKUP_PASSPHRASE_FILE           encrypt dumps with AES-256 using the passphrase in this file.
+#                                    Required unless ENV is development (or unset)
 #   BACKUP_PASSPHRASE                the same, with the passphrase given directly (less safe than a file)
 #   BACKUP_HEARTBEAT_URL             healthchecks.io-style URL: pinged on start (/start), success, and failure (/fail)
 #   BACKUP_LOG_FILE                  also append log lines here
@@ -75,10 +76,16 @@ require_cmd pg_dump pg_restore sha256sum
 
 umask 077
 WORKDIR="$(mktemp -d "${BACKUP_WORKDIR:-${TMPDIR:-/tmp}}/africasignal-backup.XXXXXX")"
+pgpass_init # the database password goes in a private file, not on the pg_dump command line
 load_backup_settings
 retain_days="${BACKUP_RETAIN_DAYS:-30}"
 case "$retain_days" in '' | *[!0-9]* | 0) die "backup_retain_days / BACKUP_RETAIN_DAYS must be a positive integer" ;; esac
 passphrase_init
+# Dumps hold readers' email addresses and the rest of the database. Outside development they are
+# only ever stored encrypted (security review S-15).
+if [ "${ENV:-development}" != development ] && [ -z "${BACKUP_PASSPHRASE_FILE:-}" ]; then
+  die "ENV=${ENV}: dumps must be encrypted; set BACKUP_PASSPHRASE_FILE (or BACKUP_PASSPHRASE)"
+fi
 if [ -n "${BACKUP_PASSPHRASE_FILE:-}" ]; then
   require_cmd openssl
   [ -s "$BACKUP_PASSPHRASE_FILE" ] || die "BACKUP_PASSPHRASE_FILE is missing or empty"
