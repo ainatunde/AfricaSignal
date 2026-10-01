@@ -166,6 +166,28 @@ def test_bad_input_is_refused_and_changes_nothing(
         assert "Band A customers of" in response.text or over.get("affected_groups")
 
 
+def test_control_characters_are_cleaned_not_a_server_error(
+    admin: TestClient,
+    session: Session,
+    places: dict[str, int],  # noqa: F811
+    nerc: Source,  # noqa: F811
+) -> None:
+    response = add(
+        admin,
+        title="Electricity\x00 tariff\u202e Abuja",
+        affected_groups="Band A\x00 customers",
+        unit="NGN/kWh\x00",
+        state_codes="NG-LA\x00",
+    )
+    assert response.status_code == 303
+    row = session.scalars(select(OperatorPolicySeries)).one()
+    assert (row.title, row.affected_groups, row.unit) == (
+        "Electricity tariff Abuja",
+        "Band A customers",
+        "NGN/kWh",
+    )
+
+
 def test_a_code_cannot_make_the_slug_of_an_existing_situation(
     session: Session,
     places: dict[str, int],  # noqa: F811
