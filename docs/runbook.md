@@ -27,9 +27,15 @@ Design choices worth knowing:
   failures never empties the store.
 - **A dump is checked before upload** (`pg_restore --list` must read it) and **after restore** (schema
   version present, key tables present, row counts printed).
-- Dumps hold email addresses. Keep the backup bucket private. Set `BACKUP_PASSPHRASE_FILE` (or
-  `BACKUP_PASSPHRASE`) to also encrypt them (AES-256). **If you encrypt, store the passphrase somewhere
-  other than the server, or the backups are useless when the server is lost.**
+- Dumps hold email addresses. Keep the backup bucket private. Outside development (`ENV` is anything
+  but `development`) the backup **refuses to run without** `BACKUP_PASSPHRASE_FILE` (or
+  `BACKUP_PASSPHRASE`), which encrypts the dump (AES-256). **Store the passphrase somewhere other than
+  the server, or the backups are useless when the server is lost.**
+- The database password is passed to `pg_dump`, `pg_restore` and `psql` through a private pgpass file
+  in the script's temporary directory, never on their command lines.
+- Keep the expected checksum somewhere the backup job cannot write when you can (for example in your
+  password manager after each drill): the `.sha256` file beside a dump detects damage but not someone
+  with write access to the bucket replacing both files.
 
 ## 2. One-time setup
 
@@ -51,7 +57,7 @@ Design choices worth knowing:
    | `ENV` | `staging` or `production`; also the default bucket prefix `africasignal/<ENV>/` |
    | `DATABASE_URL`, `SECRET_KEY` | the same values the app uses. The backup job reads the console settings from that database, and decrypts the saved secrets with `SECRET_KEY` |
    | `BACKUP_AT_UTC` | optional; `HH:MM`, default `02:30` |
-   | `BACKUP_PASSPHRASE` or `BACKUP_PASSPHRASE_FILE` | optional; encrypts dumps |
+   | `BACKUP_PASSPHRASE` or `BACKUP_PASSPHRASE_FILE` | required unless `ENV=development`; encrypts dumps |
    | `BACKUP_HEARTBEAT_URL` | the ping URL from step 2 |
 
    Where a value is set, the console wins over `.env`: for each of `backup_s3_endpoint_url`,
@@ -89,7 +95,7 @@ bucket settings to back up to a local directory, and `OPS_USE_CONSOLE_SETTINGS=0
 ## 4. Restore
 
 `scripts/restore.sh` never has a default target and refuses to touch the live database unless told
-twice (`--overwrite-live`, and always so when `ENV=production`). It verifies the checksum, decrypts,
+twice (`--overwrite-live`, and always so when `ENV=production`). It verifies the checksum (a dump with no `.sha256` is refused unless you pass `--no-verify`), decrypts,
 restores in one transaction (all or nothing), then checks the schema version and table contents.
 
 Run it inside the backup container so it has the right tools and credentials:

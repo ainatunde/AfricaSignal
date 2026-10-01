@@ -49,8 +49,10 @@ def test_full_sign_in_flow(session: Session) -> None:
     assert user.email_verified_at == NOW
     assert signed_in.expires_at == NOW + timedelta(days=30)
 
-    found = user_for_session(session, signed_in.session_token, NOW + timedelta(days=29))
-    assert found is not None and found.id == user.id
+    # Used every few days, so the 7-day idle limit (S-17) never ends it before 30 days do.
+    for day in (5, 10, 15, 20, 25, 29):
+        found = user_for_session(session, signed_in.session_token, NOW + timedelta(days=day))
+        assert found is not None and found.id == user.id
     assert user_for_session(session, signed_in.session_token, NOW + timedelta(days=31)) is None
     revoke_session(session, signed_in.session_token, NOW)
     assert user_for_session(session, signed_in.session_token, NOW) is None
