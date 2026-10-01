@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from africasignal import audit
 from africasignal.models import Operator, Source, SourcePermission
 from africasignal.sources.permissions import current_permission
+from africasignal.textclean import one_line
 
 # How long an approval stands before the console asks for a fresh review of the terms.
 REVIEW_INTERVAL = timedelta(days=365)
@@ -218,7 +219,7 @@ def set_source_owner(session: Session, operator: Operator, source_id: int, owner
     """Record who owns a source (the company or group behind it). Needed before a news outlet can
     be approved (S-08); it cannot be blanked while the outlet may be collected from."""
     source = _lock_source(session, source_id)
-    owner = " ".join(owner.split())
+    owner = one_line(owner)
     if len(owner) > 200:
         raise ConsoleError("the owner must be 200 characters or fewer")
     if not owner:

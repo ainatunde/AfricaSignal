@@ -19,10 +19,12 @@ from africasignal.models import DiscoveredDomainDecision, Operator, Source
 from africasignal.operations.assessments import MAX_REASON
 from africasignal.sources import gdelt
 from africasignal.sources.gdelt import DiscoveredDomain
+from africasignal.textclean import one_line
 
 _HOST = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
 MAX_NAME = 120
 MAX_OWNER = 200
+MAX_FEED_URL = 2000
 REPORT_LIMIT = 100
 
 
@@ -72,7 +74,7 @@ def _check_in_report(session: Session, domain: str) -> str:
 def reject(
     session: Session, operator: Operator, domain: str, note: str = ""
 ) -> DiscoveredDomainDecision:
-    note = " ".join(note.split())[:MAX_REASON]
+    note = one_line(note)[:MAX_REASON]
     domain = _check_in_report(session, domain)
     row = DiscoveredDomainDecision(
         domain=domain, status="rejected", note=note or None, decided_by_operator_id=operator.id
@@ -106,6 +108,8 @@ def _slug(session: Session, domain: str) -> str:
 
 
 def _feed_on_domain(feed_url: str, domain: str) -> str:
+    if len(feed_url.strip()) > MAX_FEED_URL or any(c.isspace() for c in feed_url.strip()):
+        raise DomainError("the feed address is not a valid URL")
     try:
         parts = urlsplit(feed_url.strip())
         host = (parts.hostname or "").lower().removeprefix("www.")
@@ -120,7 +124,7 @@ def _feed_on_domain(feed_url: str, domain: str) -> str:
 
 def add_as_source(session: Session, operator: Operator, domain: str, new: NewSource) -> Source:
     """Create the source for a discovered domain: inactive, no permission."""
-    name, owner = new.name.strip(), new.owner.strip()
+    name, owner = one_line(new.name), one_line(new.owner)
     if not name or len(name) > MAX_NAME:
         raise DomainError(f"give the outlet's name (up to {MAX_NAME} characters)")
     if not owner or len(owner) > MAX_OWNER:

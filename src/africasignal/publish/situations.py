@@ -157,15 +157,19 @@ def source_is_trusted(session: Session, source: Source, now: datetime) -> bool:
     """Whether claims from ``source`` may corroborate or dispute anything (security review S-08).
 
     The source must be active with an approved permission to collect. A news outlet must also have
-    been under approval for ``MIN_OUTLET_AGE_DAYS``, counted from its first approval, so that a
-    batch of newly registered sites cannot earn an "independent report" badge by being approved
-    together. Official sources are vetted one by one and have no waiting period.
+    an owner on record (checked here as well as when approving, because a seed run or an older
+    approval can leave it blank) and have been under approval for ``MIN_OUTLET_AGE_DAYS``, counted
+    from its first approval, so that a batch of newly registered sites cannot earn an
+    "independent report" badge by being approved together. Official sources are vetted one by one
+    and have no waiting period.
     """
     permission = current_permission(session, source.id)
     if not source.active or permission is None or not permission.may_collect:
         return False
     if source.kind not in NEWS_SOURCE_KINDS:
         return True
+    if not (source.owner or "").strip():
+        return False  # the "same owner" rule has nothing to compare (S-08)
     first = session.scalar(
         select(func.min(SourcePermission.approved_at)).where(
             SourcePermission.source_id == source.id,
