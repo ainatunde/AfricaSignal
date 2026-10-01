@@ -101,7 +101,7 @@ def test_current_previous_and_change_are_computed_in_code() -> None:
     assert fact(result, "Change in rate")["value"] == 1.3  # rounded half-up to one decimal
     assert fact(result, "Change in rate")["unit"] == "%"
     assert result.change_pct == D("1.3")
-    assert result.template_version == TEMPLATE_VERSION == "T2-1"
+    assert result.template_version == TEMPLATE_VERSION == "T2-2"
 
 
 def test_a_fall_is_labelled_as_a_decrease_with_the_size_unsigned() -> None:
@@ -133,7 +133,10 @@ def test_an_unchanged_rate_says_so_and_has_no_increase_fact() -> None:
 def test_with_one_rate_there_is_no_change_to_show() -> None:
     result = assess(rate("209.50", SEP1))
     assert result.change_pct is None
-    assert "there is no previous rate to compare with" in result.headline
+    assert result.headline == (
+        "Electricity tariff, Band A, Ikeja Electric: the rate in force is ₦209.50 per kWh "
+        "(NERC document of 28 August 2026)"
+    )
     assert "The rate before this one is not available" in result.unknowns
     assert result.severity == "none"
 
@@ -205,18 +208,67 @@ def test_severity_follows_the_size_of_the_change(new: str, expected: str) -> Non
     assert result.material == (expected != "none")
 
 
-def test_an_unknown_effective_date_caps_severity_at_low() -> None:
+def test_an_unknown_effective_date_reports_no_change_and_no_severity() -> None:
     result = assess(rate("300.00", None), rate("200.00", AUG1))
-    assert result.severity == "low"  # a 50 % rise, but the date is not stated
+    assert result.severity == "none" and not result.material and result.change_pct is None
+    assert (
+        "rose" not in result.headline and "the rate in force is ₦300.00 per kWh" in result.headline
+    )
+    assert not any(f["label"].endswith("in rate") for f in result.facts)
+    assert fact(result, "Previous rate")["value"] == 200.0  # still shown, with its own date
     assert any("date this rate takes effect is not stated" in u for u in result.unknowns)
+    assert any("No change is reported" in u for u in result.unknowns)
     assert result.period_label == "effective date not stated"
     assert result.effective_from is None
 
 
 def test_a_year_only_effective_date_counts_as_unknown() -> None:
     result = assess(rate("300.00", date(2026, 1, 1), precision="year"), rate("200.00", JUL1))
-    assert result.severity == "low"
+    assert result.severity == "none" and result.change_pct is None
     assert any("not stated" in u for u in result.unknowns)
+
+
+def test_a_previous_rate_without_a_date_means_no_change_is_reported() -> None:
+    result = assess(rate("300.00", SEP1), rate("200.00", None))
+    assert result.change_pct is None and result.severity == "none"
+    assert result.headline.startswith(
+        "Electricity tariff, Band A, Ikeja Electric: the rate in force"
+    )
+    assert any("No change is reported" in u for u in result.unknowns)
+
+
+def test_a_schedule_listing_an_old_rate_is_not_reported_as_a_recent_change() -> None:
+    """The Ikeja case: a September 2026 schedule lists the rate for "August 2024 to September
+    2026" after an earlier one for May to July 2024. The page must not say it rose from 1 August
+    2024 as if that were news, and a 20 % rise two years ago must not carry a severity."""
+    schedule = datetime(2026, 9, 17, 9, 0, tzinfo=UTC)
+    result = assess(
+        rate("240.00", date(2024, 8, 1), published=schedule),
+        rate("200.00", date(2024, 5, 1), published=schedule),
+    )
+    assert result.headline == (
+        "Electricity tariff, Band A, Ikeja Electric: the rate in force is ₦240.00 per kWh "
+        "(NERC document of 17 September 2026)"
+    )
+    assert "rose" not in result.headline and "from 1 August 2024" not in result.headline
+    assert result.change_pct is None and result.severity == "none" and not result.material
+    assert [f["label"] for f in result.facts] == ["Current rate", "Previous rate"]
+    assert fact(result, "Current rate")["period"] == "from 1 August 2024"  # the table's own date
+    assert any("long before the document" in u for u in result.unknowns)
+
+
+def test_a_change_just_inside_the_recent_window_is_still_reported() -> None:
+    published = datetime(2026, 9, 17, 9, 0, tzinfo=UTC)
+    inside = rate("240.00", date(2026, 5, 20), published=published)  # 120 days before
+    outside = rate("240.00", date(2026, 5, 19), published=published)  # 121 days before
+    assert (
+        "rose 20.0%"
+        in assess(inside, rate("200.00", date(2026, 4, 1), published=published)).headline
+    )
+    assert (
+        "rose"
+        not in assess(outside, rate("200.00", date(2026, 4, 1), published=published)).headline
+    )
 
 
 def test_the_threshold_comes_from_the_series() -> None:

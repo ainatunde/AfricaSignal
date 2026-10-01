@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from africasignal import audit
+from africasignal.assess.corroboration import OFFICIAL_SOURCE_KINDS
 from africasignal.catalog import PolicySeries, load_policies
 from africasignal.models import (
     AssessmentVersion,
@@ -96,7 +97,13 @@ def listing(session: Session) -> list[SeriesRow]:
 
 
 def source_choices(session: Session) -> list[Source]:
-    return list(session.scalars(select(Source).order_by(Source.name)))
+    """Sources that can state a policy: regulators, government bodies, statistics offices and
+    companies. News outlets and aggregators only report on policy, they never set a rate."""
+    return list(
+        session.scalars(
+            select(Source).where(Source.kind.in_(OFFICIAL_SOURCE_KINDS)).order_by(Source.name)
+        )
+    )
 
 
 def _parse_states(session: Session, typed: str) -> list[str]:
@@ -142,9 +149,19 @@ def _validate(session: Session, new: NewSeries) -> tuple[PolicySeries, str]:
     slugs = list(dict.fromkeys(one_line(s) for s in new.primary_sources if one_line(s)))
     if not slugs:
         raise PolicyError("choose at least one source that publishes this policy")
-    known = set(session.scalars(select(Source.slug).where(Source.slug.in_(slugs))))
-    if known != set(slugs):
+    found = {
+        slug: kind
+        for slug, kind in session.execute(
+            select(Source.slug, Source.kind).where(Source.slug.in_(slugs))
+        )
+    }
+    if set(found) != set(slugs):
         raise PolicyError("one of the chosen sources does not exist")
+    if any(kind not in OFFICIAL_SOURCE_KINDS for kind in found.values()):
+        raise PolicyError(
+            "a policy's primary source must be a regulator, government body, statistics office "
+            "or company; news outlets only report on it"
+        )
     try:
         pct = Decimal(one_line(new.materiality_pct) or "5")
     except InvalidOperation as exc:

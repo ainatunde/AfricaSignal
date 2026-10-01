@@ -10,7 +10,7 @@
   </select>
   <label for="publication">Publication</label>
   <select id="publication" name="publication" required>
-    {% for p in publications %}<option value="{{ p }}" {{ 'selected' if form.get('publication') == p }}>{{ p }}</option>{% endfor %}
+    {% for code, name in publications %}<option value="{{ code }}" {{ 'selected' if form.get('publication') == code }}>{{ name }}</option>{% endfor %}
   </select>
   <label for="title">Release title, as NBS shows it, with the month</label>
   <input type="text" id="title" name="title" required maxlength="200" value="{{ form.get('title', '') }}" placeholder="Premium Motor Spirit (Petrol) Price Watch (October 2024)">

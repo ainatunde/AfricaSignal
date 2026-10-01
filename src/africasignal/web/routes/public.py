@@ -401,6 +401,15 @@ def register_error_pages(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> Response:
+        if exc.status_code in (403, 404) and request.url.path.startswith("/admin"):
+            from africasignal.web.routes.admin import error_page  # the console has its own look
+
+            message = (
+                "This page is for admin operators. Ask an admin if you need it."
+                if exc.status_code == 403
+                else "There is no such console page."
+            )
+            return error_page(request, exc.status_code, message)
         if exc.status_code == 404 and not request.url.path.startswith("/v1"):
             return templates.TemplateResponse(
                 request, "not_found.html", {"nav": "", "message": None}, status_code=404

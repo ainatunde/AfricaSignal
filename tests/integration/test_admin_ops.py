@@ -4,6 +4,7 @@ domains, channel posts and backup alerts. Every change is audited and admin-only
 from __future__ import annotations
 
 import io
+import re
 import zipfile
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -100,6 +101,22 @@ def test_editors_cannot_open_or_use_the_pages(client: TestClient, session: Sessi
     assert post(client, "/admin/jobs/1/retry").status_code == 403
     assert post(client, "/admin/domains/reject", domain="a.example").status_code == 403
     assert actions(session) == ["operator.sign_in"]
+
+
+def test_an_editor_who_types_an_admin_address_gets_a_console_page_not_json(
+    client: TestClient,  # noqa: F811
+    session: Session,
+) -> None:
+    signed_in(client, make_operator(session, "editor@example.org", "editor"))
+    response = client.get("/admin/jobs")
+    assert response.status_code == 403
+    assert response.headers["content-type"].startswith("text/html")
+    assert "This page is for admin operators" in response.text
+    assert '"detail"' not in response.text and 'href="/admin/sources"' in response.text
+    assert response.headers["cache-control"] == "no-store"  # still a console response
+    missing = client.get("/admin/sources/99999")
+    assert missing.status_code == 404 and "There is no such console page." in missing.text
+    assert "AfricaSignal console" in missing.text  # not the public site's 404 page
 
 
 def test_every_page_renders_empty_for_an_admin(admin: TestClient) -> None:
@@ -467,6 +484,21 @@ def upload(admin: TestClient, data: bytes, **override: str):  # type: ignore[no-
 def nbs(session: Session, store: S3Store, monkeypatch: pytest.MonkeyPatch) -> Source:
     monkeypatch.setattr(admin_ops, "store_for_session", lambda db: store)
     return make_source(session, "nbs-upload", approved_at=datetime.now(UTC))
+
+
+def test_the_publication_dropdown_shows_names_and_sends_codes(
+    admin: TestClient, nbs: Source
+) -> None:
+    page = admin.get("/admin/nbs-upload").text
+    assert re.search(r'<option value="pms"[^>]*>Petrol \(PMS\) price watch</option>', page)
+    for name in (
+        "Diesel (AGO) price watch",
+        "Household kerosene price watch",
+        "Cooking gas (LPG) price watch",
+        "Selected food prices watch",
+    ):
+        assert name in page
+    assert ">pms</option>" not in page and ">food</option>" not in page
 
 
 def test_an_nbs_file_is_stored_under_a_server_chosen_key_and_the_import_is_queued(
@@ -841,7 +873,7 @@ def test_the_source_page_shows_the_owner_form(admin: TestClient, session: Sessio
 
 def test_channel_posts_need_the_public_address(admin: TestClient) -> None:
     response = admin.get("/admin/channel-posts")
-    assert response.status_code == 400 and "public address is not set" in response.text
+    assert response.status_code == 200 and "public address is not set" in response.text
 
 
 def test_channel_posts_are_drafts_for_recent_material_changes(
@@ -888,6 +920,79 @@ def test_channel_posts_are_drafts_for_recent_material_changes(
     assert "ago_litre" not in page
     assert "ago_litre" in admin.get("/admin/channel-posts?days=60").text
     assert not [a for a in actions(session) if "post" in a]  # nothing is recorded or sent
+
+
+def test_channel_posts_are_paged_so_a_first_import_does_not_make_a_huge_page(
+    admin: TestClient, session: Session
+) -> None:
+    operator = make_operator(session, "x@example.org")
+    settings_store.apply_changes(
+        session, operator.operator, {"public_base_url": "https://africasignal.example"}
+    )
+    place = add_place(session, "NG", "Nigeria", "country")
+    now = datetime.now(UTC)
+    for n in range(45):
+        situation = add_situation(session, f"item_{n:02d}", place)
+        version = add_version(
+            session,
+            situation,
+            severity="high",
+            published_at=now - timedelta(minutes=n),  # item_00 is the newest
+            headline=f"Petrol rose {n + 1}% in Nigeria",
+        )
+        version.facts = [{"label": "Change", "value": n + 1, "unit": "%", "period": "June 2026"}]
+    session.flush()
+
+    first = admin.get("/admin/channel-posts").text
+    assert first.count("<section>") == 20
+    assert "item_00" in first and "item_19" in first and "item_20" not in first
+    assert "Showing 1 to 20 of 45" in first
+    assert 'href="/admin/channel-posts?days=7&amp;page=2">Next' in first
+    last = admin.get("/admin/channel-posts?page=3").text
+    assert last.count("<section>") == 5 and "item_44" in last
+    assert "Next" not in last and "Previous" in last
+    # a bad or out-of-range page number gives a real page, not an error
+    assert "item_00" in admin.get("/admin/channel-posts?page=abc").text
+    assert "item_44" in admin.get("/admin/channel-posts?page=99").text
+    assert "item_00" in admin.get("/admin/channel-posts?page=-4").text
+
+
+def test_assessments_page_is_paged_for_the_hold_queue_and_the_version_list(
+    admin: TestClient, session: Session
+) -> None:
+    place = add_place(session, "NG", "Nigeria", "country")
+    for n in range(60):
+        situation = add_situation(session, f"item_{n:02d}", place)
+        held = n < 45
+        version = add_version(
+            session,
+            situation,
+            status="draft" if held else "published",
+            severity="high",
+            published_at=None if held else datetime.now(UTC),
+        )
+        if held:
+            version.hold_until = datetime.now(UTC) + timedelta(minutes=n + 1)
+    session.flush()
+
+    page = admin.get("/admin/assessments").text
+    assert page.count("/withhold") == 20  # the hold queue shows 20, soonest release first
+    assert (
+        "item_00" in page
+        and "item_19" in page
+        and "item_20" not in page.split("Newest versions")[0]
+    )
+    assert "Showing 1 to 20 of 45" in page
+    assert "Showing 1 to 50 of 60" in page  # the version list: 50 a page
+    assert page.count('<a href="/s/') == 50
+    second = admin.get("/admin/assessments?page=2&held_page=3").text
+    assert second.count('<a href="/s/') == 10
+    assert second.count("/withhold") == 5  # 45 - 40
+    assert "Showing 41 to 45 of 45" in second
+    # the status filter still works and keeps its own count
+    published = admin.get("/admin/assessments?status=published").text
+    assert "Showing 1 to 15 of 15" not in published  # one page needs no pager
+    assert published.count('<a href="/s/') == 15
 
 
 # --- backup alerts ------------------------------------------------------------------------------

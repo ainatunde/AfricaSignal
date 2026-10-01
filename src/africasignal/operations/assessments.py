@@ -9,11 +9,12 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from africasignal import audit
 from africasignal.models import AssessmentVersion, Operator, Situation
+from africasignal.operations.paging import Page, page_of
 from africasignal.publish import versions
 from africasignal.publish.invalidation import withdraw_situation
 from africasignal.textclean import one_line
@@ -57,30 +58,59 @@ def clean_public_reason(reason: str) -> str:
     return text
 
 
-def recent_versions(session: Session, *, status: str = "all", limit: int = 100) -> list[VersionRow]:
-    query = (
-        select(Situation, AssessmentVersion)
-        .join(AssessmentVersion, AssessmentVersion.situation_id == Situation.id)
-        .order_by(AssessmentVersion.id.desc())
-        .limit(limit)
-    )
+VERSIONS_PER_PAGE = 50
+HELD_PER_PAGE = 20
+
+
+def recent_versions(
+    session: Session, *, status: str = "all", page: str | None = None
+) -> tuple[list[VersionRow], Page]:
+    """One page of versions, newest first, and where that page sits in the whole list."""
+    where = []
     if status in STATUS_FILTERS and status != "all":
-        query = query.where(AssessmentVersion.status == status)
-    return [
-        VersionRow(situation, version, situation.current_version_id == version.id)
-        for situation, version in session.execute(query)
-    ]
-
-
-def held_queue(session: Session) -> list[VersionRow]:
-    """First high-severity versions waiting out the R7 hold, soonest release first."""
+        where.append(AssessmentVersion.status == status)
+    total = session.scalar(
+        select(func.count())
+        .select_from(AssessmentVersion)
+        .join(Situation, AssessmentVersion.situation_id == Situation.id)
+        .where(*where)
+    )
+    where_page = page_of(page, total or 0, VERSIONS_PER_PAGE)
     rows = session.execute(
         select(Situation, AssessmentVersion)
         .join(AssessmentVersion, AssessmentVersion.situation_id == Situation.id)
-        .where(AssessmentVersion.status == "draft", AssessmentVersion.hold_until.is_not(None))
-        .order_by(AssessmentVersion.hold_until, AssessmentVersion.id)
+        .where(*where)
+        .order_by(AssessmentVersion.id.desc())
+        .limit(where_page.size)
+        .offset(where_page.offset)
     )
-    return [VersionRow(s, v, False) for s, v in rows]
+    return (
+        [
+            VersionRow(situation, version, situation.current_version_id == version.id)
+            for situation, version in rows
+        ],
+        where_page,
+    )
+
+
+def held_queue(session: Session, page: str | None = None) -> tuple[list[VersionRow], Page]:
+    """One page of the first high-severity versions waiting out the R7 hold, soonest release
+    first, and where that page sits in the whole queue."""
+    waiting = (
+        AssessmentVersion.status == "draft",
+        AssessmentVersion.hold_until.is_not(None),
+    )
+    total = session.scalar(select(func.count()).select_from(AssessmentVersion).where(*waiting))
+    held_page = page_of(page, total or 0, HELD_PER_PAGE)
+    rows = session.execute(
+        select(Situation, AssessmentVersion)
+        .join(AssessmentVersion, AssessmentVersion.situation_id == Situation.id)
+        .where(*waiting)
+        .order_by(AssessmentVersion.hold_until, AssessmentVersion.id)
+        .limit(held_page.size)
+        .offset(held_page.offset)
+    )
+    return [VersionRow(s, v, False) for s, v in rows], held_page
 
 
 def _held_version(session: Session, version_id: int) -> tuple[Situation, AssessmentVersion]:

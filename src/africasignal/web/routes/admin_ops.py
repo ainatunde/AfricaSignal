@@ -115,13 +115,19 @@ def _assessments_page(
     status = request.query_params.get("status", "all")
     if status not in assessment_ops.STATUS_FILTERS:
         status = "all"
+    held, held_page = assessment_ops.held_queue(db, request.query_params.get("held_page"))
+    rows, page = assessment_ops.recent_versions(
+        db, status=status, page=request.query_params.get("page")
+    )
     return _page(
         request,
         "admin/assessments.html",
         auth,
         status_code,
-        held=assessment_ops.held_queue(db),
-        rows=assessment_ops.recent_versions(db, status=status),
+        held=held,
+        held_page=held_page,
+        rows=rows,
+        page=page,
         status=status,
         filters=assessment_ops.STATUS_FILTERS,
         suspended=versions.publication_suspended(db),
@@ -281,7 +287,7 @@ def _upload_page(
         auth,
         status,
         sources=nbs_upload.nbs_sources(db),
-        publications=nbs_upload.publication_codes(),
+        publications=nbs_upload.publication_choices(),
         max_mb=nbs_upload.MAX_UPLOAD_BYTES // 1_000_000,
         form=form or {},
         notice=_notice(request),
@@ -493,16 +499,18 @@ def _channel_page(
     days = min(max(_int(request.query_params.get("days"), 7), 1), 60)
     found = channel_ops.Drafts()
     try:
-        found = channel_ops.drafts(db, datetime.now(UTC) - timedelta(days=days))
+        found = channel_ops.drafts(
+            db, datetime.now(UTC) - timedelta(days=days), request.query_params.get("page")
+        )
     except PostError as exc:
-        error = str(exc)
-        status = 400
+        error = str(exc)  # a setting to fill in, not a bad request: the page still answers 200
     return _page(
         request,
         "admin/channel_posts.html",
         auth,
         status,
         posts=found.posts,
+        page=found.page,
         problems=found.problems,
         suspended=found.suspended,
         recorded=channel_ops.recent_records(db),

@@ -50,6 +50,20 @@ def badge(version: Any) -> dict[str, str]:
     return {"state": version.evidence_state, "text": text, "glyph": glyph}
 
 
+def reader_headline(version: Any) -> str:
+    """The headline as readers see it. A price headline reads like news ("rose 15.0% in October
+    2024"), so once its figure is out of date (``valid_until`` has passed) it is dated outright:
+    "As of October 2024: ...". The stored headline is not changed. A policy headline always names
+    the date of its rate or document."""
+    headline: str = version.headline
+    if version.template != "T1_price_change" or version.status not in ("published", "stale"):
+        return headline
+    expired = version.valid_until is not None and version.valid_until < datetime.now(UTC)
+    if version.status == "stale" or expired:
+        return f"As of {version.period_label}: {headline}"
+    return headline
+
+
 def fmt_date(value: datetime | None) -> str:
     if value is None:
         return ""
@@ -68,6 +82,7 @@ def ucfirst(value: str) -> str:
 
 
 templates.env.filters["ucfirst"] = ucfirst
+templates.env.filters["reader_headline"] = reader_headline
 templates.env.filters["fact_value"] = fact_value_text
 templates.env.filters["change"] = format_change
 templates.env.filters["date"] = fmt_date

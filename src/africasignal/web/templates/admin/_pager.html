@@ -1,0 +1,10 @@
+{% macro pager(p, base, param="page") -%}
+{% if p.pages > 1 %}
+<nav class="pager" aria-label="Pages">
+  Showing {{ p.first }} to {{ p.last }} of {{ p.total }}
+  {% if p.number > 1 %}· <a href="{{ base }}{{ param }}={{ p.number - 1 }}">Previous</a>{% endif %}
+  · page {{ p.number }} of {{ p.pages }}
+  {% if p.number < p.pages %}· <a href="{{ base }}{{ param }}={{ p.number + 1 }}">Next</a>{% endif %}
+</nav>
+{% endif %}
+{%- endmacro %}

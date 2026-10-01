@@ -102,6 +102,31 @@ def test_adding_a_series_creates_its_situations_and_an_audit_row(
     assert "Waiting for a primary document" in page
 
 
+def test_only_official_sources_are_offered_and_accepted_as_primary(
+    admin: TestClient,
+    session: Session,
+    places: dict[str, int],  # noqa: F811
+    nerc: Source,  # noqa: F811
+) -> None:
+    for slug, kind in (
+        ("punch", "news_outlet"),
+        ("gdelt", "aggregator"),
+        ("nbs", "official_statistics"),
+    ):
+        session.add(
+            Source(slug=slug, name=f"Name of {slug}", kind=kind, adapter="rss", schedule_minutes=60)
+        )
+    session.flush()
+    page = admin.get("/admin/policies").text
+    assert 'value="nerc"' in page and 'value="nbs"' in page  # regulator, statistics office
+    assert 'value="punch"' not in page and 'value="gdelt"' not in page
+    refused = add(admin, primary_sources=["nerc", "punch"])
+    assert refused.status_code == 400 and "news outlets only report on it" in refused.text
+    assert session.scalars(select(OperatorPolicySeries)).all() == []
+    assert add(admin, primary_sources=["gdelt"]).status_code == 400
+    assert add(admin, primary_sources=["nerc", "nbs"]).status_code == 303
+
+
 def test_a_national_series_makes_one_situation(
     admin: TestClient,
     session: Session,

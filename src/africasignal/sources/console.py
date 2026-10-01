@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from africasignal import audit
+from africasignal.jobs import queue
 from africasignal.models import Operator, Source, SourcePermission
 from africasignal.sources.permissions import current_permission
 from africasignal.textclean import one_line
@@ -93,6 +94,25 @@ def _lock_source(session: Session, source_id: int) -> Source:
     return source
 
 
+def _queue_first_fetch(
+    session: Session, source: Source, permission: SourcePermission, now: datetime
+) -> None:
+    """Queue one fetch right after a collecting permission is approved, so an operator does not
+    wait out the source's schedule (6 to 24 hours) to see anything happen. Only an approved
+    permission that allows collecting reaches this, and only for an active source; the fetch job
+    checks the permission again. The key is per permission version, so an approval is never
+    swallowed by an earlier scheduled slot. GDELT has its own 15-minute poll."""
+    if not (permission.may_collect and source.active) or source.adapter == "gdelt":
+        return
+    queue.enqueue(
+        session,
+        "fetch_source",
+        {"source_id": source.id},
+        dedupe_key=f"fetch:{source.id}:approved:{permission.id}",
+    )
+    source.next_due_at = now + timedelta(minutes=source.schedule_minutes)
+
+
 def approve_permission(
     session: Session,
     operator: Operator,
@@ -133,6 +153,7 @@ def approve_permission(
     permission.terms_checked_at = now
     permission.review_due_at = now + REVIEW_INTERVAL
     session.flush()
+    _queue_first_fetch(session, source, permission, now)
     audit.record(
         session,
         operator,
@@ -184,6 +205,7 @@ def publish_permission_version(
     )
     session.add(permission)
     session.flush()
+    _queue_first_fetch(session, source, permission, now)
     audit.record(
         session,
         operator,

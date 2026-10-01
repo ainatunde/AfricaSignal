@@ -1,4 +1,5 @@
 {% extends "admin/base.html" %}
+{% from "admin/_pager.html" import pager %}
 {% block title %}Channel posts{% endblock %}
 {% block content %}
 <h1>Channel posts</h1>
@@ -11,6 +12,7 @@ The links end in <code>?ref=wa</code> or <code>?ref=x</code> so the Metrics page
 {% for problem in problems %}
 <p class="error" role="alert">No draft for this one: {{ problem }}</p>
 {% endfor %}
+{{ pager(page, "/admin/channel-posts?days=" ~ days ~ "&") }}
 {% for item in posts %}
 <section>
   <h2>{{ item.posts.situation_slug }} · version {{ item.posts.version }}</h2>
@@ -36,6 +38,7 @@ The links end in <code>?ref=wa</code> or <code>?ref=x</code> so the Metrics page
 {% else %}
 {% if not error and not problems and not suspended %}<p>No material change was published in this period.</p>{% endif %}
 {% endfor %}
+{{ pager(page, "/admin/channel-posts?days=" ~ days ~ "&") }}
 
 <h2>Recently marked as posted</h2>
 <div class="scroll"><table>

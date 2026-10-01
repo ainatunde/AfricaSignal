@@ -1,4 +1,5 @@
 {% extends "admin/base.html" %}
+{% from "admin/_pager.html" import pager %}
 {% block title %}Assessments{% endblock %}
 {% block content %}
 <h1>Assessments</h1>
@@ -7,6 +8,7 @@
 
 <h2>Review hold (first high-severity versions)</h2>
 <p class="muted">A first version with high severity waits 60 minutes before it is published. Withhold it if it looks wrong. Publishing early runs the publication policy again, so a rule that withholds it still applies.</p>
+{{ pager(held_page, "/admin/assessments?status=" ~ status ~ "&page=" ~ page.number ~ "&", "held_page") }}
 <div class="scroll stack">
 <table>
   <thead><tr><th scope="col">Situation</th><th scope="col">Headline</th><th scope="col">Published automatically</th><th scope="col">Action (a reason is needed)</th></tr></thead>
@@ -36,10 +38,13 @@
 </table>
 </div>
 
+{{ pager(held_page, "/admin/assessments?status=" ~ status ~ "&page=" ~ page.number ~ "&", "held_page") }}
+
 <h2>Newest versions</h2>
 <p>
   {% for f in filters %}{% if f == status %}<strong>{{ f }}</strong>{% else %}<a href="/admin/assessments?status={{ f }}">{{ f }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
 </p>
+{{ pager(page, "/admin/assessments?status=" ~ status ~ "&held_page=" ~ held_page.number ~ "&") }}
 <div class="scroll stack">
 <table>
   <thead><tr><th scope="col">Situation</th><th scope="col">Version</th><th scope="col">Status</th><th scope="col">Headline</th><th scope="col">Withdraw (readers see the reason)</th></tr></thead>
@@ -66,4 +71,5 @@
   </tbody>
 </table>
 </div>
+{{ pager(page, "/admin/assessments?status=" ~ status ~ "&held_page=" ~ held_page.number ~ "&") }}
 {% endblock %}

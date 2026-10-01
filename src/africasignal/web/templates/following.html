@@ -12,7 +12,7 @@
   <ul class="cards">
     {% for n, v, s in updates %}
     <li class="card">
-      <h3><a href="/s/{{ s.slug }}">{{ v.headline }}</a></h3>
+      <h3><a href="/s/{{ s.slug }}">{{ v|reader_headline }}</a></h3>
       <p class="meta"><span class="tag">{{ kind_words[n.kind] }}</span> {{ v.scope_label }} · {{ v.period_label }}{% if v.published_at %} · published {{ v.published_at|date }}{% endif %}</p>
       {% if v.change_summary and n.kind != "new_version" %}<p>{{ v.change_summary }}</p>{% endif %}
     </li>
@@ -31,7 +31,7 @@
     {% for item in items %}
     <li class="card">
       {% if item.current %}
-      <h3><a href="/s/{{ item.situation.slug }}">{{ item.current.version.headline }}</a></h3>
+      <h3><a href="/s/{{ item.situation.slug }}">{{ item.current.version|reader_headline }}</a></h3>
       <p class="meta">{{ badge_tag(item.badge) }}
         {% if item.current.effective_status == "stale" %}<span class="tag tag-stale">Out of date</span>{% endif %}
         {% if item.current.effective_status == "withdrawn" %}<span class="tag tag-stale">Withdrawn</span>{% endif %}</p>
