@@ -1,0 +1,41 @@
+{% extends "admin/base.html" %}
+{% block title %}Alerts{% endblock %}
+{% block content %}
+<h1>Backup alerts</h1>
+<p>Raised by the hourly backup check. An alert closes by itself when the check next finds nothing wrong. Nothing is sent anywhere, so look here, or at the <a href="/admin/audit">audit log</a>.</p>
+
+<h2>Alerts</h2>
+{% for a in alerts %}
+<section class="{{ 'error' if a.is_open else 'notice' }}" role="status" style="margin-bottom:1rem">
+  <strong>{{ a.code }}</strong> · {{ 'OPEN' if a.is_open else a.state }}
+  <br>{{ a.summary }}
+  <br><span class="muted">Opened {{ a.opened_at|when }} · last checked {{ a.last_seen_at|when }}{% if a.resolved_at %} · resolved {{ a.resolved_at|when }}{% endif %}</span>
+  {% if a.detail %}<details><summary>Details</summary><pre>{% for k, v in a.detail.items() %}{{ k }}: {{ v if v is not none else '—' }}
+{% endfor %}</pre></details>{% endif %}
+</section>
+{% else %}
+<p>No alert has been raised. Either backups are healthy, or the check has not run yet.</p>
+{% endfor %}
+
+<h2>Last backup</h2>
+{% if backup %}
+<p>Last success: {{ backup.get('last_success_at') or 'never' }}. Last failure: {{ backup.get('last_failure_at') or 'none' }}{% if backup.get('last_failure_reason') %} ({{ backup.get('last_failure_reason') }}){% endif %}.</p>
+{% else %}<p class="muted">No backup has reported yet.</p>{% endif %}
+
+<h2>Last restore drill</h2>
+{% if drill %}
+<p>Run {{ drill.get('last_run_at') or 'at an unknown time' }}: <strong class="{{ 'ok' if drill.get('ok') else 'bad' }}">{{ 'passed' if drill.get('ok') else 'failed' }}</strong>{% if drill.get('detail') %} · {{ drill.get('detail') }}{% endif %}</p>
+{% else %}<p class="muted">No restore drill has been recorded.</p>{% endif %}
+
+<h2>History</h2>
+<div class="scroll"><table>
+  <thead><tr><th scope="col">When</th><th scope="col">Event</th><th scope="col">Alert</th></tr></thead>
+  <tbody>
+  {% for h in history %}
+  <tr><td>{{ h.ts|when }}</td><td>{{ h.action }}</td><td>{{ (h.after or h.before or {}).get('code', '') }}</td></tr>
+  {% else %}
+  <tr><td colspan="3">No alert has opened or resolved.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

@@ -1,0 +1,51 @@
+{% extends "admin/base.html" %}
+{% block title %}Range checks{% endblock %}
+{% block content %}
+<h1>Range checks</h1>
+<p>NBS values outside 0.2x to 5x of the previous month's median were not stored. Until you decide, the situation that would use the value is withheld (rule R4). Approve a value only after checking the NBS file; reject it if it is an error.</p>
+<div class="scroll stack">
+<table>
+  <thead><tr><th scope="col">Item</th><th scope="col">Place</th><th scope="col">Month</th><th scope="col">Value</th><th scope="col">Compared with</th><th scope="col">Why queued</th><th scope="col">Decision (a note is needed)</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.series.item_code }}<br><span class="muted">{{ r.series.unit }}</span></td>
+    <td>{{ r.place.name }}</td>
+    <td>{{ r.review.period_start.strftime('%B %Y') }}<br><span class="muted">release {{ r.review.vintage }}</span></td>
+    <td><strong>{{ r.review.value }}</strong><br><span class="muted">{{ r.ratio }}</span></td>
+    <td>{{ r.review.reference_value }}</td>
+    <td>{{ r.review.reason }}</td>
+    <td>
+      <form method="post" action="/admin/range-checks/{{ r.review.id }}/approve">
+        <label for="a{{ r.review.id }}">Note</label>
+        <input type="text" id="a{{ r.review.id }}" name="note" required minlength="{{ min_reason }}" maxlength="200">
+        <button type="submit">Approve</button>
+      </form>
+      <form method="post" action="/admin/range-checks/{{ r.review.id }}/reject">
+        <label for="j{{ r.review.id }}">Note</label>
+        <input type="text" id="j{{ r.review.id }}" name="note" required minlength="{{ min_reason }}" maxlength="200">
+        <button type="submit">Reject</button>
+      </form>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="7">Nothing is waiting for review.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Recently decided</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Item</th><th scope="col">Place</th><th scope="col">Month</th><th scope="col">Value</th><th scope="col">Decision</th><th scope="col">When</th></tr></thead>
+  <tbody>
+  {% for r in decided %}
+  <tr><td>{{ r.series.item_code }}</td><td>{{ r.place.name }}</td><td>{{ r.review.period_start.strftime('%B %Y') }}</td><td>{{ r.review.value }}</td><td>{{ r.review.status }}</td><td>{{ r.review.resolved_at|when }}</td></tr>
+  {% else %}
+  <tr><td colspan="6">None yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

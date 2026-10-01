@@ -1,0 +1,52 @@
+{% extends "admin/base.html" %}
+{% block title %}Discovered domains{% endblock %}
+{% block content %}
+<h1>Discovered domains</h1>
+<p>News sites that GDELT linked to for Nigerian stories and that no approved outlet covers. Nothing from them is fetched. Reject a domain to hide it, or add it as a source: that creates an inactive source with a feed address and a named owner, and no permission. You then review the site's terms and approve it on its Sources page, and a news outlet cannot be approved without an owner.</p>
+<div class="scroll stack">
+<table>
+  <thead><tr><th scope="col">Domain</th><th scope="col">Articles</th><th scope="col">Events</th><th scope="col">Last seen</th><th scope="col">Add as a source</th><th scope="col">Reject</th></tr></thead>
+  <tbody>
+  {% for d in found %}
+  <tr>
+    <td>{{ d.domain }}</td><td>{{ d.urls }}</td><td>{{ d.events }}</td><td>{{ d.last_seen|when }}</td>
+    <td>
+      <form method="post" action="/admin/domains/add">
+        <input type="hidden" name="domain" value="{{ d.domain }}">
+        <label for="n{{ loop.index }}">Outlet name</label>
+        <input type="text" id="n{{ loop.index }}" name="name" required maxlength="120">
+        <label for="o{{ loop.index }}">Owner (company or group)</label>
+        <input type="text" id="o{{ loop.index }}" name="owner" required maxlength="200">
+        <label for="f{{ loop.index }}">Feed address</label>
+        <input type="url" id="f{{ loop.index }}" name="feed_url" required placeholder="https://{{ d.domain }}/feed/">
+        <button type="submit">Add source</button>
+      </form>
+    </td>
+    <td>
+      <form method="post" action="/admin/domains/reject">
+        <input type="hidden" name="domain" value="{{ d.domain }}">
+        <label for="r{{ loop.index }}">Note (optional)</label>
+        <input type="text" id="r{{ loop.index }}" name="note" maxlength="200">
+        <button type="submit">Reject</button>
+      </form>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6">No undecided domains.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Decided</h2>
+<div class="scroll"><table>
+  <thead><tr><th scope="col">Domain</th><th scope="col">Decision</th><th scope="col">When</th><th scope="col">Note</th></tr></thead>
+  <tbody>
+  {% for d in decided %}
+  <tr><td>{{ d.domain }}</td><td>{{ d.status }}{% if d.source_id %} (<a href="/admin/sources/{{ d.source_id }}">source</a>){% endif %}</td><td>{{ d.decided_at|when }}</td><td>{{ d.note or '' }}</td></tr>
+  {% else %}
+  <tr><td colspan="4">None yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endblock %}

@@ -22,7 +22,7 @@ from africasignal.models.ops import (
     Setting,
 )
 from africasignal.models.places import Place, PlaceAlias
-from africasignal.models.sources import Source, SourcePermission
+from africasignal.models.sources import DiscoveredDomainDecision, Source, SourcePermission
 from africasignal.models.users import (
     AccountDeletion,
     AppUser,
@@ -41,6 +41,7 @@ __all__ = [
     "AuditLog",
     "Base",
     "Claim",
+    "DiscoveredDomainDecision",
     "Event",
     "EvidenceDocument",
     "Feedback",

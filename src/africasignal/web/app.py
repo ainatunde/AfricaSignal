@@ -15,6 +15,7 @@ from africasignal.web.routes import (
     account,
     admin,
     admin_feedback,
+    admin_ops,
     api_v1,
     feedback,
     legal,
@@ -43,6 +44,7 @@ def create_app() -> FastAPI:
     for router in (
         admin.router,
         admin_feedback.router,
+        admin_ops.router,
         public.router,
         legal.router,
         account.router,

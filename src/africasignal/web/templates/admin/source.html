@@ -20,6 +20,18 @@
 <p class="muted">Only an admin can resume a paused source.</p>
 {% endif %}
 
+<h2>Owner</h2>
+<p>Owner: <strong>{{ source.owner or 'not set' }}</strong>
+{% if source.kind == 'news_outlet' and not source.owner %}<span class="warn"> A news outlet cannot be approved until its owner is set.</span>{% endif %}</p>
+{% if is_admin %}
+<form method="post" action="/admin/sources/{{ source.id }}/owner">
+  <label for="owner">Company or group that owns this source</label>
+  <input type="text" id="owner" name="owner" value="{{ source.owner or '' }}" maxlength="200">
+  <p class="muted">Outlets with the same owner count as one voice when a report is corroborated.</p>
+  <button type="submit">Save owner</button>
+</form>
+{% endif %}
+
 <h2>Permission versions</h2>
 <div class="scroll">
 <table>
