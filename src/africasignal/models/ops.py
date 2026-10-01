@@ -15,6 +15,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB
@@ -37,6 +38,7 @@ outbox_kind = pg_enum("outbox_kind", "email_login", "email_digest", "email_corre
 outbox_status = pg_enum("outbox_status", "pending", "sent", "failed", "dead")
 job_status = pg_enum("job_status", "queued", "running", "done", "failed", "dead")
 operator_role = pg_enum("operator_role", "admin", "editor")
+channel_post_channel = pg_enum("channel_post_channel", "wa", "x")
 
 
 class Feedback(CreatedMixin, Base):
@@ -162,6 +164,26 @@ class LlmCall(CreatedMixin, Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     cache_hit: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+
+
+class ChannelPost(CreatedMixin, Base):
+    """An operator's record that they posted a draft by hand on WhatsApp or X (AS-033, demand
+    test D1). The app sends nothing: this row only remembers that a person did, which version, when
+    and by whom. One row per version and channel."""
+
+    __tablename__ = "channel_post"
+    __table_args__ = (UniqueConstraint("assessment_version_id", "channel"),)
+
+    assessment_version_id: Mapped[int] = mapped_column(
+        ForeignKey("assessment_version.id"), nullable=False
+    )
+    channel: Mapped[str] = mapped_column(channel_post_channel, nullable=False)
+    posted_by_operator_id: Mapped[int] = mapped_column(ForeignKey("operator.id"), nullable=False)
+    posted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    post_url: Mapped[str | None] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text)
 
 
 class Setting(Base):

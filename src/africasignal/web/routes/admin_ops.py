@@ -48,6 +48,8 @@ NOTICES = {
     "policy_added_no_places": "Policy series added, but no situation could be created yet because "
     "the places it covers are not loaded. They are created when the places list is loaded and "
     "the next claim for the series arrives.",
+    "post_marked": "Recorded as posted. Nothing was sent by the app.",
+    "post_unmarked": "Record removed.",
     "policy_retired": "Policy series retired. Published situations stay until you withdraw them.",
     "policy_activated": "Policy series active again.",
 }
@@ -475,29 +477,78 @@ def policies_toggle(
 # --- channel posts ------------------------------------------------------------------------------
 
 
-@router.get("/channel-posts")
-def channel_posts_view(
-    request: Request, auth: AdminOperator, db: DbSession, days: int = 7
+def _channel_page(
+    request: Request,
+    db: DbSession,
+    auth: AdminOperator,
+    status: int = 200,
+    error: str | None = None,
 ) -> Response:
-    """Drafts of the WhatsApp and X posts for material changes. Nothing is sent: an operator
-    copies the text and posts it by hand."""
-    days = min(max(days, 1), 60)
-    error: str | None = None
+    days = min(max(_int(request.query_params.get("days"), 7), 1), 60)
     found = channel_ops.Drafts()
     try:
         found = channel_ops.drafts(db, datetime.now(UTC) - timedelta(days=days))
     except PostError as exc:
         error = str(exc)
+        status = 400
     return _page(
         request,
         "admin/channel_posts.html",
         auth,
-        400 if error else 200,
+        status,
         posts=found.posts,
         problems=found.problems,
+        suspended=found.suspended,
+        recorded=channel_ops.recent_records(db),
+        channels=channel_ops.CHANNEL_NAMES,
         days=days,
+        notice=_notice(request),
         error=error,
     )
+
+
+def _int(value: str | None, default: int) -> int:
+    try:
+        return int(value) if value is not None else default
+    except ValueError:
+        return default
+
+
+@router.get("/channel-posts")
+def channel_posts_view(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    """Drafts of the WhatsApp and X posts for material changes. Nothing is sent: an operator
+    copies the text and posts it by hand, then marks it as posted."""
+    return _channel_page(request, db, auth)
+
+
+@router.post("/channel-posts/versions/{version_id}/{channel}/posted")
+def channel_posts_mark(
+    version_id: int,
+    channel: str,
+    request: Request,
+    auth: AdminOperator,
+    db: DbSession,
+    post_url: Annotated[str, Form()] = "",
+    note: Annotated[str, Form()] = "",
+) -> Response:
+    try:
+        channel_ops.mark_posted(
+            db, auth.operator, version_id, channel, post_url=post_url, note=note
+        )
+    except channel_ops.ChannelPostError as exc:
+        return _channel_page(request, db, auth, 400, str(exc))
+    return _back("/admin/channel-posts", "post_marked", auth)
+
+
+@router.post("/channel-posts/records/{record_id}/undo")
+def channel_posts_unmark(
+    record_id: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    try:
+        channel_ops.unmark(db, auth.operator, record_id)
+    except channel_ops.ChannelPostError as exc:
+        return _channel_page(request, db, auth, 400, str(exc))
+    return _back("/admin/channel-posts", "post_unmarked", auth)
 
 
 # --- alerts -------------------------------------------------------------------------------------
