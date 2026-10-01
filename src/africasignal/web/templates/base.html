@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}AfricaSignal{% endblock %}</title>
+<meta name="description" content="{% block description %}What is changing in prices and policies around you in Nigeria, with the evidence behind each change.{% endblock %}">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/site.css">
+{% block head %}{% endblock %}
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site">
+  <div class="wrap bar">
+    <a class="brand" href="/">AfricaSignal</a>
+    <nav aria-label="Main">
+      <a href="/"{% if nav == "home" %} aria-current="page"{% endif %}>For you</a>
+      <a href="/explore"{% if nav == "explore" %} aria-current="page"{% endif %}>Explore</a>
+      <a href="/coverage"{% if nav == "coverage" %} aria-current="page"{% endif %}>Coverage</a>
+      <a href="/about/method"{% if nav == "method" %} aria-current="page"{% endif %}>How it works</a>
+      <a href="/following"{% if nav == "following" %} aria-current="page"{% endif %}>Following</a>
+      <a href="/account"{% if nav == "account" %} aria-current="page"{% endif %}>Account</a>
+    </nav>
+  </div>
+</header>
+{% if suspended %}
+<div class="notice" role="status">
+  <div class="wrap"><strong>Updates are paused.</strong> New figures are not being published right now, so what you see may be out of date.</div>
+</div>
+{% endif %}
+<main id="main" class="wrap">
+{% block content %}{% endblock %}
+</main>
+<footer class="site">
+  <div class="wrap">
+    <p>AfricaSignal shows what changed, how sure we are, and where the evidence is. It is not advice.</p>
+    <p><a href="/about/method">How assessments work</a> · <a href="/coverage">Coverage</a> · <a href="/about/bot">Our crawler</a></p>
+    <p><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/corrections">Errors and takedowns</a></p>
+  </div>
+</footer>
+{% block scripts %}{% endblock %}
+</body>
+</html>

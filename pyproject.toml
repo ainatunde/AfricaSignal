@@ -17,9 +17,17 @@ dependencies = [
     "boto3>=1.34,<2",
     "trafilatura>=2.0,<3",
     "pdfplumber>=0.11,<1",
+    "pypdfium2>=4,<6",
     "openpyxl>=3.1,<4",
+    "defusedxml>=0.7.1",  # openpyxl uses it, when installed, to refuse XML entity attacks in xlsx files
     "rapidfuzz>=3.9,<4",
     "pyyaml>=6,<7",
+    "anthropic>=1.0,<2",
+    "argon2-cffi>=23.1,<26",
+    "pyotp>=2.9,<3",
+    "cryptography>=43",
+    "python-multipart>=0.0.9",
+    "feedparser>=6.0,<7",
 ]
 
 [project.optional-dependencies]
@@ -39,6 +47,10 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"africasignal.web" = ["templates/**/*", "static/**/*"]
+africasignal = ["llm/prompts/*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
@@ -52,6 +64,7 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["E501"]
+"eval/seed.py" = ["E501"]  # prose and labels in the generated reference set
 
 [tool.mypy]
 python_version = "3.12"

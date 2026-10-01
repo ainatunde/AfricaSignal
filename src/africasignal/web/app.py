@@ -2,47 +2,53 @@
 
 from __future__ import annotations
 
-import html
-import os
-
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from africasignal.config import get_settings
-from africasignal.db import database_is_up
-from africasignal.net.netutil import USER_AGENT
+from africasignal.db import database_is_up, session_scope
+from africasignal.web.analytics import AnalyticsMiddleware
+from africasignal.web.csrf import AdminOriginGuard
+from africasignal.web.public_csrf import PublicOriginGuard
+from africasignal.web.render import STATIC_DIR
+from africasignal.web.routes import (
+    account,
+    admin,
+    admin_feedback,
+    api_v1,
+    feedback,
+    legal,
+    public,
+)
+from africasignal.web.security_headers import SecurityHeadersMiddleware
 
 
 def create_app() -> FastAPI:
     get_settings()  # fail closed at startup when required settings are missing
-    app = FastAPI(title="AfricaSignal", docs_url=None, redoc_url=None)
+    app = FastAPI(title="AfricaSignal", docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.event_session = session_scope  # where page views are written; tests replace it
+    # Middleware added last runs first: origin checks refuse a request before anything else sees it.
+    app.add_middleware(AnalyticsMiddleware)
+    app.add_middleware(PublicOriginGuard)
+    app.add_middleware(AdminOriginGuard)
+    app.add_middleware(SecurityHeadersMiddleware)  # outermost: every response, errors included
 
     @app.get("/healthz")
     def healthz() -> dict[str, bool]:
         db = database_is_up()
         return {"ok": db, "db": db}
 
-    @app.get("/about/bot", response_class=HTMLResponse)
-    def about_bot() -> str:
-        contact = os.environ.get("BOT_CONTACT_EMAIL", "")
-        contact_line = (
-            f'<p>Contact: <a href="mailto:{html.escape(contact)}">{html.escape(contact)}</a></p>'
-            if contact
-            else ""
-        )
-        return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AfricaSignal crawler</title></head>
-<body>
-<h1>AfricaSignal crawler</h1>
-<p>AfricaSignalBot collects public prices and policy announcements in Nigeria so we can show
-people what has changed. It identifies itself as <code>{html.escape(USER_AGENT)}</code>.</p>
-<ul>
-<li>It obeys robots.txt and asks for at most a few pages per minute from any one site.</li>
-<li>To stop it visiting your site, disallow <code>AfricaSignalBot</code> in robots.txt.</li>
-</ul>
-{contact_line}
-</body></html>"""
-
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    # One line per router; streams that add pages append theirs here.
+    for router in (
+        admin.router,
+        admin_feedback.router,
+        public.router,
+        legal.router,
+        account.router,
+        feedback.router,
+        api_v1.router,
+    ):
+        app.include_router(router)
+    public.register_error_pages(app)
     return app

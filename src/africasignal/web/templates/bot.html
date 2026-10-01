@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}AfricaSignal crawler{% endblock %}
+{% block content %}
+<h1>AfricaSignal crawler</h1>
+<p>AfricaSignalBot collects public prices and policy announcements in Nigeria so we can show
+people what has changed. It identifies itself as <code>{{ user_agent }}</code>.</p>
+<ul>
+<li>It obeys robots.txt and asks for at most a few pages per minute from any one site.</li>
+<li>To stop it visiting your site, disallow <code>AfricaSignalBot</code> in robots.txt.</li>
+</ul>
+{% if contact %}<p>Contact: <a href="mailto:{{ contact }}">{{ contact }}</a></p>{% endif %}
+{% endblock %}

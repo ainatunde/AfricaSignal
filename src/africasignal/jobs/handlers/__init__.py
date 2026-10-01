@@ -42,12 +42,29 @@ def load_all() -> None:
     """Import every handler module so its ``@register`` runs. Called by the worker and the
     scheduler at startup."""
     from africasignal.jobs.handlers import (  # noqa: F401
+        apply_retention,
         assess_situation,
+        check_backups,
+        dispatch_outbox,
         expire_assessments,
+        explain_version,
+        extract_claims,
         fetch_source,
+        gdelt_fetch_article,
+        gdelt_poll,
         import_nbs_file,
         invalidate,
+        notify_followers,
         process_document,
+        prune_events,
         release_held_versions,
+        resolve_places,
+        weekly_digest,
     )
-    from africasignal.sources import nbs  # noqa: F401  (registers the NBS adapter)
+    from africasignal.sources import (  # noqa: F401  (register the source adapters)
+        gdelt,
+        nbs,
+        nerc,
+        price_announcements,
+        rss,
+    )

@@ -1,0 +1,93 @@
+{% extends "admin/base.html" %}
+{% block title %}Metrics{% endblock %}
+{% block content %}
+<h1>Demand test metrics</h1>
+<p class="muted">The numbers from plan section D1, by ISO week (Monday to Sunday, Lagos time). Thresholds are the plan's proposals, not yet confirmed. Nothing here stores an IP address. A visitor is a browser that opened a page; crawlers and link previews are not counted.</p>
+
+<h2>Latest complete week against the thresholds</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Metric</th><th scope="col">Now</th><th scope="col">Continue if</th><th scope="col">Rethink if</th><th scope="col">Reading</th></tr></thead>
+  <tbody>
+  {% for row in summary %}
+  {% set t = row.target %}
+  <tr>
+    <td>{{ t.label }}</td>
+    <td>{% if row.value is none %}<span class="muted">no data yet</span>{% elif t.unit == "percent" %}{{ "%.0f"|format(row.value) }}%{% elif t.unit == "usd" %}${{ "%.3f"|format(row.value) }}{% else %}{{ "%.0f"|format(row.value) }}{% endif %}</td>
+    <td>{% if t.higher_is_better %}≥{% else %}≤{% endif %} {% if t.unit == "usd" %}${{ "%.2f"|format(t.continue_at) }}{% elif t.unit == "percent" %}{{ "%.0f"|format(t.continue_at) }}%{% else %}{{ "{:,.0f}".format(t.continue_at) }}{% endif %}</td>
+    <td>{% if t.higher_is_better %}&lt;{% else %}&gt;{% endif %} {% if t.unit == "usd" %}${{ "%.2f"|format(t.rethink_at) }}{% elif t.unit == "percent" %}{{ "%.0f"|format(t.rethink_at) }}%{% else %}{{ "{:,.0f}".format(t.rethink_at) }}{% endif %}</td>
+    <td>{% if row.verdict == "continue" %}<span class="ok">Continue</span>{% elif row.verdict == "rethink" %}<span class="bad">Rethink</span>{% elif row.verdict == "between" %}<span class="warn">In between</span>{% else %}<span class="muted">Not enough data</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>By week</h2>
+<div class="scroll">
+<table>
+  <thead><tr>
+    <th scope="col">Week</th><th scope="col">Visitors</th><th scope="col">Page views</th>
+    <th scope="col">New visitors</th><th scope="col">Returned in 14 days</th>
+    <th scope="col">Users with a follow</th><th scope="col">Useful yes / no</th>
+    <th scope="col">Cost per visitor</th><th scope="col">WhatsApp followers</th>
+  </tr></thead>
+  <tbody>
+  {% for w in rows %}
+  <tr>
+    <th scope="row">{{ w.week }}<br><span class="muted">from {{ w.start }}{% if w.week == current_week %}, in progress{% endif %}</span></th>
+    <td>{{ w.visitors }}</td>
+    <td>{{ w.page_views }}</td>
+    <td>{{ w.new_visitors }}</td>
+    <td>{% if w.return_rate is none %}<span class="muted">not yet measurable</span>{% else %}{{ "%.0f"|format(w.return_rate) }}% ({{ w.return_returned }} of {{ w.return_measured }}){% endif %}</td>
+    <td>{{ w.users_with_follow }}</td>
+    <td>{{ w.useful_yes }} / {{ w.useful_no }}{% if w.useful_rate is not none %} ({{ "%.0f"|format(w.useful_rate) }}% yes){% endif %}</td>
+    <td>{% if w.cost_per_wau is none %}<span class="muted">no visitors</span>{% else %}${{ "%.3f"|format(w.cost_per_wau) }}{% endif %}<br><span class="muted">LLM ${{ "%.2f"|format(w.llm_cost_usd) }} + infrastructure ${{ "%.2f"|format(w.infra_cost_usd) }}</span></td>
+    <td>{% if w.wa_followers is none %}<span class="muted">not entered</span>{% else %}{{ w.wa_followers }}{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted">Returned: visitors first seen that week who opened a page again on a later day within 14 days; only visitors whose 14 days are over are counted. Users with a follow: people whose first follow was before the week ended and who still follow something (an earlier unfollow is not reconstructed).</p>
+
+<h2>Activity and where visits came from</h2>
+<div class="scroll">
+<table>
+  <thead><tr>
+    <th scope="col">Week</th><th scope="col">Situation views</th><th scope="col">Follows</th><th scope="col">Unfollows</th>
+    <th scope="col">Feedback</th><th scope="col">Share clicks</th><th scope="col">Digest opens</th>
+    <th scope="col">Visits from WhatsApp</th><th scope="col">from X</th><th scope="col">from email</th><th scope="col">from a shared link</th>
+  </tr></thead>
+  <tbody>
+  {% for w in rows %}
+  <tr>
+    <th scope="row">{{ w.week }}</th>
+    <td>{{ w.situation_views }}</td><td>{{ w.follows }}</td><td>{{ w.unfollows }}</td>
+    <td>{{ w.feedback }}</td><td>{{ w.share_clicks }}</td><td>{{ w.digest_opens }}</td>
+    <td>{{ w.visits_by_ref.get("wa", 0) }}</td><td>{{ w.visits_by_ref.get("x", 0) }}</td>
+    <td>{{ w.visits_by_ref.get("email", 0) }}</td><td>{{ w.visits_by_ref.get("share", 0) }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Numbers from outside the app</h2>
+{% if is_admin %}
+<form method="post" action="/admin/metrics/whatsapp">
+  <label for="week">Week (for example {{ current_week }})</label>
+  <input id="week" name="week" type="text" value="{{ current_week }}" pattern="\d{4}-W\d{2}" required>
+  <label for="followers">WhatsApp channel followers</label>
+  <input id="followers" name="followers" type="number" min="0" required>
+  <p><button type="submit">Save follower count</button></p>
+</form>
+<form method="post" action="/admin/metrics/infra">
+  <label for="monthly_usd">Monthly infrastructure bill (USD), now ${{ "%.2f"|format(report.infra_monthly_usd) }}</label>
+  <input id="monthly_usd" name="monthly_usd" type="number" min="0" step="0.01" value="{{ report.infra_monthly_usd }}" required>
+  <p><button type="submit">Save monthly cost</button></p>
+</form>
+{% else %}
+<p class="muted">An admin enters the WhatsApp follower count and the monthly infrastructure bill.</p>
+{% endif %}
+{% endblock %}

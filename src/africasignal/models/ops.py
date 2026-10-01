@@ -114,12 +114,30 @@ class Operator(CreatedMixin, Base):
     totp_secret_enc: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(operator_role, nullable=False)
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Raised on sign-out, revocation and password change; a console cookie carries the value it was
+    # issued under and stops working when the value moves on.
+    session_epoch: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    # The newest TOTP time step accepted, so a code cannot be used twice (across processes too).
+    last_totp_step: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class OperatorSignInFailure(CreatedMixin, Base):
+    """One failed console sign-in, for the throttle. ``client_key`` is a keyed hash of the
+    client's address, never the address. Rows older than the throttle window are deleted."""
+
+    __tablename__ = "operator_sign_in_failure"
+    __table_args__ = (Index("ix_operator_sign_in_failure_email_at", "email", "at"),)
+
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    client_key: Mapped[str] = mapped_column(Text, nullable=False)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class AuditLog(CreatedMixin, Base):
     __tablename__ = "audit_log"
 
-    operator_id: Mapped[int] = mapped_column(ForeignKey("operator.id"), nullable=False)
+    # Empty for a change the system made itself (a job raising an alert); see audit.record_system.
+    operator_id: Mapped[int | None] = mapped_column(ForeignKey("operator.id"))
     action: Mapped[str] = mapped_column(Text, nullable=False)
     target_kind: Mapped[str] = mapped_column(Text, nullable=False)
     target_id: Mapped[int | None] = mapped_column(BigInteger)

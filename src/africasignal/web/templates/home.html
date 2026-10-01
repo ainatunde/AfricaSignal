@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_badge.html" import situation_card %}
+{% block title %}{% if place %}For you in {{ place.name }}{% else %}AfricaSignal: what is changing around you{% endif %}{% endblock %}
+{% block content %}
+{% if not place %}
+<h1>What is changing around you?</h1>
+<p class="lead">Fuel, cooking gas and food prices in Nigeria, what changed, how sure we are, and the evidence behind it. Choose where you are.</p>
+{% include "_picker.html" %}
+{% else %}
+<h1>For you in {{ place.name }}</h1>
+<p class="meta">Showing {{ place.name }}{% if state and state.id != place.id %} (figures are for {{ state.name }}){% endif %} and Nigeria as a whole. <a href="/?change=1">Change place</a></p>
+{% if change %}{% include "_picker.html" %}{% endif %}
+
+{% if since %}
+<section aria-labelledby="h-since">
+  <h2 id="h-since">Since your last visit</h2>
+  {% if since_items %}
+  <ul class="cards">
+    {% for c, b in since_items %}{{ situation_card(c, b) }}{% endfor %}
+  </ul>
+  {% else %}
+  <p>Nothing new since {{ since|date }}.</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section aria-labelledby="h-latest">
+  <h2 id="h-latest">{{ latest_heading }}</h2>
+  {% if latest_items %}
+  <ul class="cards">
+    {% for c, b in latest_items %}{{ situation_card(c, b) }}{% endfor %}
+  </ul>
+  {% else %}
+  <p>No published changes for {{ place.name }} yet. <a href="/explore">Explore everything we track</a>.</p>
+  {% endif %}
+</section>
+
+<p><a href="/places/{{ place.code }}">Everything for {{ place.name }}</a> · <a href="/explore">Explore all items</a></p>
+{% endif %}
+{% endblock %}
+{% block scripts %}<script src="/static/site.js" defer></script>{% endblock %}

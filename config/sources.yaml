@@ -58,8 +58,8 @@
   owner: Nigerian Electricity Regulatory Commission
   # Verified 2026-09-30: orders are listed at feed_url (57 pages, newest first), each entry with a PDF.
   # The monthly DisCo tariff schedules ("IE MYTO SEPTEMBER 2026") are PDFs with no text layer, so
-  # pdfplumber cannot read the tariffs: OCR is needed. Plain orders do have text. robots.txt only
-  # disallows /wp-admin/. No terms page found. See tests/fixtures/nerc/manifest.json.
+  # pdfplumber cannot read the tariffs: the adapter reads them with OCR (tesseract must be
+  # installed). Plain orders do have text. robots.txt only disallows /wp-admin/. No terms page found. See tests/fixtures/nerc/manifest.json.
   home_url: https://nerc.gov.ng
   feed_url: https://nerc.gov.ng/resource-category/orders/
   schedule_minutes: 360
@@ -102,9 +102,11 @@
   # Verified 2026-09-30: /insights is filled in by the browser from the CMS API in feed_url (Strapi
   # JSON; ?sort=publishedAt:desc&pagination[pageSize]=10 gives the newest). The 10 newest posts are
   # corporate press releases and reports with no fuel price announcements. Terms allow personal,
-  # non-commercial use only. See tests/fixtures/nnpc/manifest.json.
+  # non-commercial use only. See tests/fixtures/nnpc/manifest.json. Stays inactive until an
+  # operator has reviewed those terms and approved the permission.
   home_url: https://nnpcgroup.com
   feed_url: https://fde-nnpc-web-cms-prod-dwfrd0hraahrbhhg.a02.azurefd.net/api/posts
+  active: false
   schedule_minutes: 360
   max_requests_per_hour: 30
   coverage_note: Company price announcements and press releases.

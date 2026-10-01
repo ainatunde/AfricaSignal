@@ -1,0 +1,17 @@
+{# Shared pieces of the legal pages (AS-043). #}
+{% macro draft_banner(kind) %}
+{% if not reviewed %}
+<div class="callout warn" role="note" data-legal-draft>
+  <strong>Draft, not yet reviewed by a lawyer.</strong>
+  This {{ kind }} describes what AfricaSignal actually does, but its wording has not been reviewed by a
+  lawyer and it is not yet in force. It was drafted {{ text_date }}.
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro contact() %}{% if contact_email %}<a href="mailto:{{ contact_email }}">{{ contact_email }}</a>{% else %}<mark class="todo" data-todo>[contact address not set yet]</mark>{% endif %}{% endmacro %}
+
+{% macro operator() %}{% if operator_name %}{{ operator_name }}{% else %}<mark class="todo" data-todo>[operator name not set yet]</mark>{% endif %}{% endmacro %}
+
+{# A gap a person must fill or confirm before launch. Always shown, even after the banner goes. #}
+{% macro todo(text) %}<mark class="todo" data-todo>[To confirm: {{ text }}]</mark>{% endmacro %}

@@ -14,14 +14,20 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from dataclasses import dataclass
-from datetime import date, datetime
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.orm import Session
 
+from africasignal.assess.corroboration import (
+    MIN_OUTLET_AGE_DAYS,
+    NEWS_SOURCE_KINDS,
+    ClaimPoint,
+    link_keys,
+)
 from africasignal.assess.price_change import (
     TEMPLATE_VERSION,
     FactorSpec,
@@ -33,10 +39,13 @@ from africasignal.assess.price_change import (
     place_phrase,
 )
 from africasignal.catalog import Item, load_items
+from africasignal.evidence.origins import SIMHASH_MAX_DISTANCE
+from africasignal.evidence.simhash import hamming_distance
 from africasignal.jobs import queue
 from africasignal.models import (
     AssessmentInput,
     AssessmentVersion,
+    Claim,
     EvidenceDocument,
     Measurement,
     Place,
@@ -44,7 +53,9 @@ from africasignal.models import (
     Series,
     Situation,
     Source,
+    SourcePermission,
 )
+from africasignal.sources.permissions import current_permission
 
 log = logging.getLogger("africasignal.publish.situations")
 
@@ -82,6 +93,7 @@ class _Row:
     measurement: Measurement
     source_label: str
     source: Source
+    origin_id: int | None = None
 
 
 def _current_rows(
@@ -93,7 +105,7 @@ def _current_rows(
     """Current measurements (not superseded, evidence still active) of an item at places. When
     several sources report the same month, the newest vintage wins."""
     query = (
-        select(Measurement, EvidenceDocument, ReportingOrigin.label, Source)
+        select(Measurement, EvidenceDocument, ReportingOrigin.label, Source, ReportingOrigin.id)
         .join(Series, Series.id == Measurement.series_id)
         .join(EvidenceDocument, EvidenceDocument.id == Measurement.evidence_document_id)
         .join(Source, Source.id == EvidenceDocument.source_id)
@@ -108,8 +120,8 @@ def _current_rows(
     if periods is not None:
         query = query.where(Measurement.period_start.in_(list(periods)))
     newest: dict[tuple[int, date], _Row] = {}
-    for measurement, document, origin_label, source in session.execute(query):
-        row = _Row(measurement, origin_label or document.title or source.name, source)
+    for measurement, document, origin_label, source, origin_id in session.execute(query):
+        row = _Row(measurement, origin_label or document.title or source.name, source, origin_id)
         key = (measurement.place_id, measurement.period_start)
         if key not in newest or measurement.vintage > newest[key].measurement.vintage:
             newest[key] = row
@@ -125,7 +137,131 @@ def _point(row: _Row) -> PricePoint:
         value=Decimal(m.value),
         evidence_document_id=m.evidence_document_id,
         source_label=row.source_label,
+        origin_id=row.origin_id,
     )
+
+
+def place_and_descendants(session: Session, place: Place) -> set[int]:
+    """The place and every place inside it (an LGA or city in a state)."""
+    found = {place.id}
+    frontier = {place.id}
+    while frontier:
+        frontier = (
+            set(session.scalars(select(Place.id).where(Place.parent_id.in_(frontier)))) - found
+        )
+        found |= frontier
+    return found
+
+
+def source_is_trusted(session: Session, source: Source, now: datetime) -> bool:
+    """Whether claims from ``source`` may corroborate or dispute anything (security review S-08).
+
+    The source must be active with an approved permission to collect. A news outlet must also have
+    been under approval for ``MIN_OUTLET_AGE_DAYS``, counted from its first approval, so that a
+    batch of newly registered sites cannot earn an "independent report" badge by being approved
+    together. Official sources are vetted one by one and have no waiting period.
+    """
+    permission = current_permission(session, source.id)
+    if not source.active or permission is None or not permission.may_collect:
+        return False
+    if source.kind not in NEWS_SOURCE_KINDS:
+        return True
+    first = session.scalar(
+        select(func.min(SourcePermission.approved_at)).where(
+            SourcePermission.source_id == source.id,
+            SourcePermission.may_collect.is_(True),
+            SourcePermission.approved_at.is_not(None),
+        )
+    )
+    return first is not None and now - first >= timedelta(days=MIN_OUTLET_AGE_DAYS)
+
+
+def load_claim_points(
+    session: Session, now: datetime, *conditions: ColumnElement[bool]
+) -> list[ClaimPoint]:
+    """Valid claims on active documents that meet ``conditions``, with what evidence rules need
+    to know about each claim's document, origin and source."""
+    rows = session.execute(
+        select(Claim, EvidenceDocument, Source, ReportingOrigin.label)
+        .join(EvidenceDocument, EvidenceDocument.id == Claim.evidence_document_id)
+        .join(Source, Source.id == EvidenceDocument.source_id)
+        .outerjoin(ReportingOrigin, ReportingOrigin.id == EvidenceDocument.origin_id)
+        .where(Claim.valid.is_(True), EvidenceDocument.status == "active", *conditions)
+        .order_by(Claim.id)
+    ).all()
+    trust: dict[int, bool] = {}
+    for _, _, source, _ in rows:
+        if source.id not in trust:
+            trust[source.id] = source_is_trusted(session, source, now)
+    return [
+        ClaimPoint(
+            claim_id=claim.id,
+            evidence_document_id=document.id,
+            origin_id=document.origin_id,
+            origin_label=origin_label or document.title or source.name,
+            source_name=source.name,
+            source_short=source_short_name(source),
+            source_kind=source.kind,
+            text=claim.text,
+            passage=claim.passage,
+            stated_value=None if claim.stated_value is None else Decimal(claim.stated_value),
+            direction=claim.direction,
+            occurred_from=claim.occurred_from,
+            occurred_to=claim.occurred_to,
+            time_precision=claim.time_precision,
+            published_at=document.published_at or document.retrieved_at,
+            trusted=trust[source.id],
+            link_keys=link_keys(
+                urls=(document.canonical_url, source.home_url, source.feed_url),
+                owner=source.owner,
+                byline=document.byline,
+            ),
+        )
+        for claim, document, source, origin_label in rows
+    ]
+
+
+def mark_official_copies(
+    session: Session, claims: Iterable[ClaimPoint], official_document_ids: Iterable[int]
+) -> list[ClaimPoint]:
+    """Flag claims whose document is a near-duplicate (SimHash) of an official document.
+
+    Reporting origins never merge official documents with news (``evidence.origins``), so an outlet
+    that reprints a regulator's statement has its own origin. It is still the regulator's text, and
+    must not count as independent confirmation of it.
+    """
+    official = set(official_document_ids)
+    reference = [
+        h
+        for h in session.scalars(
+            select(EvidenceDocument.simhash).where(
+                EvidenceDocument.id.in_(official), EvidenceDocument.simhash.is_not(None)
+            )
+        )
+        if h is not None
+    ]
+    if not reference:
+        return list(claims)
+    claims = list(claims)
+    hashes = {
+        doc_id: simhash
+        for doc_id, simhash in session.execute(
+            select(EvidenceDocument.id, EvidenceDocument.simhash).where(
+                EvidenceDocument.id.in_({c.evidence_document_id for c in claims})
+            )
+        )
+        if simhash is not None
+    }
+
+    def copies(claim: ClaimPoint) -> bool:
+        own = hashes.get(claim.evidence_document_id)
+        return (
+            own is not None
+            and claim.evidence_document_id not in official
+            and any(hamming_distance(own, r) <= SIMHASH_MAX_DISTANCE for r in reference)
+        )
+
+    return [replace(c, copies_official=True) if copies(c) else c for c in claims]
 
 
 def ensure_situations(session: Session, pairs: Iterable[tuple[str, int]]) -> list[Situation]:
@@ -208,13 +344,27 @@ def load_inputs(session: Session, situation: Situation, now: datetime) -> PriceI
 
         states_now, states_before = points(latest), points(_add_months(latest, -1))
 
+    # Claims that say something about this item in this place: the place itself, or (for a state)
+    # somewhere inside it. A national situation only hears national claims.
+    claim_places = place_and_descendants(session, place) if place.kind == "state" else {place.id}
+    claims = load_claim_points(
+        session,
+        now,
+        Claim.item_code == item.code,
+        Claim.claim_type.in_(("price_statement", "other")),
+        Claim.place_id.in_(claim_places),
+    )
+    claims = mark_official_copies(
+        session, claims, {r.measurement.evidence_document_id for r in (current, previous) if r}
+    )
+
     return PriceInputs(
         item_code=item.code,
         item_label=item.label,
         unit=item.unit,
         mom_threshold_pct=Decimal(str(item.materiality.mom_pct)),
         yoy_threshold_pct=Decimal(str(item.materiality.yoy_pct)),
-        factors=tuple(FactorSpec(f.code, f.label) for f in item.factors),
+        factors=tuple(FactorSpec(f.code, f.label, tuple(f.keywords)) for f in item.factors),
         place_code=place.code,
         place_name=place.name,
         place_kind="country" if place.kind == "country" else "state",
@@ -225,6 +375,7 @@ def load_inputs(session: Session, situation: Situation, now: datetime) -> PriceI
         now=now,
         states_current=states_now,
         states_previous=states_before,
+        claims=tuple(claims),
     )
 
 
@@ -249,6 +400,10 @@ def assess_situation(
     situation = session.get(Situation, situation_id)
     if situation is None:
         return AssessmentOutcome("skipped", reason="situation does not exist")
+    if situation.kind == "policy":  # T2 (AS-027) lives in its own module
+        from africasignal.publish.policy_situations import assess_policy_situation
+
+        return assess_policy_situation(session, situation, now, correction=correction)
     inputs = load_inputs(session, situation, now)
     if inputs is None:
         return AssessmentOutcome("skipped", reason="no current measurements")

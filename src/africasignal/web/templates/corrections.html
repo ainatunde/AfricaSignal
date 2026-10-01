@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_legal.html" import draft_banner, contact, operator, todo with context %}
+{% block title %}Corrections and takedowns · AfricaSignal{% endblock %}
+{% block head %}{% if not reviewed %}<meta name="robots" content="noindex, nofollow">{% endif %}{% endblock %}
+{% block content %}
+<h1>Corrections and takedowns</h1>
+{{ draft_banner("policy") }}
+<p class="lead">If something on AfricaSignal is wrong, unclear or should not be here, tell us. A person reads every message, and we aim to reply within {{ response_hours }} hours.</p>
+
+<h2>What we publish</h2>
+<p>For now AfricaSignal publishes only prices and official policy changes, worked out from source documents we keep a copy of. It does not publish claims about named people or companies. If you believe a page does, that is a serious error: tell us and we will look at it first.</p>
+
+<h2>How to tell us</h2>
+<ul>
+  <li><strong>An error on a page:</strong> use “Report an error” on that page. You can leave an email address if you want a reply. It is optional.</li>
+  <li><strong>Anything else</strong>, including a takedown request, or a problem you cannot report on the page: write to {{ contact() }}. Say which page, what is wrong, and, if you can, where the right information is.</li>
+  <li>If your message is about your own personal information, see your rights in the <a href="/privacy">privacy notice</a>.</li>
+</ul>
+
+<h2>What happens next</h2>
+<ol>
+  <li><strong>Within {{ response_hours }} hours</strong> we read it and reply, if you gave us an address. We will say whether we are looking into it.</li>
+  <li><strong>We check the evidence.</strong> We compare the page with the source document and with the source itself. We do not change a figure because someone says it is wrong; we change it when the evidence says so.</li>
+  <li><strong>We decide and record one of these outcomes:</strong>
+    <ul>
+      <li><em>Corrected:</em> the page is updated. The earlier version stays in the page&rsquo;s version history with a note of what changed. Readers who follow the situation and turned on the weekly email are told about a correction.</li>
+      <li><em>Not enough evidence:</em> the page is changed to say so, or withdrawn.</li>
+      <li><em>No change:</em> we explain why the page stands.</li>
+    </ul>
+  </li>
+  <li>If a source withdraws or revises a document, we recalculate on our own, without waiting for a report. If nothing valid remains, the page is withdrawn and says why.</li>
+</ol>
+<p>Some checks take longer than {{ response_hours }} hours, for example when we are waiting for a source to reply. We will tell you when that is so.</p>
+
+<h2>Takedown requests</h2>
+<p>You can ask us to remove or change material if you are the owner of a source we quote, if the page is wrong or unlawful, or if it discloses personal information it should not. Tell us who you are, what the material is, and why. We will act quickly on a clear request: we can take a quotation down while we look into it. If we decide not to remove something we will tell you why.</p>
+
+<h2>What these policies do not cover</h2>
+<p>We do not remove a figure only because it is unwelcome, and we do not delete a correction: corrected versions stay in the history so readers can see what changed.</p>
+<p>{{ todo("counsel to review this policy, in particular the takedown route for rights holders and how long copies of removed source documents are kept") }}</p>
+{% endblock %}

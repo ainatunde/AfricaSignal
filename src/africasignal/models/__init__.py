@@ -8,6 +8,7 @@ from africasignal.models.assessments import (
 from africasignal.models.base import Base
 from africasignal.models.claims import Claim
 from africasignal.models.evidence import EvidenceDocument, GdeltDiscovery, ReportingOrigin
+from africasignal.models.llm_cache import LlmResponseCache
 from africasignal.models.measurements import Measurement, MeasurementReview, Series
 from africasignal.models.ops import (
     AuditLog,
@@ -16,12 +17,14 @@ from africasignal.models.ops import (
     Job,
     LlmCall,
     Operator,
+    OperatorSignInFailure,
     Outbox,
     Setting,
 )
 from africasignal.models.places import Place, PlaceAlias
 from africasignal.models.sources import Source, SourcePermission
 from africasignal.models.users import (
+    AccountDeletion,
     AppUser,
     Follow,
     LoginToken,
@@ -31,6 +34,7 @@ from africasignal.models.users import (
 )
 
 __all__ = [
+    "AccountDeletion",
     "AppUser",
     "AssessmentInput",
     "AssessmentVersion",
@@ -44,11 +48,13 @@ __all__ = [
     "GdeltDiscovery",
     "Job",
     "LlmCall",
+    "LlmResponseCache",
     "LoginToken",
     "Measurement",
     "MeasurementReview",
     "Notification",
     "Operator",
+    "OperatorSignInFailure",
     "Outbox",
     "Place",
     "PlaceAlias",

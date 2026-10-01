@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "_badge.html" import badge as badge_tag, situation_card %}
+{% block title %}Explore{% if selected %} · {{ selected.label|ucfirst }}{% endif %} · AfricaSignal{% endblock %}
+{% block content %}
+<h1>Explore</h1>
+<nav class="tabs" aria-label="Topic">
+  {% for t in topics %}<a href="/explore?topic={{ t }}"{% if t == topic %} aria-current="page"{% endif %}>{{ t|capitalize }}</a>{% endfor %}
+</nav>
+
+<h2>{{ topic|capitalize }} items</h2>
+<ul class="plain items">
+  {% for i in items %}
+  <li>
+    {% if i.code == (selected.code if selected else None) %}<strong aria-current="page">{{ i.label|ucfirst }}</strong>{% else %}<a href="/explore?topic={{ topic }}&amp;item={{ i.code }}">{{ i.label|ucfirst }}</a>{% endif %}
+    <span class="muted">{% if i.situations %}{{ i.situations }} place{{ "s" if i.situations != 1 }}{% else %}no published figures yet{% endif %}</span>
+  </li>
+  {% endfor %}
+</ul>
+
+{% if selected %}
+<section aria-labelledby="h-item">
+  <h2 id="h-item">{{ selected.label|ucfirst }}</h2>
+  {% if national %}
+  <h3>Nigeria</h3>
+  <ul class="cards">{{ situation_card(national[0], national[1]) }}</ul>
+  {% else %}
+  <p>There is no published national figure for this item yet.</p>
+  {% endif %}
+
+  {% if state_rows %}
+  <h3>By state</h3>
+  <table>
+    <caption class="visually-hidden">{{ selected.label|ucfirst }} by state</caption>
+    <thead><tr><th scope="col">State</th><th scope="col">Latest</th><th scope="col">Change vs last month</th><th scope="col">Evidence</th></tr></thead>
+    <tbody>
+    {% for r in state_rows %}
+      <tr>
+        <th scope="row"><a href="/s/{{ r.slug }}">{{ r.place }}</a></th>
+        <td>{% if r.current %}{{ r.current|fact_value }}{% endif %}</td>
+        <td>{% if r.mom %}{{ r.mom|fact_value }}{% else %}–{% endif %}</td>
+        <td>{{ badge_tag(r.badge) }}{% if r.stale %} <span class="tag tag-stale">Out of date</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% elif selected.topic == "food" %}
+  <p class="help">The National Bureau of Statistics publishes food prices as national averages only, so there is no state table for this item.</p>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}

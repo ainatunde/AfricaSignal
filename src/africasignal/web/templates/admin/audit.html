@@ -1,0 +1,26 @@
+{% extends "admin/base.html" %}
+{% block title %}Audit log{% endblock %}
+{% block content %}
+<h1>Audit log</h1>
+<p class="muted">The 200 most recent changes.</p>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">When</th><th scope="col">Operator</th><th scope="col">Action</th><th scope="col">Target</th><th scope="col">Detail</th></tr></thead>
+  <tbody>
+  {% for entry, email in rows %}
+  <tr>
+    <td>{{ entry.ts|when }}</td>
+    <td>{{ email or "system" }}</td>
+    <td>{{ entry.action }}</td>
+    <td>{{ entry.target_kind }}{% if entry.target_id is not none %} #{{ entry.target_id }}{% endif %}</td>
+    <td>{% if entry.before or entry.after %}<details><summary>before / after</summary>
+      <pre>before: {{ entry.before|tojson }}
+after: {{ entry.after|tojson }}</pre></details>{% else %}—{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5">Nothing recorded yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

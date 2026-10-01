@@ -1,6 +1,15 @@
 # Local development stack. `minio` runs only with `--profile dev`.
+# Container logs are kept on the host with rotation (5 files of 10 MB per service). Ship them
+# elsewhere by changing the driver here (see docs/runbook.md, "Logs").
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 x-app: &app
   build: .
+  logging: *default-logging
   environment: &app-env
     ENV: development
     DATABASE_URL: postgresql+psycopg://africasignal:africasignal@db:5432/africasignal
@@ -17,12 +26,13 @@ x-app: &app
 services:
   db:
     image: postgis/postgis:16-3.4
+    logging: *default-logging
     environment:
       POSTGRES_USER: africasignal
       POSTGRES_PASSWORD: africasignal
       POSTGRES_DB: africasignal
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432" # development credentials: listen on this machine only
     volumes:
       - dbdata:/var/lib/postgresql/data
     healthcheck:
@@ -33,6 +43,7 @@ services:
 
   migrate:
     build: .
+    logging: *default-logging
     environment: *app-env
     # Migrate, then seed the source registry (idempotent; never approves anything).
     command: ["sh", "-c", "alembic upgrade head && python -m africasignal.sources.seed"]
@@ -42,6 +53,10 @@ services:
 
   web:
     <<: *app
+    # Same as the image's default, spelled out so `docker compose config` shows it: uvicorn's
+    # access log would write every reader's IP address and requested URL. Do not remove
+    # --no-access-log (tests/unit/test_logging_policy.py checks it).
+    command: ["uvicorn", "africasignal.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
     ports:
       - "8000:8000"
 
@@ -54,6 +69,78 @@ services:
     <<: *app
     command: ["python", "-m", "africasignal.jobs.scheduler"]
 
+  # Nightly backup to a separate bucket. Not started by default: `docker compose --profile backup up -d backup`.
+  # One-off backup or restore: `docker compose run --rm --entrypoint /opt/africasignal/scripts/backup.sh backup`.
+  # See docs/runbook.md for the variables and the restore drill.
+  backup:
+    build:
+      context: .
+      dockerfile: docker/backup/Dockerfile
+    profiles: ["backup"]
+    restart: unless-stopped
+    environment:
+      ENV: ${ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://africasignal:africasignal@db:5432/africasignal}
+      # Needed to read secrets saved in the operator console.
+      SECRET_KEY: ${SECRET_KEY:-}
+      # The bucket settings below are fallbacks: a value saved in the console (Settings) wins.
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://minio:9000}
+      S3_BUCKET: ${S3_BUCKET:-africasignal}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-minioadmin}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+      BACKUP_S3_ENDPOINT_URL: ${BACKUP_S3_ENDPOINT_URL:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      BACKUP_S3_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-}
+      BACKUP_RETAIN_DAYS: ${BACKUP_RETAIN_DAYS:-30}
+      BACKUP_AT_UTC: ${BACKUP_AT_UTC:-02:30}
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:-}
+      BACKUP_HEARTBEAT_URL: ${BACKUP_HEARTBEAT_URL:-}
+      # Only for restore.sh: the bucket that receives objects (never defaults to the app bucket).
+      RESTORE_S3_ENDPOINT_URL: ${RESTORE_S3_ENDPOINT_URL:-}
+      RESTORE_S3_BUCKET: ${RESTORE_S3_BUCKET:-}
+      RESTORE_S3_ACCESS_KEY_ID: ${RESTORE_S3_ACCESS_KEY_ID:-}
+      RESTORE_S3_SECRET_ACCESS_KEY: ${RESTORE_S3_SECRET_ACCESS_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: *default-logging
+
+  # Restore drill: take a backup of the running database, restore it into a scratch database next to
+  # it, compare the two, drop the scratch database, record the result. Not started by default:
+  #   docker compose --profile drill run --rm restore-drill
+  # It writes to a throwaway directory inside the container (DRILL_BACKUP_DIR), so it needs no bucket.
+  # To drill against the real backup bucket instead, set DRILL_BACKUP_DIR= (empty) and the BACKUP_S3_*
+  # values, and pass --latest to restore the newest existing backup. See docs/runbook.md, section 4.3.
+  restore-drill:
+    build:
+      context: .
+      dockerfile: docker/backup/Dockerfile
+    profiles: ["drill"]
+    entrypoint: ["/opt/africasignal/scripts/restore-drill.sh"]
+    environment:
+      ENV: ${ENV:-development}
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://africasignal:africasignal@db:5432/africasignal}
+      SECRET_KEY: ${SECRET_KEY:-}
+      BACKUP_DIR: ${DRILL_BACKUP_DIR-/tmp/drill-backups}
+      BACKUP_S3_ENDPOINT_URL: ${BACKUP_S3_ENDPOINT_URL:-}
+      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET:-}
+      BACKUP_S3_ACCESS_KEY_ID: ${BACKUP_S3_ACCESS_KEY_ID:-}
+      BACKUP_S3_SECRET_ACCESS_KEY: ${BACKUP_S3_SECRET_ACCESS_KEY:-}
+      BACKUP_S3_PREFIX: ${BACKUP_S3_PREFIX:-}
+      BACKUP_PASSPHRASE: ${BACKUP_PASSPHRASE:-}
+      RESTORE_S3_ENDPOINT_URL: ${RESTORE_S3_ENDPOINT_URL:-}
+      RESTORE_S3_BUCKET: ${RESTORE_S3_BUCKET:-}
+      RESTORE_S3_ACCESS_KEY_ID: ${RESTORE_S3_ACCESS_KEY_ID:-}
+      RESTORE_S3_SECRET_ACCESS_KEY: ${RESTORE_S3_SECRET_ACCESS_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    logging: *default-logging
+
   minio:
     image: minio/minio
     profiles: ["dev"]
@@ -62,8 +149,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - miniodata:/data
 
