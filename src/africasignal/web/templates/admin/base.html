@@ -17,7 +17,13 @@
   h1 { font-size: 1.4rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
   table { border-collapse: collapse; width: 100%; }
   th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
-  .scroll { overflow-x: auto; }
+  /* Shadows at the edges show that a wide table scrolls sideways (they appear only while there is more to see). */
+  .scroll { overflow-x: auto;
+    background:
+      linear-gradient(to right, var(--bg) 30%, rgba(0,0,0,0)) left center / 2rem 100% no-repeat local,
+      linear-gradient(to left, var(--bg) 30%, rgba(0,0,0,0)) right center / 2rem 100% no-repeat local,
+      radial-gradient(farthest-side at 0 50%, rgba(128,128,128,.45), rgba(0,0,0,0)) left center / .7rem 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%, rgba(128,128,128,.45), rgba(0,0,0,0)) right center / .7rem 100% no-repeat scroll; }
   .muted { color: var(--muted); } .bad { color: var(--bad); } .ok { color: var(--ok); } .warn { color: var(--warn); }
   .notice, .error { padding: .6rem .8rem; border: 1px solid var(--line); border-left-width: 4px; margin: 1rem 0; }
   .notice { border-left-color: var(--ok); } .error { border-left-color: var(--bad); }

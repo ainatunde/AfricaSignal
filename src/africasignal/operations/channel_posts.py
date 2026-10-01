@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from africasignal import audit, settings_store
 from africasignal.models import AssessmentVersion, ChannelPost, Operator, Situation
+from africasignal.operations.paging import Page, page_of
 from africasignal.publish import versions
 from africasignal.publish.whatsapp_text import (
     MAX_CHARS,
@@ -29,6 +30,7 @@ from africasignal.textclean import one_line
 
 CHANNELS = tuple(MAX_CHARS)  # ("wa", "x")
 CHANNEL_NAMES = {"wa": "WhatsApp", "x": "X"}
+DRAFTS_PER_PAGE = 20  # situations per page: each has a WhatsApp and an X draft
 MAX_URL = 300
 MAX_NOTE = 200
 
@@ -49,11 +51,12 @@ class Drafts:
     posts: list[Draft] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
     suspended: bool = False
+    page: Page = field(default_factory=lambda: Page(1, DRAFTS_PER_PAGE, 0))
 
 
-def drafts(session: Session, since: datetime) -> Drafts:
-    """Newest first. Raises ``PostError`` when the public address is not set (the posts link to
-    it)."""
+def drafts(session: Session, since: datetime, page: str | None = None) -> Drafts:
+    """One page of drafts, newest first. Raises ``PostError`` when the public address is not
+    set (the posts link to it)."""
     result = Drafts()
     if versions.publication_suspended(session):
         result.suspended = True
@@ -61,13 +64,16 @@ def drafts(session: Session, since: datetime) -> Drafts:
     base_url = settings_store.get(session, "public_base_url")
     if not base_url:
         raise PostError("the public address is not set: add it under Settings in the console")
-    changes = material_changes(session, since)
+    everything = material_changes(session, since)  # oldest first
+    result.page = page_of(page, len(everything), DRAFTS_PER_PAGE)
+    newest_first = everything[::-1]
+    changes = newest_first[result.page.offset : result.page.offset + result.page.size]
     records: dict[int, dict[str, ChannelPost]] = {}
     for record in session.scalars(
         select(ChannelPost).where(ChannelPost.assessment_version_id.in_([v.id for _, v in changes]))
     ):
         records.setdefault(record.assessment_version_id, {})[record.channel] = record
-    for situation, version in reversed(changes):
+    for situation, version in changes:
         try:
             posts = ChannelPosts(
                 situation.slug,

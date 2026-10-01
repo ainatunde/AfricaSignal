@@ -126,14 +126,42 @@ def test_an_explanation_is_shown_when_there_is_one(
     assert "Why this matters Fuel costs move with the exchange rate." in plain
 
 
-def test_an_expired_version_says_out_of_date(
+def test_an_expired_version_says_out_of_date_and_dates_its_headline(
     session: Session, store: S3Store, source: Source, client: TestClient
 ) -> None:
     (_, version) = seed_petrol(session, store, source)["NG-LA"]
     version.valid_until = datetime.now(UTC) - timedelta(days=1)  # published, not yet marked stale
     session.flush()
-    plain = text_of(client.get("/s/price-pms_litre-ng-la").text)
+    page = client.get("/s/price-pms_litre-ng-la").text
+    plain = text_of(page)
     assert "Out of date: last checked 25 November 2024" in plain
+    # the headline reads as a dated statement, not as news; the stored text is untouched
+    assert "<h1>As of October 2024: Average petrol (PMS) price in Lagos State rose" in page
+    assert "<title>As of October 2024: Average petrol" in page
+    assert version.headline.startswith("Average petrol")
+
+
+def test_a_current_version_keeps_its_plain_headline(
+    session: Session, store: S3Store, source: Source, client: TestClient
+) -> None:
+    (_, version) = seed_petrol(session, store, source)["NG-LA"]
+    version.valid_until = datetime.now(UTC) + timedelta(days=10)
+    session.flush()
+    page = client.get("/s/price-pms_litre-ng-la").text
+    assert "<h1>Average petrol (PMS) price in Lagos State rose" in page
+    assert "As of October 2024" not in page
+
+
+def test_lists_date_an_expired_headline_too(
+    session: Session, store: S3Store, source: Source, client: TestClient
+) -> None:
+    (_, version) = seed_petrol(session, store, source)["NG-LA"]
+    version.valid_until = datetime.now(UTC) - timedelta(days=1)
+    session.flush()
+    public.clear_page_cache()
+    assert "As of October 2024: Average petrol (PMS) price in Lagos State" in text_of(
+        client.get("/places/NG-LA").text
+    )
 
 
 def test_a_withdrawn_assessment_says_so(
@@ -145,6 +173,27 @@ def test_a_withdrawn_assessment_says_so(
     session.flush()
     plain = text_of(client.get("/s/price-pms_litre-ng-la").text)
     assert "This assessment was withdrawn." in plain and "source document was withdrawn" in plain
+
+
+def test_a_withdrawn_page_shows_no_chart_figures_or_generic_evidence_text(
+    session: Session, store: S3Store, source: Source, client: TestClient
+) -> None:
+    (_, version) = seed_petrol(session, store, source)["NG-LA"]
+    version.status = "withdrawn"
+    version.evidence_state = "insufficient"  # the browser-pass case
+    version.change_summary = "The source document was withdrawn."
+    session.flush()
+    page = client.get("/s/price-pms_litre-ng-la").text
+    plain = text_of(page)
+    assert "This assessment was withdrawn." in plain and "Withdrawn" in plain
+    assert "<svg" not in page.split("<main", 1)[1] and "Price history" not in plain
+    assert "Not enough evidence" not in plain and "enough recent data" not in plain
+    assert "No source documents are attached" not in plain
+    assert "Key facts" not in plain and "All figures" not in plain
+    assert "What we don't know" not in plain
+    assert "As of October 2024" not in plain  # withdrawn is not dressed up as a dated figure
+    assert 'href="/s/price-pms_litre-ng-la/history"' in page  # the audit trail stays reachable
+    assert "Report an error" in plain
 
 
 def test_unpublished_versions_are_not_reachable(

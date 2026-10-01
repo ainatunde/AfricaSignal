@@ -41,8 +41,24 @@ def nbs_sources(session: Session) -> list[Source]:
     )
 
 
+# What the dropdown shows. A code that is not here (a publication added to items.yaml later) is
+# shown as its code until a name is added.
+PUBLICATION_NAMES = {
+    "pms": "Petrol (PMS) price watch",
+    "ago": "Diesel (AGO) price watch",
+    "dpk": "Household kerosene price watch",
+    "lpg": "Cooking gas (LPG) price watch",
+    "food": "Selected food prices watch",
+}
+
+
 def publication_codes() -> list[str]:
     return [p.code for p in load_items().nbs_publications]
+
+
+def publication_choices() -> list[tuple[str, str]]:
+    """(code, name) for the upload form; the code is what the form sends."""
+    return [(code, PUBLICATION_NAMES.get(code, code)) for code in publication_codes()]
 
 
 def check_content(data: bytes) -> None:

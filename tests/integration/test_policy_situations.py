@@ -208,7 +208,7 @@ def test_a_primary_document_gives_a_reported_attributed_assessment(
     before = order(session, nerc, "200.00", date(2026, 8, 1), doc=None, text=ORDER + " (Aug)")
     ensure_policy_situations(session, {IKEJA})
     version = assess(session, situation(session))
-    assert (version.template, version.template_version) == ("T2_policy_change", "T2-1")
+    assert (version.template, version.template_version) == ("T2_policy_change", "T2-2")
     assert version.status == "draft" and version.policy_version == "unapplied"
     assert version.evidence_state == "reported" and version.severity == "none"  # 4.8 % < 5 %
     assert version.headline == (

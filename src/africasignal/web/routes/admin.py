@@ -110,6 +110,12 @@ def _page(
     )
 
 
+def error_page(request: Request, status_code: int, message: str) -> Response:
+    """A console-styled page for an error raised by a console route (a 403 for an editor who
+    typed an admin address, a 404). It needs no session lookup, so it shows no menu."""
+    return _page(request, "admin/error.html", None, status_code, message=message, error=None)
+
+
 def _redirect(url: str, auth: Authenticated | None = None) -> Response:
     return _finish(RedirectResponse(url, status_code=303), auth)
 

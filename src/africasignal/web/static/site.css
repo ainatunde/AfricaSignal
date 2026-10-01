@@ -65,6 +65,13 @@ thead th { border-bottom: 2px solid var(--fg); font-size: .85rem; }
 table.summary td.big { font-size: 1.4rem; font-weight: 700; }
 @media (max-width: 34rem) {
   table { display: block; overflow-x: auto; }
+  /* "All figures": one block per row on a phone, so the source is never out of sight. */
+  table.figures thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  table.figures, table.figures tbody, table.figures tr, table.figures th, table.figures td { display: block; }
+  table.figures tr { padding: .5rem 0; border-bottom: 1px solid var(--line); }
+  table.figures th, table.figures td { border: 0; padding: .1rem 0; }
+  table.figures td:empty { display: none; }
+  table.figures td::before { content: attr(data-label) ": "; color: var(--muted); }
 }
 
 svg.chart { width: 100%; height: auto; max-width: 40rem; }

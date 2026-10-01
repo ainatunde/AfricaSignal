@@ -4,7 +4,7 @@
 
 {% macro situation_card(c, b, show_place=False) -%}
 <li class="card">
-  <h3><a href="/s/{{ c.situation.slug }}">{{ c.version.headline }}</a></h3>
+  <h3><a href="/s/{{ c.situation.slug }}">{{ c.version|reader_headline }}</a></h3>
   <p class="meta">{{ badge(b) }}
     {% if c.effective_status == "stale" %}<span class="tag tag-stale">Out of date</span>{% endif %}
     {% if c.effective_status == "withdrawn" %}<span class="tag tag-stale">Withdrawn</span>{% endif %}

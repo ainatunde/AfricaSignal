@@ -14,9 +14,17 @@ change is being applied. Rules, as implemented:
   ``now``; the previous rate is the latest one before that. The absolute and percentage change
   are computed here, never by a language model. A rate that takes effect after ``now`` is shown
   as an announced rate and does not replace the current one.
+* **A change is only asserted when the documents support it.** The headline says the rate "rose",
+  "fell" or is "unchanged", and the change facts and severity are given, only when both the current
+  and the previous rate have an effective date stated to the day or month *and* the current one
+  took effect no more than ``RECENT_CHANGE_DAYS`` before the document that gives it was published
+  (the document reports the change; it is not a table that merely lists older rates). Otherwise
+  the headline states the rate in force and the date of the document, the previous rate stays as
+  a dated fact, and severity is ``none``. A schedule published in September 2026 that lists the
+  same rate "August 2024 to September 2026" is therefore not reported as a rise in August 2024.
 * **Severity.** ``ratio = |pct change| / materiality``. ``none`` below 1, ``low`` below 2,
   ``medium`` up to 4, ``high`` above (the same bands as T1); ``none`` when the evidence is
-  ``insufficient``.
+  ``insufficient`` or no change is asserted.
 * **Evidence state** (``insufficient`` first, then ``disputed``, then ``corroborated``):
 
   - ``insufficient``: no primary rate is in force (no primary document, or only an announced
@@ -66,8 +74,9 @@ from africasignal.assess.price_change import (
     severity_for,
 )
 
-TEMPLATE_VERSION = "T2-1"
+TEMPLATE_VERSION = "T2-2"
 VALID_FOR_DAYS = 45  # after the latest input, then re-check
+RECENT_CHANGE_DAYS = 120  # a change is news only this long after it took effect (same as T1)
 
 SUSPENSION = re.compile(
     r"\b(suspend(?:s|ed|ing)?|suspension|revers(?:e|es|ed|al)|rescind(?:s|ed)?|revok(?:e|es|ed)"
@@ -253,13 +262,27 @@ def compute_policy_change(inputs: PolicyInputs) -> PolicyAssessment | None:
         facts.append(
             _fact("Current rate", current.value, inputs.unit, period_label, place, current_claims)
         )
+        dated_change = previous is not None and current.known and previous.known
+        reports_change = (
+            dated_change
+            and (current.claim.published_at.date() - current.effective).days <= RECENT_CHANGE_DAYS
+        )
         if previous is not None:
             prev_period = f"from {_day(previous.effective)}" if previous.known else period_label
             facts.append(
                 _fact("Previous rate", previous.value, inputs.unit, prev_period, place,
                       previous_claims)
             )  # fmt: skip
-            if previous.value != 0:
+            if not dated_change:
+                unknowns.append(
+                    "No change is reported: the date one of the two rates took effect is not stated"
+                )
+            elif not reports_change:
+                unknowns.append(
+                    f"The rate last changed on {_day(current.effective)}, long before the "
+                    "document that states it, so it is shown as the rate in force, not as news"
+                )
+            elif previous.value != 0:
                 change_pct = pct_change(current.value, previous.value)
                 step = abs(current.value - previous.value)
                 if step != 0:
@@ -295,8 +318,6 @@ def compute_policy_change(inputs: PolicyInputs) -> PolicyAssessment | None:
             ratio = abs(change_pct) / inputs.materiality_pct
             material = ratio >= 1
             severity = severity_for(ratio)
-            if severity in ("medium", "high") and not current.known:
-                severity = "low"  # an unknown effective date caps severity (spec B8.3)
         headline = _headline(inputs, current, change_pct, source_short)
     else:
         unknowns.append("A new rate has been announced but is not in force yet")
@@ -366,13 +387,15 @@ def _input_rows(
 
 
 def _headline(inputs: PolicyInputs, current: _Rate, pct: Decimal | None, source: str) -> str:
+    """A change is worded as news only when ``pct`` is set (a dated, recent change, see the module
+    docstring); otherwise the headline states the rate in force and the date of the document."""
     rate = _money(current.value, inputs.unit)
-    since = f"from {_day(current.effective)}" if current.known else "(effective date not stated)"
     if pct is None:
         return (
-            f"{inputs.title}: {source} says the rate is {rate} {since}; "
-            "there is no previous rate to compare with"
+            f"{inputs.title}: the rate in force is {rate} "
+            f"({source} document of {_day(current.claim.published_at.date())})"
         )
+    since = f"from {_day(current.effective)}"
     if pct == 0:
         return f"{inputs.title}: {source} says the rate is unchanged at {rate} {since}"
     verb = "rose" if pct > 0 else "fell"

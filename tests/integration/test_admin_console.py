@@ -339,6 +339,58 @@ def test_source_cannot_be_fetched_until_approved_in_the_console(
     )
 
 
+def fetch_jobs(session: Session, source: Source) -> list[Job]:
+    return list(
+        session.scalars(
+            select(Job).where(
+                Job.kind == "fetch_source", Job.payload["source_id"].astext == str(source.id)
+            )
+        )
+    )
+
+
+def test_approving_a_source_queues_its_first_fetch_once(
+    client: TestClient, session: Session
+) -> None:
+    source = make_source(session, approved_at=None)  # type: ignore[arg-type]
+    assert fetch_jobs(session, source) == []  # nothing is queued before approval
+    signed_in(client, make_operator(session))
+    url = f"/admin/sources/{source.id}/permissions/1/approve"
+    assert client.post(url, data={"terms_reviewed": "on"}, headers=ORIGIN).status_code == 303
+    assert len(fetch_jobs(session, source)) == 1
+    # the schedule restarts from the approval, so the scheduler does not add a second one at once
+    assert source.next_due_at > datetime.now(UTC)
+
+
+def test_a_refused_approval_queues_no_fetch(client: TestClient, session: Session) -> None:
+    source = make_source(session, approved_at=None)  # type: ignore[arg-type]
+    signed_in(client, make_operator(session))
+    client.post(f"/admin/sources/{source.id}/permissions/1/approve", data={}, headers=ORIGIN)
+    assert fetch_jobs(session, source) == []
+
+
+def test_withdrawing_permission_or_pausing_queues_no_fetch(
+    client: TestClient, session: Session
+) -> None:
+    withdrawn = make_source(session, "withdrawn", approved_at=datetime.now(UTC))  # type: ignore[arg-type]
+    paused = make_source(session, "paused", approved_at=None)  # type: ignore[arg-type]
+    paused.active = False
+    session.flush()
+    signed_in(client, make_operator(session))
+    client.post(
+        f"/admin/sources/{withdrawn.id}/permissions",
+        data={"rights_basis": "Withdrawn after a takedown request", "link_required": "on"},
+        headers=ORIGIN,
+    )
+    client.post(
+        f"/admin/sources/{paused.id}/permissions/1/approve",
+        data={"terms_reviewed": "on"},
+        headers=ORIGIN,
+    )
+    assert fetch_jobs(session, withdrawn) == []  # collecting is off
+    assert fetch_jobs(session, paused) == []  # an inactive source is never fetched
+
+
 def test_approval_records_who_when_and_writes_an_audit_row(
     client: TestClient, session: Session
 ) -> None:
