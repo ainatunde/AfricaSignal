@@ -1,0 +1,194 @@
+{
+  "description": "Real NBS price-watch workbooks used as parser fixtures. Files are unmodified copies of what nigerianstat.gov.ng served. Retrieved with the AfricaSignalBot user agent, one request every 4 seconds.",
+  "publisher": "National Bureau of Statistics, Nigeria",
+  "rights_note": "Public government statistics, attributed to NBS (see source rights_basis in config/sources.yaml). NBS terms of use were not reviewed when these were saved; an operator must review them before the source permission is approved.",
+  "retrieved_on": "2026-09-30",
+  "listing_page": "https://nigerianstat.gov.ng/elibrary",
+  "files": [
+    {
+      "file": "FUEL_SEPT_2024_REPORT.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/FUEL_SEPT_2024_REPORT.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241571",
+      "listing_title": "Premium Motor Spirit (Petrol) Price Watch (September 2024)",
+      "listing_release_date": "Thu Oct 17 2024",
+      "bytes": 18558,
+      "sha256": "c78a001d57d78f973e181a17867fadcb5eacb889f07ae2be833bfc620afd38d4"
+    },
+    {
+      "file": "DIESEL_SEPT_2024_REPORT.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/DIESEL_SEPT_2024_REPORT.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241572",
+      "listing_title": "Automotive Gas Oil (Diesel) Price Watch (September 2024)",
+      "listing_release_date": "Thu Oct 17 2024",
+      "bytes": 15173,
+      "sha256": "2a3739336a218105579db9637f70677afb8aaa4f57dba47ba668e2e5ef0d0c05"
+    },
+    {
+      "file": "HOUSEHOLD_KEROSENE_SEPT_2024.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/HOUSEHOLD_KEROSENE_SEPT_2024.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241573",
+      "listing_title": "National Household Kerosene Price Watch (September 2024)",
+      "listing_release_date": "Thu Oct 17 2024",
+      "bytes": 18045,
+      "sha256": "209ae789627db74011045f93d3d397d44de853dae00c132c026fc152466acca7"
+    },
+    {
+      "file": "GAS_PRICE_WATCH_SEPT_2024.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/GAS_PRICE_WATCH_SEPT_2024.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241574",
+      "listing_title": "Liquefied Petroleum Gas (Cooking Gas) Price Watch (September 2024)",
+      "listing_release_date": "Thu Oct 17 2024",
+      "bytes": 19777,
+      "sha256": "91eeff1476b2c1747e3fc362adc1b09fb65cbaf28ecdddf6c2c1802531e2a65c"
+    },
+    {
+      "file": "selected_food_sept_2024.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/selected_food_sept_2024.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241575",
+      "listing_title": "Selected Food Prices Watch (September 2024)",
+      "listing_release_date": "Wed Oct 23 2024",
+      "bytes": 23034,
+      "sha256": "bd1d0f9e2dd71cb4c1cb5862d0dd8153bb6bdee343e9e8d97217192d307867bf"
+    },
+    {
+      "file": "PMS_OCT_2024_REPORT.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/PMS_OCT_2024_REPORT.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241584",
+      "listing_title": "Premium Motor Spirit (Petrol) Price Watch (October 2024)",
+      "listing_release_date": "Tue Nov 19 2024",
+      "bytes": 23364,
+      "sha256": "d42c469b1eff4ed605027084d819aba25d21bd94da6064eb2055b2e12b5036e2"
+    },
+    {
+      "file": "DIESEL_OCT_2024_REPORT.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/DIESEL_OCT_2024_REPORT.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241585",
+      "listing_title": "Automotive Gas Oil (Diesel) Price Watch (October 2024)",
+      "listing_release_date": "Tue Nov 19 2024",
+      "bytes": 15080,
+      "sha256": "a5d4e57eb8dcc7e59d0b7c64cb6121eca7c6b1cff7c904d57195ed0a5b75a155"
+    },
+    {
+      "file": "HOUSEHOLD_KEROSENE_OCT_2024.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/HOUSEHOLD_KEROSENE_OCT_2024.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241586",
+      "listing_title": "National Household Kerosene Price Watch (October 2024)",
+      "listing_release_date": "Tue Nov 19 2024",
+      "bytes": 17786,
+      "sha256": "311c7a2d0c2fe4f6794d865a92462f56256a9dbd0c0debb2d47e5791df690542"
+    },
+    {
+      "file": "GAS_PRICE_WATCH_OCT_2024.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/GAS_PRICE_WATCH_OCT_2024.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241587",
+      "listing_title": "Liquefied Petroleum Gas (Cooking Gas) Price Watch (October 2024)",
+      "listing_release_date": "Tue Nov 19 2024",
+      "bytes": 19637,
+      "sha256": "5af16f988ab1f2c94bf8b8ec93b8dc18470c83ef7b55fa3567dc7104c5797b78"
+    },
+    {
+      "file": "selected_food_oct_2024.xlsx",
+      "source_url": "https://nigerianstat.gov.ng/resource/selected_food_oct_2024.xlsx",
+      "report_page": "https://nigerianstat.gov.ng/elibrary/read/1241592",
+      "listing_title": "Selected Food Prices Watch (October 2024)",
+      "listing_release_date": "Sun Nov 24 2024",
+      "bytes": 23080,
+      "sha256": "d692fa2b610fca7ed965627930892e82c0b470e1c038f500cf96c6f250a92da1"
+    }
+  ],
+  "excerpts": [
+    {
+      "file": "elibrary_listing_rows.html",
+      "source_url": "https://nigerianstat.gov.ng/elibrary",
+      "note": "Table rows copied verbatim from the listing page; the page holds 1695 rows."
+    },
+    {
+      "file": "report_page_download_links.html",
+      "source_url": "https://nigerianstat.gov.ng/elibrary/read/1241584",
+      "note": "The 'Download Report' (PDF) and 'Download Tables' (Excel) links of one report page."
+    },
+    {
+      "file": "microdata_catalog_157_downloads.html",
+      "source_url": "https://microdata.nigerianstat.gov.ng/index.php/catalog/157",
+      "note": "Downloads list of the petrol price watch catalog page, newest first."
+    }
+  ],
+  "microdata_files": [
+    {
+      "file": "Fuel_MAY_2026.xlsx",
+      "source_url": "https://microdata.nigerianstat.gov.ng/index.php/catalog/157/download/1424/PMS_Report_MAY_2026.zip",
+      "container": "zip",
+      "inner_file": "Fuel_MAY_2026.xlsx",
+      "container_sha256": "b792493b6fb8c3ca0ce6c72e1994ffcc79e66db10896dc60e06aef78bb3cbc2e",
+      "container_bytes": 742369,
+      "catalog_page": "https://microdata.nigerianstat.gov.ng/index.php/catalog/157",
+      "catalog_link_text": "PMS Report May 2026",
+      "publication": "pms",
+      "latest_member_modified": "2026-06-24",
+      "bytes": 15212,
+      "sha256": "1d35221e5b34a333ad697ac3390a24ade8925861cb79e88a393d2ab80280098f",
+      "note": "xlsx extracted unmodified from the ZIP the catalog serves; the ZIP also holds a PDF report"
+    },
+    {
+      "file": "DIESEL_MAY_2026.xlsx",
+      "source_url": "https://microdata.nigerianstat.gov.ng/index.php/catalog/158/download/1425/AGO_Report_MAY_2026.zip",
+      "container": "zip",
+      "inner_file": "DIESEL_MAY_2026.xlsx",
+      "container_sha256": "c9e29324b8e05d0c8e67d008aed3ae59ec95b9176580d769903bca9257986a73",
+      "container_bytes": 737128,
+      "catalog_page": "https://microdata.nigerianstat.gov.ng/index.php/catalog/158",
+      "catalog_link_text": "AGO Report May 2026",
+      "publication": "ago",
+      "latest_member_modified": "2026-06-24",
+      "bytes": 14857,
+      "sha256": "04f395bf3a1f79fa74d0009e87507235f535cad0ad0a856963bcfc0d921f81f0",
+      "note": "xlsx extracted unmodified from the ZIP the catalog serves; the ZIP also holds a PDF report"
+    },
+    {
+      "file": "HOUSEHOLD KEROSENE MAY 2026.xlsx",
+      "source_url": "https://microdata.nigerianstat.gov.ng/index.php/catalog/159/download/1426/NHK_Report_May_26.zip",
+      "container": "zip",
+      "inner_file": "HOUSEHOLD KEROSENE MAY 2026.xlsx",
+      "container_sha256": "4e2688cc73018bdac8737cdca557c7a564cfff048d60e0c0b77ceb5e09c080f6",
+      "container_bytes": 1058715,
+      "catalog_page": "https://microdata.nigerianstat.gov.ng/index.php/catalog/159",
+      "catalog_link_text": "NHK Report May 2026",
+      "publication": "dpk",
+      "latest_member_modified": "2026-06-24",
+      "bytes": 20849,
+      "sha256": "0e1a652f12f694c36b3fcbf3df6de7510947181427917140dc2019107b63262c",
+      "note": "xlsx extracted unmodified from the ZIP the catalog serves; the ZIP also holds a PDF report"
+    },
+    {
+      "file": "GAS PRICE WATCH APRIL 2026_table.xlsx",
+      "source_url": "https://microdata.nigerianstat.gov.ng/index.php/catalog/160/download/1413/LPG_Report_APR26.zip",
+      "container": "zip",
+      "inner_file": "GAS PRICE WATCH APRIL 2026_table.xlsx",
+      "container_sha256": "511f5c77350293b994230d9640c3a1052fed7afef047191e7e6803764d12cf4d",
+      "container_bytes": 3376325,
+      "catalog_page": "https://microdata.nigerianstat.gov.ng/index.php/catalog/160",
+      "catalog_link_text": "LPG Report April 2026",
+      "publication": "lpg",
+      "latest_member_modified": "2026-05-26",
+      "bytes": 18899,
+      "sha256": "4713bdf4630740d40c3f36f8f3d8d2473ee1a9ffc0b2f47e0e7a1aa99706c5fa",
+      "note": "xlsx extracted unmodified from the ZIP the catalog serves; the ZIP also holds a PDF report"
+    },
+    {
+      "file": "selected food table May 26.xlsx",
+      "source_url": "https://microdata.nigerianstat.gov.ng/index.php/catalog/162/download/1427/Selected_Food_Report_May%2026.zip",
+      "container": "zip",
+      "inner_file": "selected food table May 26.xlsx",
+      "container_sha256": "2d46ff90f87c7bfe75cc3df30ae35cc10a9641971543243e9d885aa7a97ca466",
+      "container_bytes": 5294517,
+      "catalog_page": "https://microdata.nigerianstat.gov.ng/index.php/catalog/162",
+      "catalog_link_text": "Selected Food Price Watch May 2026",
+      "publication": "food",
+      "latest_member_modified": "2026-06-25",
+      "bytes": 22197,
+      "sha256": "d72407cea0ae2456d6309dcec1cb9a19918b2f0f0652dc3e610ee5a9a08e7318",
+      "note": "xlsx extracted unmodified from the ZIP the catalog serves; the ZIP also holds a PDF report"
+    }
+  ],
+  "microdata_note": "Current NBS price watches (2025 onwards) are published on the NBS microdata catalog, not on the eLibrary page, as ZIPs holding a PDF report and an xlsx table. Retrieved 2026-09-30."
+}

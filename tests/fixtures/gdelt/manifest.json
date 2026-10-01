@@ -1,0 +1,59 @@
+{
+  "description": "Real GDELT 2.0 files. data.gdeltproject.org has no robots.txt (404) and no rate limit was met at one request every 2 seconds.",
+  "retrieved_on": "2026-09-30",
+  "terms_note": "Read on 2026-09-30 at https://www.gdeltproject.org/about.html: all datasets are available for unlimited and unrestricted use, including commercial use, without fee; they may be redistributed and republished; any use or redistribution must cite the GDELT Project and link to its website. Not legally reviewed. The plan uses only URLs and event metadata.",
+  "fips_reminder": "GDELT geographic country codes are FIPS 10-4: NI is Nigeria and NG is Niger. Actor country codes are CAMEO (NGA).",
+  "columns_used_by_the_counts": "export (0-based): ActionGeo_CountryCode 53, Actor1CountryCode 7, Actor2CountryCode 17, Actor1Geo_CountryCode 37, Actor2Geo_CountryCode 44.",
+  "files": [
+    {
+      "file": "lastupdate.txt",
+      "source_url": "http://data.gdeltproject.org/gdeltv2/lastupdate.txt (redirects to https)",
+      "retrieved_on": "2026-09-30",
+      "bytes": 320,
+      "sha256": "9d13954a18d1ea941b5097ff716a4b7cc096323464723c6b04f3a7cfa0aa2b07",
+      "note": "The http:// URLs it lists redirect (301) to https://. The adapter must follow or upgrade them."
+    },
+    {
+      "file": "20260930180000.export.CSV.zip",
+      "source_url": "https://data.gdeltproject.org/gdeltv2/20260930180000.export.CSV.zip",
+      "retrieved_on": "2026-09-30",
+      "bytes": 74059,
+      "sha256": "6a3c3b774386bb74a30c635b15445b58db5b95fddce8a64aecb37f00f4f45c47",
+      "note": "Events, 61 tab-separated columns, no header. Newest 15-minute slice when fetched.",
+      "rows": 1074,
+      "action_geo_country_NI_nigeria": 38,
+      "action_geo_country_NG_niger": 0,
+      "actor_geo_country_NG_niger": 0,
+      "actor1_or_actor2_NGA": 33
+    },
+    {
+      "file": "20260930154500.export.CSV.zip",
+      "source_url": "https://data.gdeltproject.org/gdeltv2/20260930154500.export.CSV.zip",
+      "retrieved_on": "2026-09-30",
+      "bytes": 104084,
+      "sha256": "77727de63b954ff0ca7dba577b4ac3c2150c95850d90ecf87615f71a130e2cea",
+      "note": "Events slice chosen because it holds 7 rows where Actor1Geo_CountryCode (col 37) or Actor2Geo_CountryCode (col 44) is NG, which is Niger in FIPS 10-4 (Nigeria is NI), for the FIPS test the plan asks for. Their actors are BFA/NER, not NGA, and their ActionGeo country is not NI, so a correct filter rejects them. No ActionGeo_CountryCode NG row turned up in the 10 slices examined (15:45 to 18:00 UTC).",
+      "rows": 1603,
+      "action_geo_country_NI_nigeria": 70,
+      "action_geo_country_NG_niger": 0,
+      "actor_geo_country_NG_niger": 7,
+      "actor1_or_actor2_NGA": 47
+    },
+    {
+      "file": "20260930180000.mentions.CSV.zip",
+      "source_url": "https://data.gdeltproject.org/gdeltv2/20260930180000.mentions.CSV.zip",
+      "retrieved_on": "2026-09-30",
+      "bytes": 134701,
+      "sha256": "cf0d3e0ce30422c3db9550c8203970ad04c41bcbaa5741bd53318fd51031104a",
+      "note": "Mentions, 16 tab-separated columns, no header."
+    },
+    {
+      "file": "20260930180000.gkg.nigeria-rows.tsv",
+      "source_url": "https://data.gdeltproject.org/gdeltv2/20260930180000.gkg.csv.zip",
+      "retrieved_on": "2026-09-30",
+      "bytes": 150626,
+      "sha256": "4bf0a8d200aaf259a3ecbf0f1cb2657f55b4b83e451891b875d7bf33f97376a4",
+      "note": "DERIVED: the first 12 lines of the 18:00 UTC slice's GKG 2.1 file (27 columns, no header) whose V2Locations mention Nigeria. The full file (6.9 MB zipped, 1,664 rows) is not stored."
+    }
+  ]
+}

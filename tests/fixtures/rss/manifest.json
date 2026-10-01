@@ -1,0 +1,131 @@
+{
+  "description": "Real RSS feeds fetched with the AfricaSignalBot user agent, one request per host, pausing for each host's robots.txt crawl-delay.",
+  "retrieved_on": "2026-09-30",
+  "trimmed": "The repository is public and article text is the outlets' copyright, so body text is truncated: every <description> and <content:encoded> is cut to 300 characters (the plan's quotation limit for news). Everything else (channel header, item fields, namespaces, dates, links, categories, GUIDs) is as served. original_sha256 is of the untrimmed response.",
+  "not_available": [
+    {
+      "outlet": "TheCable",
+      "feed_url": "https://www.thecable.ng/feed/",
+      "result": "HTTP 403 with a Cloudflare 'Just a moment' challenge page. Not bypassed."
+    },
+    {
+      "outlet": "The Guardian Nigeria",
+      "feed_url": "https://guardian.ng/feed/",
+      "result": "HTTP 403 with a Cloudflare challenge page. Not bypassed."
+    }
+  ],
+  "files": [
+    {
+      "file": "punch.xml",
+      "outlet": "Punch",
+      "feed_url": "https://punchng.com/feed/",
+      "final_url_after_redirects": "https://rss.punchng.com/v1/category/latest_news",
+      "retrieved_on": "2026-09-30",
+      "items": 30,
+      "original_bytes": 36956,
+      "original_sha256": "f6a49a0d0cf8e01a0b6b5411127d0674a67b82018aa165c4d81db65cee8a854e",
+      "saved_bytes": 36812,
+      "has_content_encoded": false,
+      "robots_txt": "No disallow rule for feeds. Disallows /search/ and some query strings.",
+      "terms_note": "No terms of use page found at the usual URLs; the footer has a privacy policy and an affiliate disclaimer only. Not reviewed."
+    },
+    {
+      "file": "premiumtimes.xml",
+      "outlet": "Premium Times",
+      "feed_url": "https://www.premiumtimesng.com/feed",
+      "final_url_after_redirects": "https://www.premiumtimesng.com/feed",
+      "retrieved_on": "2026-09-30",
+      "items": 15,
+      "original_bytes": 45195,
+      "original_sha256": "f17d6089008d527445dd31f02d74cd1b77a4a700fad85158931b82d594abf96b",
+      "saved_bytes": 26134,
+      "has_content_encoded": false,
+      "robots_txt": "Allows everything for generic agents; asks for crawl-delay 10 (seconds).",
+      "terms_note": "Terms and conditions (https://www.premiumtimesng.com/terms-and-conditions): content for personal, non-commercial use; reproduction or republication needs prior written consent."
+    },
+    {
+      "file": "businessday.xml",
+      "outlet": "BusinessDay",
+      "feed_url": "https://businessday.ng/feed/",
+      "final_url_after_redirects": "https://businessday.ng/feed/",
+      "retrieved_on": "2026-09-30",
+      "items": 5,
+      "original_bytes": 12785,
+      "original_sha256": "1ad079c21c19214792ab30866794f33b87dfe5e2ee49818bd45e383016135d09",
+      "saved_bytes": 6744,
+      "has_content_encoded": false,
+      "robots_txt": "Allows feeds. Disallows /search/, /?s= and a few WordPress paths.",
+      "terms_note": "Copyright page (https://businessday.ng/copyright/): text may not be copied or reproduced without explicit permission; downloads are for personal, non-commercial use."
+    },
+    {
+      "file": "channels.xml",
+      "outlet": "Channels TV",
+      "feed_url": "https://www.channelstv.com/feed/",
+      "final_url_after_redirects": "https://www.channelstv.com/feed/",
+      "retrieved_on": "2026-09-30",
+      "items": 10,
+      "original_bytes": 57368,
+      "original_sha256": "b7f0be707d8d5741c88aa2bee7cc7912d3e47ae45fd17b4064c9f75e079fbdf3",
+      "saved_bytes": 25023,
+      "has_content_encoded": true,
+      "robots_txt": "Crawl-delay 30 (seconds). Disallows /wp-admin/ and player paths; feed allowed.",
+      "terms_note": "No terms of use page found at the usual URLs; the footer links a privacy policy only. Not reviewed."
+    },
+    {
+      "file": "vanguard.xml",
+      "outlet": "Vanguard",
+      "feed_url": "https://www.vanguardngr.com/feed/",
+      "final_url_after_redirects": "https://www.vanguardngr.com/feed/",
+      "retrieved_on": "2026-09-30",
+      "items": 20,
+      "original_bytes": 128948,
+      "original_sha256": "c09d70ec1c61673aeb36683bd08289a1587aac0fcec8ff40e3cf299876c4ed3a",
+      "saved_bytes": 25553,
+      "has_content_encoded": true,
+      "robots_txt": "Crawl-delay 10 for /feed/ (explicitly allowed), 30 elsewhere. Disallows /search/, /wp-json/.",
+      "terms_note": "No terms of use page found at the usual URLs; the footer links a privacy policy only. Not reviewed."
+    },
+    {
+      "file": "nairametrics.xml",
+      "outlet": "Nairametrics",
+      "feed_url": "https://nairametrics.com/feed/",
+      "final_url_after_redirects": "https://nairametrics.com/feed/",
+      "retrieved_on": "2026-09-30",
+      "items": 20,
+      "original_bytes": 34584,
+      "original_sha256": "5167d4b914fea57749a5e3439a2b3a01e62c09661033017493cfd0398571da0e",
+      "saved_bytes": 29458,
+      "has_content_encoded": false,
+      "robots_txt": "Allows everything.",
+      "terms_note": "No terms of use page found at the usual URLs; the footer links a privacy policy only. Not reviewed."
+    },
+    {
+      "file": "dailytrust.xml",
+      "outlet": "Daily Trust",
+      "feed_url": "https://dailytrust.com/feed/",
+      "final_url_after_redirects": "https://dailytrust.com/feed/",
+      "retrieved_on": "2026-09-30",
+      "items": 14,
+      "original_bytes": 76714,
+      "original_sha256": "740f78b1a3420f7848ae41a5998096c34a2fb325d69981eb515c898405fe323f",
+      "saved_bytes": 18155,
+      "has_content_encoded": true,
+      "robots_txt": "Disallows only plugin paths; feed and sitemap.rss listed.",
+      "terms_note": "Terms of use page (https://dailytrust.com/terms-of-use/) found; it has no clause on feeds, crawling or republication that was found by keyword search. Not legally reviewed."
+    },
+    {
+      "file": "leadership.xml",
+      "outlet": "Leadership",
+      "feed_url": "https://leadership.ng/feed/",
+      "final_url_after_redirects": "https://leadership.ng/feed/",
+      "retrieved_on": "2026-09-30",
+      "items": 10,
+      "original_bytes": 45011,
+      "original_sha256": "79ff2ef875c23ae7f575919e72f6e560f9c843dc3e070fc20d44ceb4c4384581",
+      "saved_bytes": 12762,
+      "has_content_encoded": true,
+      "robots_txt": "Disallows /wp-admin/ only.",
+      "terms_note": "Terms of use page (https://leadership.ng/terms-of-use/) found; no clause on feeds, crawling or republication was found by keyword search. Not legally reviewed."
+    }
+  ]
+}

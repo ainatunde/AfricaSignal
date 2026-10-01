@@ -1,0 +1,20 @@
+{
+  "description": "NNPC Limited's news, from the CMS API that its website's own pages call.",
+  "retrieved_on": "2026-09-30",
+  "finding": "https://nnpcgroup.com/insights is a Nuxt page whose list is filled in by the browser from https://fde-nnpc-web-cms-prod-dwfrd0hraahrbhhg.a02.azurefd.net/api/posts (Strapi JSON: data[] with id, title, content as HTML, post_date, slug, publishedAt, post_category; meta.pagination). The default order is oldest first; sort=publishedAt:desc gives the newest. Individual pages (https://nnpcgroup.com/insights/<slug>) are server-rendered. The 10 newest posts (29 Aug to 29 Sep 2026 and the July monthly report) are press releases and corporate reports; none announces a petrol, diesel or gas price, so this source may add little to the price questions.",
+  "request": "GET https://fde-nnpc-web-cms-prod-dwfrd0hraahrbhhg.a02.azurefd.net/api/posts?sort=publishedAt:desc&pagination[pageSize]=10",
+  "robots_txt": "nnpcgroup.com: allows everything (Disallow empty). The API host has not been checked.",
+  "terms_note": "General terms (https://nnpcgroup.com/terms-of-use): content may be printed for personal, non-commercial use; copying, republishing or distributing it is not allowed except as the terms permit. Stores and quotes beyond that need permission. The seeded permission (link and 300-character quotation) stays within a quotation reading but should be reviewed.",
+  "trimmed": "Each post's content (HTML) is cut to 300 characters; everything else is as served. original_sha256 is of the untrimmed response.",
+  "files": [
+    {
+      "file": "posts_newest.json",
+      "source_url": "https://fde-nnpc-web-cms-prod-dwfrd0hraahrbhhg.a02.azurefd.net/api/posts?sort=publishedAt:desc&pagination[pageSize]=10",
+      "retrieved_on": "2026-09-30",
+      "original_bytes": 79557,
+      "original_sha256": "2a817a14d0c3608605e92e4347ffa55d1d76c4c8cb3cb0f305dda232512516b3",
+      "posts": 10,
+      "total_posts_on_server": 443
+    }
+  ]
+}

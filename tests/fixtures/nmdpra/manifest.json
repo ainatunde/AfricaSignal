@@ -1,0 +1,19 @@
+{
+  "description": "The NMDPRA site cannot be read without running JavaScript.",
+  "retrieved_on": "2026-09-30",
+  "finding": "https://nmdpra.gov.ng/ and https://www.nmdpra.gov.ng/press-release/ return the same 26 KB Blazor WebAssembly shell (blazor.webassembly.js); every page's content is loaded by the browser from an API. There are no links to press releases or price data in the HTML. Release 1 has no JavaScript rendering, so the adapter plan for NMDPRA (AS-026) needs a different route: the API behind the site (not inspected), another publication of the same data, or news reports.",
+  "robots_txt": "404 (none).",
+  "terms_note": "No terms page found (https://nmdpra.gov.ng/terms-and-conditions returns the same shell).",
+  "files": [
+    {
+      "file": "home.html",
+      "source_url": "https://nmdpra.gov.ng/",
+      "retrieved_on": "2026-09-30",
+      "bytes": 26156,
+      "sha256": "555a2072571e7ecc85016807a8a893c6ae684b768c0b9bfd1308c5cb73bbc147",
+      "note": "The SPA shell; identical bytes came from /press-release/."
+    }
+  ],
+  "route_search_2026_09_30": "Looked for a public API or feed behind the site, and found none that does not need a sign-in. /appsettings.json (public) shows the app calls a server API through Microsoft Entra ID (MSAL, scope 'AgileCore.Access') and /_framework/blazor.boot.json shows the client assembly DynamicWebsite.Client. The API's address is an 'api://' application ID, not a URL, and calls need an Azure AD token, so it was not probed or called. The only public URLs found inside the client were documents on Azure Blob Storage (https://alps.blob.core.windows.net/nmdprawebsite/...: News/, Regulation/ and policy PDFs), reachable only if the exact file name is known. alpas.nmdpra.gov.ng is another Blazor sign-in portal. No robots.txt on either host (404).",
+  "alternatives": "NMDPRA publishes a monthly 'sector fact sheet' (for example July 2026 cooking gas prices by city, reported by Leadership, Legit.ng and allAfrica). Its own URL was not found. Options: get the fact sheet link from NMDPRA's social accounts or a listed news article, ask NMDPRA for a feed, or read the press coverage through the RSS adapter."
+}

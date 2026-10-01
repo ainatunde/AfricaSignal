@@ -1,0 +1,62 @@
+[project]
+name = "africasignal"
+version = "0.1.0"
+description = "Analytics that show people in Nigeria what is changing in the prices and policies around them."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.30,<1",
+    "jinja2>=3.1,<4",
+    "sqlalchemy>=2.0.30,<2.1",
+    "alembic>=1.13,<2",
+    "psycopg[binary]>=3.2,<4",
+    "pydantic-settings>=2.4,<3",
+    "httpx>=0.27,<0.29",
+    "httpcore>=1.0,<2",
+    "geoalchemy2>=0.15,<1",
+    "boto3>=1.34,<2",
+    "trafilatura>=2.0,<3",
+    "pdfplumber>=0.11,<1",
+    "openpyxl>=3.1,<4",
+    "rapidfuzz>=3.9,<4",
+    "pyyaml>=6,<7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.3,<10",
+    "pytest-asyncio>=0.24,<2",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pip-audit>=2.7",
+    "moto[s3]>=5,<6",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["africasignal.assess.*", "africasignal.jobs.*", "africasignal.net.*"]
+strict = true

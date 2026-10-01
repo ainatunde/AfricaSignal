@@ -1,0 +1,33 @@
+# Policy series that get a T2 "policy change" situation (spec B6.4, B6.5, B8.3).
+#
+# STATUS: only the two Lagos distribution companies are listed, because Lagos is the one place
+# where the DisCo-to-state mapping is not in doubt. Add the other DisCos (with the states each
+# serves) after checking them against NERC's published orders. `primary_sources` are source slugs
+# from sources.yaml. Affected groups are set here, never inferred by the language model.
+
+series:
+  - code: "electricity_tariff_band_a:ikeja-electric"
+    title: Electricity tariff, Band A, Ikeja Electric
+    topic: energy
+    unit: NGN/kWh
+    primary_sources: [nerc]
+    scope: states
+    state_codes: [NG-LA]
+    affected_groups: Band A customers of Ikeja Electric
+
+  - code: "electricity_tariff_band_a:eko"
+    title: Electricity tariff, Band A, Eko Electricity Distribution Company
+    topic: energy
+    unit: NGN/kWh
+    primary_sources: [nerc]
+    scope: states
+    state_codes: [NG-LA]
+    affected_groups: Band A customers of Eko Electricity Distribution Company
+
+  - code: "pms_regulated_price"
+    title: Petrol (PMS) price announcements
+    topic: energy
+    unit: NGN/litre
+    primary_sources: [nmdpra, nnpc]
+    scope: national
+    affected_groups: Motorists and businesses buying petrol at filling stations
