@@ -17,6 +17,7 @@ import threading
 import time
 from urllib.parse import urlparse
 
+import africasignal.net.netutil as netutil
 from africasignal.net.netutil import USER_AGENT, allowed_by_robots
 
 log = logging.getLogger("africasignal.net.politeness")
@@ -113,6 +114,8 @@ def politeness_gate(
     user_agent: str | None = None,
     acquire_token: bool = True,
     max_requests_per_hour: int | None = None,
+    max_wait_seconds: float = 0.0,
+    preflight_timeout: float | None = None,
 ) -> bool:
     """Evaluate whether url may be acquired per robots.txt and domain rate limits.
 
@@ -138,7 +141,15 @@ def politeness_gate(
 
     # 1. Zero-evasion robots.txt check
     ua = user_agent or USER_AGENT
-    if not allowed_by_robots(url, user_agent=ua):
+    if preflight_timeout is not None and preflight_timeout <= 0:
+        return False
+    gate_started = time.monotonic()
+    allowed = (
+        allowed_by_robots(url, user_agent=ua)
+        if preflight_timeout is None
+        else allowed_by_robots(url, user_agent=ua, timeout=preflight_timeout)
+    )
+    if not allowed:
         log.warning("Politeness gate: URL %s disallowed by robots.txt; abstaining from fetch.", url)
         return False
 
@@ -147,15 +158,41 @@ def politeness_gate(
         return True
 
     domain = (parsed.hostname or parsed.netloc).lower()
-    if max_requests_per_hour is not None and max_requests_per_hour > 0:
-        # Steady rate from the source's hourly budget, with a small burst so that a listing page
-        # and a few articles can be fetched back to back.
-        rate_limiter.configure_domain(
-            domain,
-            rate=max_requests_per_hour / 3600.0,
-            capacity=float(min(max_requests_per_hour, MAX_BURST)),
+    rate = rate_limiter.rate
+    capacity = rate_limiter.capacity
+    hourly_limit = (
+        max_requests_per_hour if max_requests_per_hour and max_requests_per_hour > 0 else None
+    )
+    source_has_limit = hourly_limit is not None
+    if hourly_limit is not None:
+        rate = hourly_limit / 3600.0
+        capacity = float(min(hourly_limit, MAX_BURST))
+
+    crawl_delay, request_rate = (
+        netutil.robots_pacing(url, user_agent=ua)
+        if preflight_timeout is None
+        else netutil.robots_pacing(url, user_agent=ua, timeout=preflight_timeout)
+    )
+    if crawl_delay is not None:
+        rate = min(rate, 1.0 / crawl_delay)
+        capacity = 1.0
+    if request_rate is not None:
+        requests, seconds = request_rate
+        rate = min(rate, requests / seconds)
+        burst = float(min(requests, MAX_BURST))
+        capacity = min(capacity, burst) if source_has_limit or crawl_delay else burst
+    rate_limiter.configure_domain(domain, rate=rate, capacity=capacity)
+    remaining_wait = max_wait_seconds
+    if preflight_timeout is not None:
+        remaining_wait = min(
+            remaining_wait, max(0.0, preflight_timeout - (time.monotonic() - gate_started))
         )
-    if not rate_limiter.acquire(domain, tokens=1.0):
+    acquired = (
+        rate_limiter.wait_and_acquire(domain, max_wait=remaining_wait)
+        if remaining_wait > 0
+        else rate_limiter.acquire(domain, tokens=1.0)
+    )
+    if not acquired:
         log.warning(
             "Politeness gate: Rate limit exceeded for domain %s; throttling request.", domain
         )

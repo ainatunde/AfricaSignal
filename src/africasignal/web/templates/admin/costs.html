@@ -2,10 +2,10 @@
 {% block title %}Costs{% endblock %}
 {% block content %}
 <h1>Costs</h1>
-<p>Today (Lagos time): <strong class="{{ 'bad' if budget.exhausted else ('warn' if budget.warn else 'ok') }}">${{ '%.2f'|format(budget.spent) }}</strong> of ${{ '%.2f'|format(budget.limit) }} daily budget
-({{ '%.0f'|format(budget.fraction * 100) }}%).
+<p>Today (Lagos time): <strong class="{{ 'bad' if budget.exhausted else ('warn' if budget.warn else 'ok') }}">${{ '%.2f'|format(budget.committed_and_reserved) }}</strong> of ${{ '%.2f'|format(budget.limit) }} daily budget
+({{ '%.0f'|format(budget.fraction * 100) }}%; ${{ '%.2f'|format(budget.spent) }} spent, ${{ '%.2f'|format(budget.reserved) }} reserved).
 {% if budget.exhausted %}New extraction and explanation jobs wait for tomorrow.{% endif %}
-The limit is set under Settings.</p>
+Amounts use the configured model price table. The limit is set under Settings.</p>
 <p>Showing the last {{ days }} days.
   {% for n in (7, 14, 30, 90) %}{% if n == days %}<strong>{{ n }}</strong>{% else %}<a href="/admin/costs?days={{ n }}">{{ n }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</p>
 

@@ -96,6 +96,13 @@ def fetch_document(
     ``max_requests_per_hour`` sets the per-domain rate for this request's host (pass the source's
     ``max_requests_per_hour``); by default a domain is limited to one request per second.
     """
+    started = _monotonic()
+
+    def out_of_time() -> bool:
+        return _monotonic() - started > deadline
+
+    if deadline <= 0:
+        return FetchResult(url=url or "", error=_deadline_error(deadline))
     if not url or not isinstance(url, str) or not url.strip():
         return FetchResult(url=url or "", error="SSRF blocked: invalid or empty URL")
 
@@ -114,12 +121,25 @@ def fetch_document(
             error="SSRF blocked: unsafe target resolving to private, loopback, "
             "or cloud metadata address",
         )
+    if out_of_time():
+        return FetchResult(url=url, error=_deadline_error(deadline))
 
-    # 2. Politeness and robots.txt gating
+    # 2. Politeness and robots.txt gating. Bound the robots request and any pacing wait by the
+    # time remaining after URL validation.
     ua = user_agent or netutil.USER_AGENT
-    if not politeness.politeness_gate(
-        url, user_agent=ua, acquire_token=True, max_requests_per_hour=max_requests_per_hour
-    ):
+    remaining_before_gate = max(0.0, deadline - (_monotonic() - started))
+    if remaining_before_gate <= 0:
+        return FetchResult(url=url, error=_deadline_error(deadline))
+    gate_allowed = politeness.politeness_gate(
+        url,
+        user_agent=ua,
+        acquire_token=True,
+        max_requests_per_hour=max_requests_per_hour,
+        preflight_timeout=remaining_before_gate,
+    )
+    if out_of_time():
+        return FetchResult(url=url, error=_deadline_error(deadline))
+    if not gate_allowed:
         log.warning("fetch_document: URL %s abstained per politeness gate.", url)
         return FetchResult(
             url=url,
@@ -134,25 +154,31 @@ def fetch_document(
         req_headers.update(cache.get_conditional_headers(url))
 
     # 4. Request, following redirects by hand so every hop is checked
-    started = _monotonic()
-
-    def out_of_time() -> bool:
-        return _monotonic() - started > deadline
-
     try:
+        transport = pinned_http_transport(url)
+        if out_of_time():
+            return FetchResult(url=url, error=_deadline_error(deadline))
         with httpx.Client(
             timeout=timeout,
             follow_redirects=False,
             trust_env=False,
-            transport=pinned_http_transport(url),
+            transport=transport,
         ) as client:
             current_url = url
             current_headers = dict(req_headers)
             hops = 0
 
             while True:
-                req = client.build_request("GET", current_url, headers=current_headers)
+                if out_of_time():
+                    return FetchResult(url=current_url, error=_deadline_error(deadline))
+                remaining = max(0.001, deadline - (_monotonic() - started))
+                req = client.build_request(
+                    "GET", current_url, headers=current_headers, timeout=min(timeout, remaining)
+                )
                 resp = client.send(req, stream=True)
+                if out_of_time():
+                    resp.close()
+                    return FetchResult(url=current_url, error=_deadline_error(deadline))
 
                 if resp.status_code not in REDIRECT_STATUSES:
                     break
@@ -203,12 +229,20 @@ def fetch_document(
                         "loopback, or cloud metadata address",
                     )
 
-                if not politeness.politeness_gate(
+                remaining_before_redirect = max(0.0, deadline - (_monotonic() - started))
+                if remaining_before_redirect <= 0:
+                    return FetchResult(url=next_url, error=_deadline_error(deadline))
+                gate_allowed = politeness.politeness_gate(
                     next_url,
                     user_agent=ua,
                     acquire_token=True,
                     max_requests_per_hour=max_requests_per_hour,
-                ):
+                    max_wait_seconds=remaining_before_redirect,
+                    preflight_timeout=remaining_before_redirect,
+                )
+                if out_of_time():
+                    return FetchResult(url=next_url, error=_deadline_error(deadline))
+                if not gate_allowed:
                     log.warning("fetch_document: redirect URL %s disallowed", next_url)
                     return FetchResult(
                         url=next_url,

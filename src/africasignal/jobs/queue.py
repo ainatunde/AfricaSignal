@@ -11,6 +11,7 @@ import random
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from uuid import UUID, uuid4
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -28,6 +29,8 @@ class ClaimedJob:
     payload: dict[str, Any]
     attempts: int
     max_attempts: int
+    lease_token: UUID | None = None
+    lock_owner: str | None = None
 
 
 def backoff_seconds(attempts: int, rng: random.Random | None = None) -> float:
@@ -71,11 +74,14 @@ def claim(
     session: Session, worker_id: str, lease_seconds: int = DEFAULT_LEASE_SECONDS
 ) -> ClaimedJob | None:
     """Atomically take the oldest due queued job, or ``None`` when there is none."""
+    token = uuid4()
+    lock_owner = f"{worker_id}:{token.hex}"
     row = (
         session.execute(
             text(
                 """
-                UPDATE job SET status = 'running', locked_by = :worker,
+                UPDATE job SET status = 'running', locked_by = :lock_owner,
+                    lease_token = CAST(:lease_token AS uuid),
                     lease_until = now() + make_interval(secs => :lease),
                     attempts = attempts + 1
                 WHERE id = (
@@ -85,10 +91,14 @@ def claim(
                     FOR UPDATE SKIP LOCKED
                     LIMIT 1
                 )
-                RETURNING id, kind, payload, attempts, max_attempts
+                RETURNING id, kind, payload, attempts, max_attempts, lease_token, locked_by
                 """
             ),
-            {"worker": worker_id, "lease": lease_seconds},
+            {
+                "lock_owner": lock_owner,
+                "lease_token": str(token),
+                "lease": lease_seconds,
+            },
         )
         .mappings()
         .one_or_none()
@@ -101,21 +111,28 @@ def claim(
         payload=row["payload"],
         attempts=row["attempts"],
         max_attempts=row["max_attempts"],
+        lease_token=row["lease_token"],
+        lock_owner=row["locked_by"],
     )
 
 
-def complete(session: Session, job_id: int, worker_id: str) -> bool:
-    """Mark a job done. Returns False when this worker no longer owns it."""
+def complete(
+    session: Session, job_id: int, lock_owner: str | None, lease_token: UUID | None
+) -> bool:
+    """Mark an attempt done; stale attempts cannot finish a reclaimed job."""
+    if lock_owner is None or lease_token is None:
+        return False
     result = session.execute(
         text(
             """
             UPDATE job SET status = 'done', finished_at = now(), locked_by = NULL,
-                lease_until = NULL, last_error = NULL
-            WHERE id = :id AND status = 'running' AND locked_by = :worker
+                lease_token = NULL, lease_until = NULL, last_error = NULL
+            WHERE id = :id AND status = 'running' AND locked_by = :lock_owner
+                AND lease_token = CAST(:lease_token AS uuid)
                 AND lease_until > clock_timestamp()
             """
         ),
-        {"id": job_id, "worker": worker_id},
+        {"id": job_id, "lock_owner": lock_owner, "lease_token": str(lease_token)},
     )
     return bool(result.rowcount)  # type: ignore[attr-defined]
 
@@ -123,7 +140,8 @@ def complete(session: Session, job_id: int, worker_id: str) -> bool:
 def fail(
     session: Session,
     job_id: int,
-    worker_id: str,
+    lock_owner: str | None,
+    lease_token: UUID | None,
     error: str,
     rng: random.Random | None = None,
 ) -> str | None:
@@ -131,14 +149,17 @@ def fail(
 
     Returns the new status, or ``None`` when this worker no longer owns the job.
     """
+    if lock_owner is None or lease_token is None:
+        return None
     row = (
         session.execute(
             text(
                 "SELECT attempts, max_attempts FROM job "
-                "WHERE id = :id AND status = 'running' AND locked_by = :worker "
+                "WHERE id = :id AND status = 'running' AND locked_by = :lock_owner "
+                "AND lease_token = CAST(:lease_token AS uuid) "
                 "AND lease_until > clock_timestamp() FOR UPDATE"
             ),
-            {"id": job_id, "worker": worker_id},
+            {"id": job_id, "lock_owner": lock_owner, "lease_token": str(lease_token)},
         )
         .mappings()
         .one_or_none()
@@ -149,8 +170,9 @@ def fail(
         session.execute(
             text(
                 """
-                UPDATE job SET status = 'queued', locked_by = NULL, lease_until = NULL,
-                    last_error = :error, run_at = now() + make_interval(secs => :delay)
+                UPDATE job SET status = 'queued', locked_by = NULL, lease_token = NULL,
+                    lease_until = NULL, last_error = :error,
+                    run_at = now() + make_interval(secs => :delay)
                 WHERE id = :id
                 """
             ),
@@ -160,8 +182,8 @@ def fail(
     session.execute(
         text(
             """
-            UPDATE job SET status = 'dead', locked_by = NULL, lease_until = NULL,
-                last_error = :error, finished_at = now()
+            UPDATE job SET status = 'dead', locked_by = NULL, lease_token = NULL,
+                lease_until = NULL, last_error = :error, finished_at = now()
             WHERE id = :id
             """
         ),
@@ -171,17 +193,29 @@ def fail(
 
 
 def extend_lease(
-    session: Session, job_id: int, worker_id: str, lease_seconds: int = DEFAULT_LEASE_SECONDS
+    session: Session,
+    job_id: int,
+    lock_owner: str | None,
+    lease_token: UUID | None,
+    lease_seconds: int = DEFAULT_LEASE_SECONDS,
 ) -> bool:
+    if lock_owner is None or lease_token is None:
+        return False
     result = session.execute(
         text(
             """
             UPDATE job SET lease_until = clock_timestamp() + make_interval(secs => :lease)
-            WHERE id = :id AND status = 'running' AND locked_by = :worker
+            WHERE id = :id AND status = 'running' AND locked_by = :lock_owner
+                AND lease_token = CAST(:lease_token AS uuid)
                 AND lease_until > clock_timestamp()
             """
         ),
-        {"id": job_id, "worker": worker_id, "lease": lease_seconds},
+        {
+            "id": job_id,
+            "lock_owner": lock_owner,
+            "lease_token": str(lease_token),
+            "lease": lease_seconds,
+        },
     )
     return bool(result.rowcount)  # type: ignore[attr-defined]
 
@@ -196,7 +230,7 @@ def reclaim_expired(session: Session) -> int:
                               ELSE 'dead'::job_status END,
                 finished_at = CASE WHEN attempts < max_attempts THEN NULL ELSE now() END,
                 last_error = 'lease expired',
-                locked_by = NULL, lease_until = NULL
+                locked_by = NULL, lease_token = NULL, lease_until = NULL
             WHERE status = 'running' AND lease_until < now()
             """
         )

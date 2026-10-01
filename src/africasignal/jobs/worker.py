@@ -16,6 +16,7 @@ from africasignal.jobs import handlers as handler_registry
 from africasignal.jobs import queue
 from africasignal.jobs.handlers import JobContext
 from africasignal.jobs.log import configure_logging
+from africasignal.ops_heartbeat import ProcessHeartbeat
 from africasignal.publish.recovery import require_recovery_complete
 
 log = logging.getLogger("africasignal.worker")
@@ -32,11 +33,10 @@ class _Heartbeat:
     """Extends a running job's lease from a separate connection until stopped."""
 
     def __init__(
-        self, factory: sessionmaker[Session], job_id: int, worker_id: str, interval: float
+        self, factory: sessionmaker[Session], job: queue.ClaimedJob, interval: float
     ) -> None:
         self._factory = factory
-        self._job_id = job_id
-        self._worker_id = worker_id
+        self._job = job
         self._interval = interval
         self.lost = threading.Event()
         self._stop = threading.Event()
@@ -46,13 +46,15 @@ class _Heartbeat:
         while not self._stop.wait(self._interval):
             try:
                 with self._factory() as session:
-                    renewed = queue.extend_lease(session, self._job_id, self._worker_id)
+                    renewed = queue.extend_lease(
+                        session, self._job.id, self._job.lock_owner, self._job.lease_token
+                    )
                     session.commit()
                     if not renewed:
                         self.lost.set()
                         return
             except Exception:  # a missed heartbeat is retried on the next tick
-                log.exception("lease extension failed", extra={"job_id": self._job_id})
+                log.exception("lease extension failed", extra={"job_id": self._job.id})
 
     def __enter__(self) -> _Heartbeat:
         self._thread.start()
@@ -99,11 +101,11 @@ class Worker:
             if handler is None:
                 raise LookupError(f"no handler registered for job kind {job.kind!r}")
             with self.factory() as session:
-                with _Heartbeat(
-                    self.factory, job.id, self.worker_id, self.heartbeat_seconds
-                ) as heartbeat:
+                with _Heartbeat(self.factory, job, self.heartbeat_seconds) as heartbeat:
                     handler(JobContext(session=session, job=job, worker_id=self.worker_id))
-                if heartbeat.lost.is_set() or not queue.complete(session, job.id, self.worker_id):
+                if heartbeat.lost.is_set() or not queue.complete(
+                    session, job.id, job.lock_owner, job.lease_token
+                ):
                     session.rollback()
                     log.warning("job lease lost before completion; result discarded", extra=ctx)
                     return True
@@ -112,7 +114,9 @@ class Worker:
         except Exception as exc:
             log.exception("job failed", extra=ctx)
             with self.factory() as session:
-                status = queue.fail(session, job.id, self.worker_id, f"{type(exc).__name__}: {exc}")
+                status = queue.fail(
+                    session, job.id, job.lock_owner, job.lease_token, f"{type(exc).__name__}: {exc}"
+                )
                 session.commit()
             log.info("job %s after failure", status, extra=ctx)
             if status == "dead":
@@ -143,7 +147,15 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
     log.info("worker started", extra={"worker": worker.worker_id})
-    worker.run_forever()
+    monitor = ProcessHeartbeat("WORKER_HEARTBEAT_URL")
+    monitor.start()
+    try:
+        worker.run_forever()
+    except Exception:
+        monitor.ping("fail")
+        raise
+    finally:
+        monitor.close()
     log.info("worker stopped", extra={"worker": worker.worker_id})
 
 

@@ -5,10 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -16,6 +18,7 @@ from sqlalchemy import (
     Numeric,
     Text,
     UniqueConstraint,
+    Uuid,
     func,
 )
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB
@@ -86,9 +89,36 @@ class Job(CreatedMixin, Base):
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="5")
     locked_by: Mapped[str | None] = mapped_column(Text)
+    # Worker ids are reused across claims. This unique token fences stale attempts, including
+    # a reclaim by the same worker process.
+    lease_token: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LlmBudgetReservation(CreatedMixin, Base):
+    """Durable upper-bound reservations that prevent concurrent model calls exceeding the cap."""
+
+    __tablename__ = "llm_budget_reservation"
+    __table_args__ = (
+        CheckConstraint("state IN ('reserved', 'uncertain', 'settled')", name="state_valid"),
+        CheckConstraint("reserved_usd >= 0", name="amount_nonnegative"),
+        CheckConstraint("input_token_bound >= 0", name="input_nonnegative"),
+        CheckConstraint("output_token_bound >= 0", name="output_nonnegative"),
+        Index("ix_llm_budget_reservation_day_state", "budget_day", "state"),
+        Index("ix_llm_budget_reservation_job_state", "job_id", "state"),
+    )
+
+    budget_day: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("job.id", ondelete="SET NULL"))
+    input_token_bound: Mapped[int] = mapped_column(Integer, nullable=False)
+    output_token_bound: Mapped[int] = mapped_column(Integer, nullable=False)
+    reserved_usd: Mapped[Decimal] = mapped_column(Numeric(10, 5), nullable=False)
+    actual_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 5))
+    state: Mapped[str] = mapped_column(Text, nullable=False, server_default="reserved")
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(Text)
 
 
 class Event(CreatedMixin, Base):

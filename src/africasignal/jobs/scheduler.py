@@ -16,6 +16,7 @@ from africasignal.db import get_engine
 from africasignal.jobs import handlers as handler_registry
 from africasignal.jobs import queue
 from africasignal.jobs.log import configure_logging
+from africasignal.ops_heartbeat import ProcessHeartbeat
 from africasignal.publish.recovery import require_recovery_complete
 
 log = logging.getLogger("africasignal.scheduler")
@@ -96,6 +97,7 @@ def main() -> None:
     handler_registry.load_all()
     factory = sessionmaker(bind=get_engine(), expire_on_commit=False)
     stopping = threading.Event()
+    monitor = ProcessHeartbeat("SCHEDULER_HEARTBEAT_URL")
 
     def _handle_signal(signum: int, frame: FrameType | None) -> None:
         stopping.set()
@@ -103,16 +105,20 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
     log.info("scheduler started")
+    monitor.start()
     while not stopping.is_set():
         try:
             with factory() as session:
                 counts = tick(session)
                 session.commit()
+            monitor.mark_healthy()
             if any(counts.values()):
                 log.info("tick %s", counts)
         except Exception:
             log.exception("scheduler tick failed")
+            monitor.ping("fail")
         stopping.wait(TICK_SECONDS)
+    monitor.close()
     log.info("scheduler stopped")
 
 

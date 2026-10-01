@@ -26,14 +26,14 @@ from africasignal import settings_store
 from africasignal.db import get_engine
 from africasignal.llm import cache
 from africasignal.llm.budget import (
-    budget_status,
     cost_usd,
-    next_budget_day_start,
+    mark_uncertain,
+    reserve_call,
+    settle_call,
     tokens_used_by_job,
 )
 from africasignal.llm.config import LlmConfig, load_llm_config
 from africasignal.llm.errors import (
-    BudgetExhausted,
     JobTokenLimitExceeded,
     LlmNotConfigured,
     ProviderRefused,
@@ -173,26 +173,52 @@ class LlmAdapter:
             cached: dict[str, Any] = json.loads(json.dumps(hit.response))
             return cached
 
-        status = budget_status(self.session, self.daily_budget_usd, now)
-        if status.exhausted:
-            raise BudgetExhausted(status.spent, status.limit, next_budget_day_start(now))
-
+        # UTF-8 bytes are a conservative proxy for tokenization; add bounded provider framing
+        # overhead. Output is reserved at the exact max_tokens sent to the provider.
+        input_token_bound = (
+            len(system.encode("utf-8"))
+            + len(user.encode("utf-8"))
+            + len(json.dumps(schema, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+            + 128
+        )
         if job_id is not None:
             remaining = self.per_job_max_tokens - tokens_used_by_job(self.session, job_id)
-            if remaining <= 0:
+            if remaining <= input_token_bound:
                 raise JobTokenLimitExceeded(
-                    f"job {job_id} has used its {self.per_job_max_tokens} token allowance"
+                    f"job {job_id} used or reserved its {self.per_job_max_tokens} token allowance"
                 )
-            max_tokens = min(max_tokens, remaining)
+            max_tokens = min(max_tokens, remaining - input_token_bound)
+        if max_tokens <= 0:
+            raise JobTokenLimitExceeded("no output tokens remain in the job allowance")
 
-        reply = self.provider.complete(
-            model=model,
-            system=system,
-            user=user,
-            schema=schema,
-            max_tokens=max_tokens,
-            effort=purpose_cfg.effort,
+        reservation_id = reserve_call(
+            self.session,
+            limit=self.daily_budget_usd,
+            price=price,
+            input_token_bound=input_token_bound,
+            output_token_bound=max_tokens,
+            job_id=job_id,
+            per_job_limit=self.per_job_max_tokens,
+            now=now,
         )
+        try:
+            reply = self.provider.complete(
+                model=model,
+                system=system,
+                user=user,
+                schema=schema,
+                max_tokens=max_tokens,
+                effort=purpose_cfg.effort,
+            )
+        except Exception as exc:
+            try:
+                mark_uncertain(self.session, reservation_id, type(exc).__name__)
+            except Exception:
+                log.exception("could not mark model-spend reservation uncertain")
+            raise
+        if reply.input_tokens < 0 or reply.output_tokens < 0:
+            mark_uncertain(self.session, reservation_id, "InvalidTokenUsage")
+            raise ValueError("provider returned negative token usage")
         cost = cost_usd(price, reply.input_tokens, reply.output_tokens)
         self._record(
             purpose,
@@ -208,6 +234,7 @@ class LlmAdapter:
         try:
             data = self._parse(reply, schema)
         except (SchemaValidationError, ProviderRefused):
+            settle_call(self.session, reservation_id, cost, now)
             self.session.commit()  # the tokens were billed whatever the answer looked like
             raise
         cache.put(
@@ -220,6 +247,7 @@ class LlmAdapter:
             reply.input_tokens,
             reply.output_tokens,
         )
+        settle_call(self.session, reservation_id, cost, now)
         self.session.commit()
         log.info(
             "llm call",

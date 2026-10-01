@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     email_provider: str = Field(default="", alias="EMAIL_PROVIDER")
     email_api_key: str = Field(default="", alias="EMAIL_API_KEY")
     email_from: str = Field(default="", alias="EMAIL_FROM")
+    # In staging every outbound message is refused unless the normalized address appears here.
+    staging_email_allowed_recipients: str = Field(
+        default="", alias="STAGING_EMAIL_ALLOWED_RECIPIENTS"
+    )
 
     secret_key: str = Field(default="", alias="SECRET_KEY")
 
@@ -72,6 +76,14 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "SECRET_KEY must be a randomly generated secret of at least 32 characters"
             )
+
+    @property
+    def staging_email_recipients(self) -> frozenset[str]:
+        return frozenset(
+            address.strip().casefold()
+            for address in self.staging_email_allowed_recipients.split(",")
+            if address.strip()
+        )
 
     @property
     def effective_database_url(self) -> str:

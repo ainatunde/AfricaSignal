@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Nightly backup: a custom-format pg_dump of the database plus a copy of the evidence bucket,
-# both sent to a separate, private bucket (or a local directory), then old dumps are pruned.
+# Nightly backup: a custom-format pg_dump plus object copies in a separate, private bucket (or a
+# local directory), then old dumps are pruned. Evidence and deletion-ledger prefixes mirror the
+# current app bucket so expired evidence and retired deletion fingerprints age out there too.
 #
 # Usage: scripts/backup.sh [--no-objects]
 #
@@ -132,10 +133,21 @@ if [ "$copy_objects" -eq 1 ] && [ -n "${S3_BUCKET:-}" ]; then
     die "the backup bucket is the app's own bucket; use a separate bucket (ideally another account)"
   fi
   rclone_define_s3 app "${S3_ENDPOINT_URL:-}" "${S3_ACCESS_KEY_ID:-}" "${S3_SECRET_ACCESS_KEY:-}"
-  # Evidence objects are content-addressed and never change: copy (never sync, so deleting an
-  # object in the app bucket cannot delete its backup) and fail loudly if one changes size.
-  log "copying app bucket $S3_BUCKET to objects/"
-  rclone copy "app:$S3_BUCKET" "$BACKUP_ROOT/objects" --size-only --immutable --transfers 8 --checkers 16
+  # Keep non-retention-managed objects such as NBS uploads immutable in the backup copy.
+  # Evidence and the deletion ledger are current-state mirrors: retention and ledger pruning in
+  # the app bucket must also take effect in backups. A restore from an older database dump remains
+  # quarantined until current retention and deletion replay have run.
+  log "copying non-expiring app objects from $S3_BUCKET"
+  rclone copy "app:$S3_BUCKET" "$BACKUP_ROOT/objects" \
+    --exclude "/evidence/**" --exclude "/deletions/**" \
+    --immutable --transfers 8 --checkers 16
+  for prefix in evidence deletions; do
+    log "mirroring current $prefix/ objects into objects/$prefix/"
+    rclone sync "app:$S3_BUCKET/$prefix" "$BACKUP_ROOT/objects/$prefix" \
+      --checksum --transfers 8 --checkers 16
+    rclone check "app:$S3_BUCKET/$prefix" "$BACKUP_ROOT/objects/$prefix" \
+      --one-way --download
+  done
 elif [ "$copy_objects" -eq 1 ]; then
   log "warning: S3_BUCKET not set, skipping object copy"
 fi

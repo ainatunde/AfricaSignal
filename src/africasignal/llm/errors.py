@@ -21,7 +21,9 @@ class BudgetExhausted(LlmError):
     """
 
     def __init__(self, spent: object, limit: object, retry_at: datetime) -> None:
-        super().__init__(f"daily LLM budget reached: spent {spent} of {limit} USD")
+        super().__init__(
+            f"daily LLM budget cannot reserve this call: projected use {spent} exceeds {limit} USD"
+        )
         self.retry_at = retry_at
 
 
