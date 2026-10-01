@@ -28,6 +28,7 @@ from africasignal.models import (
 )
 from africasignal.policy_series import to_series
 from africasignal.publish.policy_situations import ensure_policy_situations, policy_slug
+from africasignal.textclean import one_line
 
 _CODE = re.compile(r"^[a-z0-9_]{2,60}(:[a-z0-9][a-z0-9-]{0,59})?$")
 _STATE = re.compile(r"^NG-[A-Z]{2}$")
@@ -99,7 +100,7 @@ def source_choices(session: Session) -> list[Source]:
 
 
 def _parse_states(session: Session, typed: str) -> list[str]:
-    codes = list(dict.fromkeys(c.upper() for c in re.split(r"[\s,;]+", typed.strip()) if c))
+    codes = list(dict.fromkeys(c.upper() for c in re.split(r"[\s,;]+", one_line(typed)) if c))
     if not codes:
         raise PolicyError("give at least one state code, for example NG-LA")
     bad = [c for c in codes if not _STATE.match(c)]
@@ -115,7 +116,7 @@ def _parse_states(session: Session, typed: str) -> list[str]:
 
 
 def _validate(session: Session, new: NewSeries) -> tuple[PolicySeries, str]:
-    code = new.code.strip()
+    code = one_line(new.code)
     if not _CODE.match(code):
         raise PolicyError(
             "the code is lower case letters, digits and underscores, optionally followed by "
@@ -125,7 +126,7 @@ def _validate(session: Session, new: NewSeries) -> tuple[PolicySeries, str]:
     taken |= set(session.scalars(select(OperatorPolicySeries.code)))
     if code in taken:
         raise PolicyError("a policy series with that code already exists")
-    title, unit, groups = new.title.strip(), new.unit.strip(), new.affected_groups.strip()
+    title, unit, groups = one_line(new.title), one_line(new.unit), one_line(new.affected_groups)
     if not 3 <= len(title) <= MAX_TITLE:
         raise PolicyError(f"give a title of 3 to {MAX_TITLE} characters")
     if not 1 <= len(unit) <= MAX_UNIT:
@@ -138,14 +139,14 @@ def _validate(session: Session, new: NewSeries) -> tuple[PolicySeries, str]:
         raise PolicyError("choose a topic")
     if new.scope not in ("national", "states"):
         raise PolicyError("choose whether the policy is national or for named states")
-    slugs = list(dict.fromkeys(s.strip() for s in new.primary_sources if s.strip()))
+    slugs = list(dict.fromkeys(one_line(s) for s in new.primary_sources if one_line(s)))
     if not slugs:
         raise PolicyError("choose at least one source that publishes this policy")
     known = set(session.scalars(select(Source.slug).where(Source.slug.in_(slugs))))
     if known != set(slugs):
         raise PolicyError("one of the chosen sources does not exist")
     try:
-        pct = Decimal(new.materiality_pct.strip() or "5")
+        pct = Decimal(one_line(new.materiality_pct) or "5")
     except InvalidOperation as exc:
         raise PolicyError("the materiality threshold must be a number") from exc
     if not Decimal("0.1") <= pct <= Decimal("100"):
