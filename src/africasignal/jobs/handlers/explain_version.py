@@ -87,7 +87,7 @@ def explain_backfill_job(ctx: JobContext) -> None:
     try:
         for version_id in versions_missing_explanation(ctx.session, BACKFILL_BATCH):
             explain_version(ctx.session, adapter, version_id, job_id=ctx.job.id)
-            ctx.session.commit()
+            ctx.session.flush()
             done += 1
     except BudgetExhausted:
         log.info("daily %s budget spent: backfill stops", PURPOSE, extra={"job_id": ctx.job.id})

@@ -170,13 +170,13 @@ def test_missing_robots_txt_allows_fetching(web: FakeWeb) -> None:
     assert fetch_document(URL).success is True
 
 
-def test_robots_fetch_failure_fails_open(web: FakeWeb) -> None:
+def test_robots_fetch_failure_fails_closed(web: FakeWeb) -> None:
     def boom(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("robots unreachable")
 
     web.add("https://news.example.ng/robots.txt", handler=boom)
     web.add(URL, content=b"page")
-    assert fetch_document(URL).success is True
+    assert fetch_document(URL).abstained is True
 
 
 def test_rate_limit_abstains(web: FakeWeb, monkeypatch: pytest.MonkeyPatch) -> None:

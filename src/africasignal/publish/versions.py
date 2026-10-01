@@ -217,7 +217,7 @@ def cancel_pending_delivery(session: Session, version_id: int, now: datetime) ->
     session.execute(
         text(
             "UPDATE outbox SET status = 'dead', last_error = 'superseded' "
-            "WHERE status = 'pending' AND payload->>'assessment_version_id' = :v"
+            "WHERE status IN ('pending', 'failed') AND payload->>'assessment_version_id' = :v"
         ),
         {"v": str(version_id)},
     )
@@ -258,9 +258,26 @@ def apply_policy(
     version = session.get(AssessmentVersion, version_id)
     if version is None or version.status != "draft":
         return None
-    situation = session.get(Situation, version.situation_id)
+    situation = session.scalar(
+        select(Situation)
+        .where(Situation.id == version.situation_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     assert situation is not None
-    decision = decide(build_draft(session, version, now))
+    session.refresh(version)
+    if version.status != "draft":
+        return None
+    current = (
+        session.get(AssessmentVersion, situation.current_version_id)
+        if situation.current_version_id
+        else None
+    )
+    decision = (
+        Decision("withheld", ("superseded_draft",))
+        if current is not None and current.version > version.version
+        else decide(build_draft(session, version, now))
+    )
 
     version.policy_version = POLICY_VERSION
     match decision.status:

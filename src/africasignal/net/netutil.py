@@ -4,8 +4,8 @@ Copied from TV Insights (``app/curation/netutil.py``) and adapted: new User-Agen
 answers expire after an hour, and the robots.txt body is size-capped.
 
 Feeds fetched over http(s) are checked against the host's robots.txt before we
-request them. robots fetch failures fail *open* (allow) - the common convention -
-but an explicit Disallow is honoured.
+request them. Network failures, server errors and unhandled redirects fail closed.
+An absent robots.txt (4xx) permits acquisition; explicit Disallow is honoured.
 """
 
 from __future__ import annotations
@@ -55,17 +55,23 @@ def _robots_for(host_url: str) -> RobotFileParser | None:
             ) as client,
             client.stream("GET", f"{base}/robots.txt", headers={"User-Agent": USER_AGENT}) as resp,
         ):
-            if resp.status_code >= 400:
-                rp = None  # no robots -> allow
+            if 400 <= resp.status_code < 500:
+                rp = None  # robots unavailable (RFC 9309)
+            elif not resp.is_success:
+                parser.parse(["User-agent: *", "Disallow: /"])
             else:
+                deadline = time.monotonic() + 10.0
                 body = b""
                 for chunk in resp.iter_bytes():
+                    if time.monotonic() > deadline:
+                        raise TimeoutError("robots body deadline exceeded")
                     body += chunk
                     if len(body) >= ROBOTS_MAX_BYTES:
                         break
                 parser.parse(body[:ROBOTS_MAX_BYTES].decode("utf-8", errors="replace").splitlines())
-    except Exception:  # fetch failure -> allow
-        rp = None
+    except Exception:  # unreachable robots must disallow (RFC 9309)
+        parser.parse(["User-agent: *", "Disallow: /"])
+        rp = parser
     _robots_cache[base] = (time.monotonic(), rp)
     return rp
 

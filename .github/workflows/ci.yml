@@ -21,6 +21,7 @@ jobs:
           --health-cmd "pg_isready -U africasignal"
           --health-interval 5s --health-timeout 3s --health-retries 10
     env:
+      TEST_DATABASE_URL: postgresql+psycopg://africasignal:africasignal@localhost:5432/africasignal_test
       DATABASE_URL: postgresql+psycopg://africasignal:africasignal@localhost:5432/africasignal_test
       RUN_NETWORK_TESTS: "1"  # downloads the real boundary files (see tests/integration/test_places_full.py)
     steps:
@@ -34,7 +35,9 @@ jobs:
           path: data/places
           key: places-boundaries-v1
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rclone tesseract-ocr  # rclone: backup scripts; tesseract: NERC tariff PDFs
-      - run: pip install -e ".[dev]"
+      - run: pip install pip==26.2.1 setuptools==84.0.0 wheel==0.48.0
+      - run: pip install -r requirements-dev.lock && pip install --no-deps --no-build-isolation -e ".[dev]"
+      - run: pip check
       - run: ruff check .
       - run: ruff format --check .
       - run: mypy src
@@ -46,3 +49,7 @@ jobs:
           python -m africasignal.sources.seed
           BACKUP_DIR="$RUNNER_TEMP/drill-backups" OPS_USE_CONSOLE_SETTINGS=0 scripts/restore-drill.sh
       - run: pip-audit
+      - name: Build production images
+        run: |
+          docker build -t africasignal:ci .
+          docker build -f docker/backup/Dockerfile -t africasignal-backup:ci .

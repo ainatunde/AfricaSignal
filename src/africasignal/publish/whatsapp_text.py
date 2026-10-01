@@ -13,11 +13,11 @@ a post can never state a figure the page does not.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal
 from urllib.parse import quote
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from africasignal import settings_store
@@ -124,6 +124,10 @@ def material_changes(
         .join(AssessmentVersion, AssessmentVersion.id == Situation.current_version_id)
         .where(
             AssessmentVersion.status == "published",
+            or_(
+                AssessmentVersion.valid_until.is_(None),
+                AssessmentVersion.valid_until > datetime.now(UTC),
+            ),
             AssessmentVersion.severity != "none",
             AssessmentVersion.evidence_state != "insufficient",
             AssessmentVersion.published_at >= since,

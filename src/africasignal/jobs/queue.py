@@ -112,6 +112,7 @@ def complete(session: Session, job_id: int, worker_id: str) -> bool:
             UPDATE job SET status = 'done', finished_at = now(), locked_by = NULL,
                 lease_until = NULL, last_error = NULL
             WHERE id = :id AND status = 'running' AND locked_by = :worker
+                AND lease_until > clock_timestamp()
             """
         ),
         {"id": job_id, "worker": worker_id},
@@ -134,7 +135,8 @@ def fail(
         session.execute(
             text(
                 "SELECT attempts, max_attempts FROM job "
-                "WHERE id = :id AND status = 'running' AND locked_by = :worker FOR UPDATE"
+                "WHERE id = :id AND status = 'running' AND locked_by = :worker "
+                "AND lease_until > clock_timestamp() FOR UPDATE"
             ),
             {"id": job_id, "worker": worker_id},
         )
@@ -174,8 +176,9 @@ def extend_lease(
     result = session.execute(
         text(
             """
-            UPDATE job SET lease_until = now() + make_interval(secs => :lease)
+            UPDATE job SET lease_until = clock_timestamp() + make_interval(secs => :lease)
             WHERE id = :id AND status = 'running' AND locked_by = :worker
+                AND lease_until > clock_timestamp()
             """
         ),
         {"id": job_id, "worker": worker_id, "lease": lease_seconds},

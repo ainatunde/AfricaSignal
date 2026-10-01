@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import os
 import time
 from collections.abc import Callable
 
@@ -69,11 +70,25 @@ def forwarded_client(header_values: list[str], hops: int) -> str | None:
         return None
 
 
+def trusted_proxy_peer(peer: str) -> bool:
+    """Trust forwarding headers only from an explicitly configured proxy network."""
+    try:
+        address = ipaddress.ip_address(peer)
+        networks = [
+            ipaddress.ip_network(value.strip())
+            for value in os.environ.get("TRUSTED_PROXY_NETWORKS", "").split(",")
+            if value.strip()
+        ]
+        return any(address in network for network in networks)
+    except ValueError:
+        return False
+
+
 def client_address(request: Request) -> str:
     """The reader's address, for a limiter key. Never stored or logged."""
     peer = request.client.host if request.client else "unknown"
     hops = trusted_proxy_hops()
-    if hops:
+    if hops and trusted_proxy_peer(peer):
         forwarded = forwarded_client(request.headers.getlist("x-forwarded-for"), hops)
         if forwarded is not None:
             return forwarded

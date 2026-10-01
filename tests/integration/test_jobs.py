@@ -519,3 +519,15 @@ def test_load_all_imports_every_handler_and_source_module() -> None:
     modules, kinds = (part.split() for part in out.split("--\n"))
     assert expected <= set(modules)
     assert {"fetch_source", "check_health", "check_backups", "gdelt_poll"} <= set(kinds)
+
+
+def test_expired_lease_cannot_be_completed_failed_or_revived(factory):
+    job_id = _enqueue(factory)
+    with factory() as session:
+        queue.claim(session, "expired-owner")
+        session.execute(text("UPDATE job SET lease_until = now() - interval '1 second'"))
+        session.commit()
+    with factory() as session:
+        assert not queue.complete(session, job_id, "expired-owner")
+        assert not queue.extend_lease(session, job_id, "expired-owner")
+        assert queue.fail(session, job_id, "expired-owner", "too late") is None

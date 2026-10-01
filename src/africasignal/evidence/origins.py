@@ -45,10 +45,12 @@ def _when(document: EvidenceDocument) -> datetime:
 
 
 def _label(source: Source, document: EvidenceDocument) -> str:
+    when = _when(document)
+    label_date = f"{when.day} {when:%b %Y}"
     if source.kind in _OFFICIAL_KIND:
         name = document.title or source.name
-        return f"{name}, {_when(document):%-d %b %Y}"
-    return f"{source.name} report, {_when(document):%-d %b %Y}"
+        return f"{name}, {label_date}"
+    return f"{source.name} report, {label_date}"
 
 
 def _new_origin_kind(source: Source) -> str:

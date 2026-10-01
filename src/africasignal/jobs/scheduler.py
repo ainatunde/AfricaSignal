@@ -16,6 +16,7 @@ from africasignal.db import get_engine
 from africasignal.jobs import handlers as handler_registry
 from africasignal.jobs import queue
 from africasignal.jobs.log import configure_logging
+from africasignal.publish.recovery import require_recovery_complete
 
 log = logging.getLogger("africasignal.scheduler")
 
@@ -91,6 +92,7 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
 
 def main() -> None:
     configure_logging()
+    require_recovery_complete()
     handler_registry.load_all()
     factory = sessionmaker(bind=get_engine(), expire_on_commit=False)
     stopping = threading.Event()

@@ -145,9 +145,9 @@ def test_robots_body_is_size_capped(web: FakeWeb) -> None:
     assert netutil.allowed_by_robots("https://site.example.ng/a") is True
 
 
-def test_robots_server_error_means_allow(web: FakeWeb) -> None:
+def test_robots_server_error_means_disallow(web: FakeWeb) -> None:
     web.add("https://site.example.ng/robots.txt", status=500, content=b"oops")
-    assert netutil.allowed_by_robots("https://site.example.ng/a") is True
+    assert netutil.allowed_by_robots("https://site.example.ng/a") is False
 
 
 def test_non_http_urls_are_not_governed_by_robots() -> None:

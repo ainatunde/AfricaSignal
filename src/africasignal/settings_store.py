@@ -18,6 +18,7 @@ it: ``DATABASE_URL``, ``SECRET_KEY``, ``ENV`` and ``ADMIN_TRUSTED_ORIGINS``.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -302,6 +303,13 @@ def resolve(session: Session, key: str) -> Resolved:
         return Resolved(stored, "console")
     env = _environment(defn)
     if env is not None:
+        # Development-only email doubles remain available to local tests.
+        if not (
+            key == "email_provider"
+            and get_settings().env == "development"
+            and env.strip().lower() in ("fake", "console")
+        ):
+            env = normalise(defn, env.strip())
         return Resolved(env, "environment")
     if defn.default is not None:
         return Resolved(defn.default, "default")
@@ -389,6 +397,8 @@ def normalise(defn: SettingDef, raw: str) -> str:
             number = float(raw) if defn.kind == "float" else int(raw)
         except ValueError:
             raise SettingError(f"{defn.label}: enter a number") from None
+        if not math.isfinite(number):
+            raise SettingError(f"{defn.label}: enter a finite number")
         if defn.minimum is not None and number < defn.minimum:
             raise SettingError(f"{defn.label}: must be at least {defn.minimum:g}")
         if defn.maximum is not None and number > defn.maximum:

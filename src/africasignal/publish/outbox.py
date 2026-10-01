@@ -12,17 +12,19 @@ idempotency key to absorb that. Status meanings:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select, true
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from africasignal.jobs.queue import backoff_seconds
-from africasignal.models import AppUser, Outbox
+from africasignal.models import AppUser, AssessmentVersion, LoginToken, Outbox, Situation
 from africasignal.publish import email_render
 from africasignal.publish.email import (
     EmailMessage,
@@ -72,27 +74,87 @@ def _scrub(row: Outbox) -> None:
     row.payload = {k: v for k, v in row.payload.items() if k not in SECRET_PAYLOAD_KEYS}
 
 
-def _build_message(session: Session, row: Outbox) -> EmailMessage | None:
+def _build_message(
+    session: Session, row: Outbox, now: datetime | None = None
+) -> EmailMessage | None:
     """Render a row. ``None`` when the recipient is gone or has not verified their address."""
-    user = session.get(AppUser, row.payload["user_id"])
+    user = session.scalar(
+        select(AppUser)
+        .where(AppUser.id == row.payload["user_id"])
+        .execution_options(populate_existing=True)
+    )
     if user is None or user.deleted_at is not None:
         return None
     if row.kind == "email_login":  # sent to an address that is not verified yet
+        raw = parse_qs(urlparse(row.payload.get("link", "")).query).get("token", [""])[0]
+        valid = (
+            session.scalar(
+                select(LoginToken.id).where(
+                    LoginToken.user_id == user.id,
+                    LoginToken.token_sha256 == hashlib.sha256(raw.encode()).hexdigest(),
+                    LoginToken.used_at.is_(None),
+                    LoginToken.expires_at > (now or datetime.now(UTC)),
+                )
+            )
+            if raw
+            else None
+        )
+        if valid is None:
+            return None
         return email_render.render_login(user.email, row.payload, row.dedupe_key)
-    if user.email_verified_at is None:
+    if user.email_verified_at is None or not user.digest_opt_in:
         return None
     base = email_render.resolve_base_url(session)  # read now, so a console change applies
     if row.kind == "email_correction":
+        version_id = row.payload.get("assessment_version_id")
+        if version_id is not None and not _current_version(
+            session,
+            version_id,
+            now or datetime.now(UTC),
+            withdrawal=row.payload.get("notification_kind") == "withdrawal",
+        ):
+            return None
         return email_render.render_correction(
             user.email, user.id, row.payload, row.dedupe_key, base=base
         )
     if row.kind == "email_digest":
         if not user.digest_opt_in:
             return None
-        return email_render.render_digest(
-            user.email, user.id, row.payload, row.dedupe_key, base=base
-        )
+        payload = dict(row.payload)
+        had_items = bool(payload.get("followed") or payload.get("top"))
+        for section in ("followed", "top"):
+            payload[section] = [
+                item
+                for item in payload.get(section, [])
+                if _current_version(
+                    session, item.get("assessment_version_id"), now or datetime.now(UTC)
+                )
+            ]
+        if had_items and not (payload["followed"] or payload["top"]):
+            return None
+        return email_render.render_digest(user.email, user.id, payload, row.dedupe_key, base=base)
     raise ValueError(f"unknown outbox kind {row.kind!r}")
+
+
+def _current_version(
+    session: Session, version_id: int | None, now: datetime, *, withdrawal: bool = False
+) -> bool:
+    if version_id is None:
+        return False
+    return (
+        session.scalar(
+            select(AssessmentVersion.id)
+            .join(Situation, Situation.current_version_id == AssessmentVersion.id)
+            .where(
+                AssessmentVersion.id == version_id,
+                AssessmentVersion.status == ("withdrawn" if withdrawal else "published"),
+                or_(AssessmentVersion.valid_until.is_(None), AssessmentVersion.valid_until > now)
+                if not withdrawal
+                else true(),
+            )
+        )
+        is not None
+    )
 
 
 def dispatch_pending(
@@ -100,26 +162,32 @@ def dispatch_pending(
 ) -> DispatchResult:
     """Send up to ``limit`` due rows. Commits after every row so a crash loses no progress."""
     result = DispatchResult()
-    suspended = publication_suspended(session)
-    due = select(Outbox).where(
-        Outbox.status.in_(("pending", "failed")), Outbox.next_attempt_at <= now
-    )
-    if suspended:
-        result.held = (
-            session.scalar(
-                select(func.count()).select_from(
-                    due.where(Outbox.kind.in_(HELD_WHILE_SUSPENDED)).subquery()
-                )
-            )
-            or 0
+    # Lock only the row whose send this transaction owns. A prefetched locked batch loses
+    # every remaining lock when the first row commits, allowing another worker to send it.
+    for _ in range(limit):
+        suspended = publication_suspended(session)
+        due = select(Outbox).where(
+            Outbox.status.in_(("pending", "failed")), Outbox.next_attempt_at <= now
         )
-        due = due.where(Outbox.kind.notin_(HELD_WHILE_SUSPENDED))
-    rows = session.scalars(
-        due.order_by(Outbox.next_attempt_at, Outbox.id)
-        .limit(limit)
-        .with_for_update(skip_locked=True)
-    ).all()
-    for row in rows:
+        if suspended:
+            result.held = (
+                session.scalar(
+                    select(func.count()).select_from(
+                        due.where(Outbox.kind.in_(HELD_WHILE_SUSPENDED)).subquery()
+                    )
+                )
+                or 0
+            )
+            due = due.where(Outbox.kind.notin_(HELD_WHILE_SUSPENDED))
+        row = session.scalar(
+            due.order_by(Outbox.next_attempt_at, Outbox.id)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
+        )
+        if row is None:
+            break
+        # Suspension applies between sends; an already-started provider request is in flight.
         _send_one(session, provider, row, now, result)
         session.commit()
     return result
@@ -130,13 +198,15 @@ def _send_one(
 ) -> None:
     row.attempts += 1
     try:
-        message = _build_message(session, row)
+        message = _build_message(session, row, now)
         if message is None:
             row.status, row.last_error = "dead", "recipient unavailable"
             _scrub(row)
             result.dead += 1
             return
         row.provider_message_id = provider.send(message)
+        if not row.provider_message_id or not row.provider_message_id.strip():
+            raise EmailSendError("provider returned no message id; outcome uncertain")
     except EmailSendError as exc:
         _record_failure(row, str(exc), retryable=exc.retryable, now=now, result=result)
         return

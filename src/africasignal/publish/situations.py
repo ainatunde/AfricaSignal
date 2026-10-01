@@ -416,7 +416,12 @@ def assess_situation(
     the inputs changed (spec B9): it becomes the new version's ``change_summary``. The caller
     commits.
     """
-    situation = session.get(Situation, situation_id)
+    situation = session.scalar(
+        select(Situation)
+        .where(Situation.id == situation_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if situation is None:
         return AssessmentOutcome("skipped", reason="situation does not exist")
     if situation.kind == "policy":  # T2 (AS-027) lives in its own module

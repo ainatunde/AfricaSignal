@@ -263,6 +263,7 @@ def test_the_operator_upload_fallback_runs_the_same_parser_and_records_the_origi
 
     assert _job_states(factory) == {
         ("import_nbs_file", "done"): 1,
+        ("discard_import_upload", "done"): 1,
         ("assess_situation", "done"): 38,  # the country and 37 states
     }
     assert _count(factory, Measurement) == 114

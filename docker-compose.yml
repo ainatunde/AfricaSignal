@@ -10,6 +10,7 @@ x-logging: &default-logging
 x-app: &app
   build: .
   logging: *default-logging
+  restart: unless-stopped
   environment: &app-env
     ENV: development
     DATABASE_URL: postgresql+psycopg://africasignal:africasignal@db:5432/africasignal
@@ -65,9 +66,14 @@ services:
     # Same as the image's default, spelled out so `docker compose config` shows it: uvicorn's
     # access log would write every reader's IP address and requested URL. Do not remove
     # --no-access-log (tests/unit/test_logging_policy.py checks it).
-    command: ["uvicorn", "africasignal.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+    command: ["uvicorn", "africasignal.web.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-access-log", "--no-proxy-headers"]
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   worker:
     <<: *app

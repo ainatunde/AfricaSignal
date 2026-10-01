@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import case, select
+from sqlalchemy import case, or_, select
 from sqlalchemy.orm import Session
 
 from africasignal.models import (
@@ -63,6 +63,7 @@ def _recent_current(now: datetime) -> Any:
         .join(AssessmentVersion, AssessmentVersion.id == Situation.current_version_id)
         .where(
             AssessmentVersion.status == "published",
+            or_(AssessmentVersion.valid_until.is_(None), AssessmentVersion.valid_until > now),
             AssessmentVersion.published_at >= now - WINDOW,
             AssessmentVersion.published_at <= now,
         )

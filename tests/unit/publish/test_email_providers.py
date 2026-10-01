@@ -110,3 +110,34 @@ def test_build_provider_selects_by_name() -> None:
     assert isinstance(build_provider(settings("resend")), ResendProvider)
     with pytest.raises(RuntimeError):
         build_provider(settings("carrier-pigeon"))
+
+
+@pytest.mark.parametrize("name", ["", "fake", "console", " Console "])
+@pytest.mark.parametrize("env", ["staging", "production"])
+def test_non_live_providers_are_refused_outside_development(name: str, env: str) -> None:
+    from africasignal.publish.email import EmailNotConfigured
+
+    settings = Settings(ENV=env, EMAIL_PROVIDER=name)  # type: ignore[call-arg]
+    with pytest.raises(EmailNotConfigured):
+        build_provider(settings)
+
+
+@pytest.mark.parametrize(
+    "provider_type,key", [(ResendProvider, "id"), (PostmarkProvider, "MessageID")]
+)
+@pytest.mark.parametrize("value", [None, "", " ", 123])
+def test_success_without_message_id_is_uncertain(provider_type, key, value) -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={key: value}))
+    with pytest.raises(EmailSendError, match="outcome uncertain"):
+        provider_type("key", "a@b.co", client(transport)).send(MESSAGE)
+
+
+@pytest.mark.parametrize(
+    "name,retryable",
+    [("concurrent_idempotent_requests", True), ("invalid_idempotent_request", False)],
+)
+def test_resend_conflicts_distinguish_concurrent_retries(name: str, retryable: bool) -> None:
+    transport = httpx.MockTransport(lambda request: httpx.Response(409, json={"name": name}))
+    with pytest.raises(EmailSendError) as exc:
+        ResendProvider("key", "a@b.co", client(transport)).send(MESSAGE)
+    assert exc.value.retryable is retryable

@@ -29,6 +29,9 @@ def test_all_secrets_present_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ENV", "production")
     for name in REQUIRED_OUTSIDE_DEVELOPMENT:
         monkeypatch.setenv(name.upper(), "x")
+    monkeypatch.setenv(
+        "SECRET_KEY", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    )
     Settings(_env_file=None).validate_required()
 
 
@@ -38,5 +41,23 @@ def test_one_missing_secret_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in REQUIRED_OUTSIDE_DEVELOPMENT:
         monkeypatch.setenv(name.upper(), "x")
     monkeypatch.delenv("SECRET_KEY")
+    with pytest.raises(RuntimeError, match="SECRET_KEY"):
+        Settings(_env_file=None).validate_required()
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "x",
+        " " * 64,
+        "a" * 64,
+        "africasignal-development-only-secret-key",
+        "change-me-change-me-change-me-change-me",
+    ],
+)
+def test_weak_production_secrets_are_refused(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
+    monkeypatch.setenv("ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/app")
+    monkeypatch.setenv("SECRET_KEY", key)
     with pytest.raises(RuntimeError, match="SECRET_KEY"):
         Settings(_env_file=None).validate_required()

@@ -37,6 +37,7 @@ backup_name=latest
 local_file=""
 do_list=0 recreate=0 restore_objects=0 overwrite_live=0 no_verify=0
 verify_objects=0
+drill_only=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -49,6 +50,7 @@ while [ $# -gt 0 ]; do
     --verify-objects) verify_objects="${2:?--verify-objects needs a value}"; shift ;;
     --overwrite-live) overwrite_live=1 ;;
     --no-verify) no_verify=1 ;;
+    --drill-only) drill_only=1 ;;
     -h | --help)
       sed -n '2,/^set -Eeuo/p' "$0" | sed '$d; s/^# \{0,1\}//'
       exit 0
@@ -90,6 +92,10 @@ if [ -n "${DATABASE_URL:-}" ] && [ "$(libpq_url "$DATABASE_URL")" = "$target" ] 
 fi
 if [ "${ENV:-development}" = "production" ] && [ "$overwrite_live" -ne 1 ]; then
   die "ENV=production: restoring here is only for disaster recovery; pass --overwrite-live to confirm"
+fi
+
+if [ "$drill_only" -eq 1 ]; then
+  case "$dbname" in *_drill_*) ;; *) die "--drill-only requires a scratch *_drill_* database" ;; esac
 fi
 
 # ---- fetch and verify the dump -------------------------------------------------------------
@@ -149,6 +155,12 @@ existing="$(psql "$target" -v ON_ERROR_STOP=1 -Atq -c "
 log "restoring $name into $dbname"
 pg_restore --no-owner --no-acl --exit-on-error --single-transaction --dbname="$target" "$dump"
 psql "$target" -v ON_ERROR_STOP=1 -q -c "ANALYZE"
+if [ "$drill_only" -ne 1 ]; then
+  psql "$target" -v ON_ERROR_STOP=1 -q -c "INSERT INTO setting (key, value)
+    VALUES ('ops.restore_quarantined', 'true'::jsonb)
+    ON CONFLICT (key) DO UPDATE SET value = 'true'::jsonb"
+  log "database quarantined: production services refuse startup until reapply-deletions succeeds"
+fi
 
 # ---- checks --------------------------------------------------------------------------------
 version="$(psql "$target" -v ON_ERROR_STOP=1 -Atq -c "SELECT version_num FROM alembic_version")" ||

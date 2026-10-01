@@ -32,6 +32,28 @@ MAX_BYLINE_CHARS = 200  # a feed's author field is untrusted text
 
 Fetcher = Callable[..., FetchResult]
 
+_PROCESSING_CONTENT_ATTRIBUTE = "_africasignal_processing_content"
+
+
+def consume_processing_content(store: ObjectStore, document: EvidenceDocument) -> bytes:
+    """Take freshly captured bytes for this job, or read the retained object on a retry.
+
+    Non-retained source material is attached only to the in-memory ORM instance so an adapter can
+    parse it in the same job that fetched it. It is never serialized to the database or object
+    store.
+    """
+    content = getattr(document, _PROCESSING_CONTENT_ATTRIBUTE, None)
+    if isinstance(content, bytes):
+        delattr(document, _PROCESSING_CONTENT_ATTRIBUTE)
+        return content
+    return store.get(document.storage_key)
+
+
+def clear_processing_content(document: EvidenceDocument) -> None:
+    """Drop any transient source bytes when document processing finishes."""
+    if hasattr(document, _PROCESSING_CONTENT_ATTRIBUTE):
+        delattr(document, _PROCESSING_CONTENT_ATTRIBUTE)
+
 
 class CaptureError(Exception):
     """A document could not be captured."""
@@ -128,11 +150,20 @@ def record_document(
         )
     ).first()
     if existing is not None:
+        setattr(existing, _PROCESSING_CONTENT_ATTRIBUTE, content)
         return existing
 
-    key = evidence_key(sha, extension_for(mime))
+    quotation = excerpt(extracted.text, permission)
+    if permission.may_store_full_text:
+        key = evidence_key(sha, extension_for(mime))
+        retained, retained_mime = content, mime
+    else:
+        # A raw HTML/PDF is itself a stored full copy. Retain only the permitted quotation.
+        retained = (quotation or "").encode()
+        key = evidence_key(hashlib.sha256(retained).hexdigest(), "quote")
+        retained_mime = "text/plain"
     if not store.exists(key):
-        store.put(key, content, mime)
+        store.put(key, retained, retained_mime)
 
     retrieved_at = now or datetime.now(UTC)
     document = EvidenceDocument(
@@ -147,7 +178,7 @@ def record_document(
         title=title or extracted.title,
         byline=(byline or "").strip()[:MAX_BYLINE_CHARS] or None,
         text_content=extracted.text if permission.may_store_full_text else None,
-        excerpt=excerpt(extracted.text, permission),
+        excerpt=quotation,
         simhash=simhash(extracted.text) if extracted.text else None,
         retention_until=(
             retrieved_at + timedelta(days=permission.retention_days)
@@ -157,12 +188,12 @@ def record_document(
     )
     session.add(document)
     session.flush()
+    setattr(document, _PROCESSING_CONTENT_ATTRIBUTE, content)
     return document
 
 
 def load_text(store: ObjectStore, document: EvidenceDocument) -> str | None:
-    """The document's text: the stored copy, or re-extracted from the raw object when the
-    source's permission does not allow storing full text."""
-    if document.text_content is not None:
-        return document.text_content
-    return extract_text(store.get(document.storage_key), document.mime).text
+    """Return retained text only; never reconstruct a forbidden full copy from raw bytes."""
+    if document.status in ("expired", "withdrawn"):
+        return None
+    return document.text_content if document.text_content is not None else document.excerpt

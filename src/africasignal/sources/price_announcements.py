@@ -34,6 +34,7 @@ from urllib.parse import urlparse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from africasignal.evidence.capture import consume_processing_content
 from africasignal.evidence.text import extract_text
 from africasignal.models import Claim, EvidenceDocument, Place, ReportingOrigin, Source
 from africasignal.net.fetch import FetchResult, fetch_document
@@ -326,7 +327,10 @@ class PriceAnnouncementAdapter:
 
         # The source's permission may forbid keeping the text, so read it from the raw file each
         # time and keep nothing.
-        text = doc.text_content or extract_text(ctx.store.get(doc.storage_key), doc.mime).text
+        text = (
+            doc.text_content
+            or extract_text(consume_processing_content(ctx.store, doc), doc.mime).text
+        )
         if not text:
             result.notes.append(f"no readable text in the document ({doc.mime})")
             return result

@@ -86,6 +86,14 @@ def _classify(response: httpx.Response) -> EmailSendError | None:
     if response.is_success:
         return None
     retryable = response.status_code == 429 or response.status_code >= 500
+    if response.status_code == 409:
+        try:
+            data = response.json()
+            retryable = (
+                isinstance(data, dict) and data.get("name") == "concurrent_idempotent_requests"
+            )
+        except ValueError:
+            pass
     return EmailSendError(
         f"HTTP {response.status_code}: {response.text[:200]}", retryable=retryable
     )
@@ -130,7 +138,7 @@ class PostmarkProvider(_HttpProvider):
         # Postmark reports some rejections with HTTP 200 and a non-zero ErrorCode.
         if data.get("ErrorCode", 0) not in (0, "0"):
             raise EmailSendError(str(data.get("Message", "rejected")), retryable=False)
-        return str(data.get("MessageID", ""))
+        return _message_id(data, "MessageID")
 
 
 class ResendProvider(_HttpProvider):
@@ -149,7 +157,16 @@ class ResendProvider(_HttpProvider):
         }
         if message.html:
             body["html"] = message.html
-        return str(self._post(self.URL, headers, body).get("id", ""))
+        return _message_id(self._post(self.URL, headers, body), "id")
+
+
+def _message_id(data: dict[str, str], key: str) -> str:
+    value = data.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise EmailSendError(
+            "provider accepted request without a valid message id; outcome uncertain"
+        )
+    return value
 
 
 class EmailNotConfigured(RuntimeError):
@@ -171,6 +188,12 @@ def build_provider_named(name: str, api_key: str, from_address: str) -> EmailPro
 
 
 def build_provider(settings: Settings) -> EmailProvider:
+    if settings.env != "development" and settings.email_provider.strip().lower() in (
+        "",
+        "fake",
+        "console",
+    ):
+        raise EmailNotConfigured("staging and production require a real email provider")
     return build_provider_named(
         settings.email_provider, settings.email_api_key, settings.email_from
     )
@@ -198,6 +221,8 @@ def get_provider(session: Session | None = None) -> EmailProvider:
         name = "console"
     if not name:
         raise EmailNotConfigured("no email provider is set in the console settings")
+    if get_settings().env != "development" and name.strip().lower() in ("fake", "console"):
+        raise EmailNotConfigured("staging and production require a real email provider")
     key = (name, api_key, sender)
     if _built is None or _built[0] != key:
         _built = (key, build_provider_named(name, api_key, sender))

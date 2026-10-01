@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from africasignal.db import get_engine
 from alembic import command
+from tests.db_safety import require_test_database
 
 
 def alembic_config() -> Config:
@@ -16,6 +17,7 @@ def alembic_config() -> Config:
 @pytest.fixture(scope="module")
 def engine() -> Iterator[Engine]:
     """A database migrated to head for the module, emptied again afterwards."""
+    require_test_database()
     cfg = alembic_config()
     command.downgrade(cfg, "base")
     command.upgrade(cfg, "head")

@@ -16,6 +16,7 @@ from africasignal.jobs import handlers as handler_registry
 from africasignal.jobs import queue
 from africasignal.jobs.handlers import JobContext
 from africasignal.jobs.log import configure_logging
+from africasignal.publish.recovery import require_recovery_complete
 
 log = logging.getLogger("africasignal.worker")
 
@@ -37,6 +38,7 @@ class _Heartbeat:
         self._job_id = job_id
         self._worker_id = worker_id
         self._interval = interval
+        self.lost = threading.Event()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
@@ -44,8 +46,11 @@ class _Heartbeat:
         while not self._stop.wait(self._interval):
             try:
                 with self._factory() as session:
-                    queue.extend_lease(session, self._job_id, self._worker_id)
+                    renewed = queue.extend_lease(session, self._job_id, self._worker_id)
                     session.commit()
+                    if not renewed:
+                        self.lost.set()
+                        return
             except Exception:  # a missed heartbeat is retried on the next tick
                 log.exception("lease extension failed", extra={"job_id": self._job_id})
 
@@ -94,9 +99,11 @@ class Worker:
             if handler is None:
                 raise LookupError(f"no handler registered for job kind {job.kind!r}")
             with self.factory() as session:
-                with _Heartbeat(self.factory, job.id, self.worker_id, self.heartbeat_seconds):
+                with _Heartbeat(
+                    self.factory, job.id, self.worker_id, self.heartbeat_seconds
+                ) as heartbeat:
                     handler(JobContext(session=session, job=job, worker_id=self.worker_id))
-                if not queue.complete(session, job.id, self.worker_id):
+                if heartbeat.lost.is_set() or not queue.complete(session, job.id, self.worker_id):
                     session.rollback()
                     log.warning("job lease lost before completion; result discarded", extra=ctx)
                     return True
@@ -125,6 +132,7 @@ class Worker:
 
 def main() -> None:
     configure_logging()
+    require_recovery_complete()
     handler_registry.load_all()
     worker = Worker()
 
