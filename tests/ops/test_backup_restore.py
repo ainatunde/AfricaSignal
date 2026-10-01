@@ -30,7 +30,7 @@ pytestmark = pytest.mark.skipif(
     reason="needs pg_dump, pg_restore, psql, rclone and openssl",
 )
 
-SCHEMA = """
+SCHEMA_WITHOUT_SETTING = """
 CREATE TABLE alembic_version (version_num text PRIMARY KEY);
 INSERT INTO alembic_version VALUES ('0003');
 CREATE TABLE source (id serial PRIMARY KEY, name text);
@@ -43,6 +43,12 @@ INSERT INTO source (name) VALUES ('nbs'), ('nerc');
 INSERT INTO app_user (email) VALUES ('a@example.org');
 INSERT INTO evidence_document (storage_key) VALUES ('evidence/ab/cd/one.html'), ('evidence/ef/01/two.pdf');
 """
+
+SETTING = """
+CREATE TABLE setting (key text PRIMARY KEY, value jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
+"""
+
+SCHEMA = SCHEMA_WITHOUT_SETTING + SETTING
 
 
 def libpq(url: str) -> str:
@@ -491,7 +497,8 @@ def test_console_settings_choose_the_buckets_and_beat_the_environment(
 def test_environment_is_used_when_the_console_cannot_be_read(
     tmp_path: Path, scratch_db: str
 ) -> None:
-    # The scratch database has no setting table, like a database lost and restored elsewhere.
+    # Exercise the legacy/missing-settings fallback explicitly; current schemas have setting.
+    psql(scratch_db, "DROP TABLE setting")
     env = {
         "DATABASE_URL": scratch_db.replace("postgresql://", "postgresql+psycopg://", 1),
         "BACKUP_DIR": str(tmp_path),

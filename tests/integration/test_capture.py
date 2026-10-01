@@ -102,10 +102,12 @@ def _rows(session: Session) -> int:
     return session.scalar(select(func.count()).select_from(EvidenceDocument)) or 0
 
 
-def test_capture_stores_raw_bytes_and_a_row(session: Session, store: S3Store, news: Source) -> None:
+def test_capture_stores_raw_bytes_and_a_row(
+    session: Session, store: S3Store, official: Source
+) -> None:
     fetcher = FakeFetcher()
     fetcher.page("https://punch.example/a", HTML.encode())
-    doc = capture(session, store, news, "https://punch.example/a", fetch=fetcher)
+    doc = capture(session, store, official, "https://punch.example/a", fetch=fetcher)
 
     assert doc.storage_key == evidence_key(doc.content_sha256, "html")
     assert doc.storage_key.startswith("evidence/") and not doc.storage_key.startswith("/")
@@ -164,14 +166,14 @@ def test_changed_bytes_give_a_new_row(session: Session, store: S3Store, news: So
     assert store.exists(first.storage_key) and store.exists(second.storage_key)
 
 
-def test_same_bytes_from_two_sources_are_two_rows_sharing_one_object(
+def test_same_bytes_with_different_rights_use_separate_objects(
     session: Session, store: S3Store, news: Source, official: Source
 ) -> None:
     fetcher = FakeFetcher()
     fetcher.page("https://x.example/a", HTML.encode())
     a = capture(session, store, news, "https://x.example/a", fetch=fetcher)
     b = capture(session, store, official, "https://x.example/a", fetch=fetcher)
-    assert a.id != b.id and a.storage_key == b.storage_key
+    assert a.id != b.id and a.storage_key != b.storage_key
 
 
 def test_news_source_never_stores_full_text(session: Session, store: S3Store, news: Source) -> None:
@@ -180,9 +182,11 @@ def test_news_source_never_stores_full_text(session: Session, store: S3Store, ne
     doc = capture(session, store, news, "https://punch.example/a", fetch=fetcher)
     assert doc.text_content is None
     assert doc.excerpt is not None and 0 < len(doc.excerpt) <= 300
-    # The text can still be recovered transiently from the raw object.
+    # Only the approved quotation is retained, including in object storage.
     text = load_text(store, doc)
-    assert text is not None and "N870 per litre" in text
+    assert text == doc.excerpt
+    assert store.get(doc.storage_key).decode() == doc.excerpt
+    assert store.get(doc.storage_key) != HTML.encode()
 
 
 def test_excerpt_respects_a_short_quote_limit(session: Session, store: S3Store) -> None:

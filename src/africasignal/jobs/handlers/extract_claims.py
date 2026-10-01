@@ -51,7 +51,7 @@ def extract_claims_job(ctx: JobContext) -> None:
         return
 
     text = document.text_content
-    if text is None:  # the source's permission does not allow storing text: read the raw file
+    if text is None:  # quotation-only sources expose only their permitted excerpt
         text = load_text(get_store(), document)
     if not text or not keyword_hits(text):
         log.info("document %s has no topic keywords: not extracted", document_id, extra=log_extra)

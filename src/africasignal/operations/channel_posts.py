@@ -9,7 +9,7 @@ kill switch) there are no drafts and nothing can be marked."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
 from sqlalchemy import select
@@ -141,7 +141,11 @@ def mark_posted(
     situation = session.get(Situation, version.situation_id) if version else None
     if version is None or situation is None:
         raise ChannelPostError("no such version")
-    if version.status != "published" or situation.current_version_id != version.id:
+    if (
+        version.status != "published"
+        or situation.current_version_id != version.id
+        or (version.valid_until is not None and version.valid_until <= datetime.now(UTC))
+    ):
         raise ChannelPostError(
             "that version is no longer the published one, so its draft is out of date"
         )

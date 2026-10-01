@@ -64,6 +64,7 @@ def queue_notifications(session: Session, version_id: int, kind: str) -> None:
 def item_snapshot(situation: Situation, version: AssessmentVersion) -> dict[str, Any]:
     """The display text an email needs, copied into the outbox payload."""
     return {
+        "assessment_version_id": version.id,
         "slug": situation.slug,
         "title": situation.title,
         "headline": version.headline,
@@ -95,6 +96,8 @@ def notify_followers(
         raise ValueError(f"unknown notification kind {kind!r}")
     situation = session.get(Situation, version.situation_id)
     assert situation is not None  # foreign key
+    if situation.current_version_id != version.id:
+        return NotifyResult(skipped="version is no longer current")
 
     result = NotifyResult()
     followers = session.execute(

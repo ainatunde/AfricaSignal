@@ -17,7 +17,16 @@ from pathlib import Path
 
 import pytest
 
-from tests.ops.test_backup_restore import ROOT, SCHEMA, libpq, psql, run, with_db
+from tests.ops.test_backup_restore import (
+    ROOT,
+    SCHEMA,
+    SCHEMA_WITHOUT_SETTING,
+    SETTING,
+    libpq,
+    psql,
+    run,
+    with_db,
+)
 
 DRILL = ROOT / "scripts" / "restore-drill.sh"
 BACKUP = ROOT / "scripts" / "backup.sh"
@@ -26,10 +35,6 @@ pytestmark = pytest.mark.skipif(
     any(shutil.which(c) is None for c in ("pg_dump", "pg_restore", "psql", "rclone", "openssl")),
     reason="needs pg_dump, pg_restore, psql, rclone and openssl",
 )
-
-SETTING = """
-CREATE TABLE setting (key text PRIMARY KEY, value jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
-"""
 
 
 @pytest.fixture(scope="module")
@@ -48,7 +53,7 @@ def source_db(admin_url: str) -> Iterator[str]:
     name = f"ops_drill_{uuid.uuid4().hex[:8]}"
     psql(admin_url, f'CREATE DATABASE "{name}"')
     url = with_db(admin_url, name)
-    psql(url, SCHEMA + SETTING)
+    psql(url, SCHEMA)
     yield url
     leftovers = psql(
         admin_url, f"SELECT datname FROM pg_database WHERE datname LIKE '{name}\\_drill\\_%'"
@@ -267,7 +272,7 @@ def test_backup_without_a_setting_table_or_with_recording_off_records_nothing(
     psql(admin_url, f'CREATE DATABASE "{name}"')
     try:
         url = with_db(admin_url, name)
-        psql(url, SCHEMA)  # no setting table
+        psql(url, SCHEMA_WITHOUT_SETTING)  # no setting table
         done = run(BACKUP, env={"DATABASE_URL": url, "BACKUP_DIR": str(tmp_path)})
         assert done.returncode == 0 and "could not record" not in done.stderr
         psql(url, SETTING)

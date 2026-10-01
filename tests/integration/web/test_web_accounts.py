@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -51,7 +52,7 @@ def situation(session: Session) -> Situation:
 def sent_token(session: Session) -> str:
     """Send the queued emails and return the raw token from the sign-in link."""
     provider = FakeProvider()
-    dispatch_pending(session, provider, NOW)
+    dispatch_pending(session, provider, datetime.now(UTC) + timedelta(seconds=1))
     link = next(line for line in provider.sent[-1].text.splitlines() if line.startswith("http"))
     assert urlparse(link).path == "/signin/verify"
     return parse_qs(urlparse(link).query)["token"][0]

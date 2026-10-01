@@ -21,6 +21,7 @@ deleted after the restored backup was taken.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -29,9 +30,19 @@ from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from africasignal import settings_store
-from africasignal.models import AccountDeletion, AppUser, Feedback, LoginToken, UserSession
+from africasignal.jobs import queue
+from africasignal.models import (
+    AccountDeletion,
+    AppUser,
+    Claim,
+    EvidenceDocument,
+    Feedback,
+    LlmResponseCache,
+    LoginToken,
+    UserSession,
+)
 from africasignal.publish import accounts, deletions
-from africasignal.storage import S3Store
+from africasignal.storage import S3Store, evidence_key
 
 log = logging.getLogger("africasignal.retention")
 
@@ -49,6 +60,8 @@ class RetentionResult:
     feedback_scrubbed: int = 0
     ledger_pruned: int = 0
     ledger_mirrored: int = 0
+    evidence_expired: int = 0
+    evidence_redacted: int = 0
 
 
 def purge_login_records(session: Session, now: datetime) -> tuple[int, int]:
@@ -103,9 +116,92 @@ def ledger_keep(session: Session) -> timedelta:
     return timedelta(days=days) + deletions.LEDGER_MARGIN
 
 
+def redact_forbidden_copies(session: Session, store: S3Store | None, now: datetime) -> int:
+    """Convert legacy raw copies to permitted quotations, preserving legally shared objects."""
+    from africasignal.publish.invalidation import invalidate
+    from africasignal.sources.permissions import current_permission
+
+    changed = 0
+    for document in session.scalars(
+        select(EvidenceDocument)
+        .where(
+            EvidenceDocument.status == "active", ~EvidenceDocument.storage_key.endswith(".quote")
+        )
+        .with_for_update(skip_locked=True)
+    ):
+        permission = current_permission(session, document.source_id)
+        if permission is None or permission.may_store_full_text:
+            continue
+        if store is None:
+            raise RuntimeError("Legacy evidence redaction requires object storage")
+        quote = document.excerpt or ""
+        if permission.max_quote_chars is not None:
+            quote = quote[: permission.max_quote_chars]
+        retained = quote.encode()
+        key = evidence_key(hashlib.sha256(retained).hexdigest(), "quote")
+        store.put(key, retained, "text/plain")
+        old_key = document.storage_key
+        document.storage_key = key
+        document.text_content = None
+        document.excerpt = quote or None
+        for claim in session.scalars(
+            select(Claim).where(Claim.evidence_document_id == document.id)
+        ):
+            if claim.passage and claim.passage not in quote:
+                claim.passage = ""
+                claim.text = ""
+                claim.valid = False
+                claim.invalid_reason = "outside permitted retained quotation"
+                invalidate(session, "claim", [claim.id], now)
+        queue.enqueue(
+            session,
+            "purge_expired_evidence",
+            {"storage_key": old_key},
+            dedupe_key=f"redact_evidence:{document.id}:{old_key}",
+        )
+        changed += 1
+    if changed:
+        session.execute(delete(LlmResponseCache))
+    return changed
+
+
+def expire_evidence(session: Session, now: datetime) -> int:
+    """Invalidate expired evidence now and queue idempotent object deletion after commit."""
+    from africasignal.publish.invalidation import invalidate
+
+    documents = session.scalars(
+        select(EvidenceDocument)
+        .where(EvidenceDocument.status != "expired", EvidenceDocument.retention_until <= now)
+        .with_for_update(skip_locked=True)
+    ).all()
+    for document in documents:
+        document.status = "expired"
+        document.text_content = None
+        document.excerpt = None
+        session.execute(
+            update(Claim)
+            .where(Claim.evidence_document_id == document.id)
+            .values(text="", passage="", valid=False, invalid_reason="evidence retention expired")
+        )
+        invalidate(session, "evidence_document", [document.id], now)
+        queue.enqueue(
+            session,
+            "purge_expired_evidence",
+            {"storage_key": document.storage_key},
+            dedupe_key=f"purge_expired_evidence:{document.id}",
+        )
+    if documents:
+        # Cache entries do not track source dependencies; clearing them prevents reuse of quotes
+        # from expired evidence. Billed call metadata stays for cost accounting.
+        session.execute(delete(LlmResponseCache))
+    return len(documents)
+
+
 def run(session: Session, now: datetime, store: S3Store | None) -> RetentionResult:
     """The daily retention pass. The caller commits."""
     result = RetentionResult()
+    result.evidence_expired = expire_evidence(session, now)
+    result.evidence_redacted = redact_forbidden_copies(session, store, now)
     result.login_tokens, result.sessions = purge_login_records(session, now)
     result.unverified_accounts = purge_unverified_accounts(session, now)
     result.feedback_scrubbed = scrub_old_feedback(session, now, feedback_retention_months(session))

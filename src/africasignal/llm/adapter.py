@@ -5,8 +5,9 @@ when the day's budget is spent, records every real call in ``llm_call`` with its
 the answer against the schema before returning it. The provider behind it (Anthropic in
 production, ``FakeProvider`` in tests) only turns a prompt into text.
 
-The adapter commits the session after each call so that spend and cached answers survive a later
-failure of the calling job. Make the call before other uncommitted changes.
+Production adapters commit an independent accounting session after each call, so billed spend
+and cached answers survive a job failure without committing the job's own changes. Directly
+constructed adapters require a dedicated accounting session.
 """
 
 from __future__ import annotations
@@ -19,9 +20,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from africasignal import settings_store
+from africasignal.db import get_engine
 from africasignal.llm import cache
 from africasignal.llm.budget import (
     budget_status,
@@ -91,10 +93,12 @@ class LlmAdapter:
         provider: LlmProvider,
         *,
         config: LlmConfig | None = None,
+        accounting_factory: sessionmaker[Session] | None = None,
         daily_budget_usd: Decimal | float | None = None,
         per_job_max_tokens: int | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
+        self.accounting_factory = accounting_factory
         self.session = session
         self.provider = provider
         self.config = config or load_llm_config()
@@ -139,6 +143,20 @@ class LlmAdapter:
         or ``SchemaValidationError`` (both billed and recorded). ``job_id`` ties the spend to the
         running job and enforces ``LLM_PER_JOB_MAX_TOKENS`` across all of that job's calls.
         """
+        if self.accounting_factory is not None:
+            # Accounting commits must never commit unrelated writes made by a job handler.
+            with self.accounting_factory() as accounting:
+                adapter = LlmAdapter(
+                    accounting,
+                    self.provider,
+                    config=self.config,
+                    daily_budget_usd=self._daily_budget_override,
+                    per_job_max_tokens=self._per_job_override,
+                    clock=self.clock,
+                )
+                return adapter.complete_json(
+                    purpose, prompt_version, system, user, schema, max_tokens, job_id=job_id
+                )
         purpose_cfg = self.config.purpose(purpose)
         model = purpose_cfg.model
         price = self.config.prices.get(model)
@@ -261,4 +279,8 @@ class LlmAdapter:
 def build_adapter(session: Session) -> LlmAdapter:
     """The adapter handlers use: the production provider, and the key and limits from the console
     settings (falling back to the environment)."""
-    return LlmAdapter(session, make_provider(session))
+    return LlmAdapter(
+        session,
+        make_provider(session),
+        accounting_factory=sessionmaker(bind=get_engine(), expire_on_commit=False),
+    )

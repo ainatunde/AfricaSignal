@@ -159,6 +159,15 @@ def withdraw_situation(
 ) -> AssessmentVersion | None:
     """Replace the current version with a ``withdrawn`` one. Returns None when there is no
     published version to withdraw, or it is already withdrawn."""
+    locked = session.scalar(
+        select(Situation)
+        .where(Situation.id == situation.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if locked is None:
+        return None
+    situation = locked
     previous = (
         session.get(AssessmentVersion, situation.current_version_id)
         if situation.current_version_id is not None

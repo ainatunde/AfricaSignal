@@ -343,3 +343,28 @@ def test_the_per_job_token_limit_comes_from_the_console(session: Session, operat
     call(a, user="one", job_id=job_id)
     call(a, user="two", job_id=job_id)
     assert fake.calls[1].max_tokens == 100  # 1000 - 900 used by the first call
+
+
+def test_model_accounting_does_not_commit_callers_writes(engine: Engine) -> None:
+    from africasignal.models import AppUser
+
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory() as caller:
+        user = AppUser(email="uncommitted-accounting@example.com")
+        caller.add(user)
+        caller.flush()
+        fake = FakeProvider([reply()])
+        independent = LlmAdapter(
+            caller,
+            fake,
+            config=config(),
+            accounting_factory=factory,
+            daily_budget_usd=10,
+            per_job_max_tokens=20000,
+            clock=lambda: NOW,
+        )
+        assert call(independent, user="independent-accounting") == {"answer": "ok"}
+        with factory() as observer:
+            assert observer.scalar(select(AppUser.id).where(AppUser.id == user.id)) is None
+            assert observer.scalar(select(LlmCall.id).limit(1)) is not None
+        caller.rollback()

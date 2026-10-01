@@ -27,13 +27,14 @@ ORIGIN = {"Origin": "http://testserver"}
 def _proxy_hops(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(client_address, "hops_source", lambda: 1)  # one proxy in front
     client_address.reset_cache()
+    monkeypatch.setenv("TRUSTED_PROXY_NETWORKS", "127.0.0.1/32")
 
 
 @pytest.fixture
 def client(session: Session) -> Iterator[TestClient]:
     app = create_app()
     app.dependency_overrides[get_db] = lambda: session
-    with TestClient(app, follow_redirects=False) as c:
+    with TestClient(app, follow_redirects=False, client=("127.0.0.1", 50000)) as c:
         yield c
 
 

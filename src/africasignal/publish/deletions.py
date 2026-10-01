@@ -21,12 +21,14 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from africasignal.config import get_settings
 from africasignal.jobs import queue
 from africasignal.models import AccountDeletion
 from africasignal.operators import derive_key
@@ -70,6 +72,8 @@ def mirror_pending(session: Session, store: S3Store | None, now: datetime) -> in
     """Copy ledger entries that are not yet in object storage. Returns how many were copied.
     With no store configured nothing is copied and the entries stay pending."""
     if store is None:
+        if get_settings().env != "development":
+            raise RuntimeError("Deletion ledger mirroring requires object storage")
         return 0
     copied = 0
     for row in session.scalars(
@@ -89,16 +93,20 @@ def mirror_pending(session: Session, store: S3Store | None, now: datetime) -> in
 
 
 def stored_entries(store: S3Store) -> list[Entry]:
-    """Every entry in object storage. Objects that cannot be read are skipped with a warning."""
+    """Read every entry; an unreadable ledger prevents restore acceptance."""
     found: list[Entry] = []
     for key in store.list_keys(LEDGER_PREFIX):
         try:
             data = json.loads(store.get(key))
-            found.append(
-                Entry(str(data["email_hmac"]), datetime.fromisoformat(str(data["deleted_at"])))
-            )
-        except (ValueError, KeyError, TypeError):
-            log.warning("unreadable deletion ledger object %s", key)
+            email_hmac = data["email_hmac"]
+            deleted_at = datetime.fromisoformat(data["deleted_at"])
+            if not isinstance(email_hmac, str) or re.fullmatch(r"[0-9a-f]{64}", email_hmac) is None:
+                raise ValueError("invalid fingerprint")
+            if deleted_at.tzinfo is None:
+                raise ValueError("timestamp must include a timezone")
+            found.append(Entry(email_hmac, deleted_at))
+        except (ValueError, KeyError, TypeError) as exc:
+            raise ValueError(f"unreadable deletion ledger object {key}") from exc
     return found
 
 

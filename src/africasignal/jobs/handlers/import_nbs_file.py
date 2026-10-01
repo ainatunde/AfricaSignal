@@ -20,7 +20,7 @@ from datetime import date
 from africasignal.catalog import load_items
 from africasignal.evidence.capture import SourceNotApproved, record_document
 from africasignal.jobs.handlers import JobContext, on_dead, register
-from africasignal.jobs.queue import ClaimedJob
+from africasignal.jobs.queue import ClaimedJob, enqueue
 from africasignal.models import Source
 from africasignal.publish.situations import request_assessments
 from africasignal.sources.nbs import import_workbook, title_month
@@ -76,7 +76,13 @@ def import_nbs_file(ctx: JobContext) -> None:
     )
     queued = request_assessments(session, result.touched, document.id, result.superseded)
     if upload_key != document.storage_key:
-        store.delete(upload_key)  # the evidence copy lives under its own hash-based key
+        # Delete only after the import transaction commits; retries still need the upload.
+        enqueue(
+            session,
+            "discard_import_upload",
+            {"storage_key": upload_key},
+            dedupe_key=f"discard_import_upload:{ctx.job.id}",
+        )
     log.info(
         "imported %s: %d measurements, %d assessments queued",
         payload["original_url"],
@@ -98,3 +104,11 @@ def discard_upload(job: ClaimedJob) -> None:
         return  # same rule as the handler: only ever delete a flat name under uploads/
     get_store().delete(key)
     log.info("removed the upload of dead job %d", job.id, extra={"job_id": job.id})
+
+
+@register("discard_import_upload")
+def discard_import_upload(ctx: JobContext) -> None:
+    key = str(ctx.job.payload.get("storage_key", ""))
+    if not UPLOAD_KEY.fullmatch(key):
+        raise ValueError("storage_key must be a file name under uploads/")
+    get_store().delete(key)

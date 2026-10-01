@@ -114,12 +114,23 @@ def reapply_deletions() -> int:
         store = store_for_session(session)
         if store is None:
             print(
-                "warning: no object storage is configured, so only the deletion ledger in the "
-                "database was used; deletions made after the backup are lost",
+                "error: no object storage is configured; post-restore deletion replay "
+                "cannot verify deletions made after the backup",
                 file=sys.stderr,
             )
+            return 1
         try:
             removed = retention.reapply_deletions(session, datetime.now(UTC), store)
+            retention.run(session, datetime.now(UTC), store)
+            from sqlalchemy import text
+
+            session.execute(
+                text(
+                    "INSERT INTO setting (key, value) "
+                    "VALUES ('ops.restore_quarantined', 'false'::jsonb) "
+                    "ON CONFLICT (key) DO UPDATE SET value = 'false'::jsonb"
+                )
+            )
         except Exception as exc:  # the object store being unreachable must not look like success
             print(f"error: could not read the deletion ledger: {exc}", file=sys.stderr)
             return 1

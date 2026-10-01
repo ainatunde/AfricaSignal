@@ -172,7 +172,9 @@ def summary_of(current: queries.Current) -> dict[str, Any]:
         "topic": current.situation.topic,
         "item_code": current.situation.item_code,
         "place": queries.place_summary(current.place),
-        "headline": v.headline,
+        "headline": f"Last known: {v.headline}"
+        if current.effective_status == "stale"
+        else v.headline,
         "scope_label": v.scope_label,
         "period_label": v.period_label,
         "evidence_state": v.evidence_state,
@@ -263,7 +265,9 @@ def get_versions(slug: str, db: Db) -> dict[str, Any]:
             {
                 "version": v.version,
                 "status": queries.effective_status(v, now),
-                "headline": v.headline,
+                "headline": f"Last known: {v.headline}"
+                if queries.effective_status(v, now) == "stale"
+                else v.headline,
                 "scope_label": v.scope_label,
                 "period_label": v.period_label,
                 "evidence_state": v.evidence_state,

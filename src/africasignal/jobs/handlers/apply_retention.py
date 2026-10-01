@@ -7,7 +7,10 @@ import logging
 from dataclasses import asdict
 from datetime import UTC, datetime
 
+from sqlalchemy import select
+
 from africasignal.jobs.handlers import JobContext, register
+from africasignal.models import EvidenceDocument
 from africasignal.publish import deletions, retention
 from africasignal.storage import store_for_session
 
@@ -25,10 +28,23 @@ def apply_retention(ctx: JobContext) -> None:
 @register(deletions.MIRROR_JOB)
 def mirror_deletions(ctx: JobContext) -> None:
     store = store_for_session(ctx.session)
-    if store is None:
-        log.warning(
-            "deletion ledger not copied to object storage: no bucket is configured",
-            extra={"job_id": ctx.job.id},
-        )
-        return
     deletions.mirror_pending(ctx.session, store, datetime.now(UTC))
+
+
+@register("purge_expired_evidence")
+def purge_expired_evidence(ctx: JobContext) -> None:
+    key = str(ctx.job.payload.get("storage_key", ""))
+    if not key.startswith("evidence/"):
+        raise ValueError("only evidence objects may be purged")
+    # Content-addressed objects can be shared by another source with a longer permission.
+    live = ctx.session.scalar(
+        select(EvidenceDocument.id)
+        .where(EvidenceDocument.storage_key == key, EvidenceDocument.status != "expired")
+        .limit(1)
+    )
+    if live is not None:
+        return
+    store = store_for_session(ctx.session)
+    if store is None:
+        raise RuntimeError("Evidence purge requires object storage")
+    store.delete(key)

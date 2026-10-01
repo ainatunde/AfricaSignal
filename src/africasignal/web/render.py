@@ -67,13 +67,13 @@ def reader_headline(version: Any) -> str:
 def fmt_date(value: datetime | None) -> str:
     if value is None:
         return ""
-    return f"{value.astimezone(UTC):%-d %B %Y}"
+    return f"{value.astimezone(UTC).day} {value.astimezone(UTC):%B %Y}"
 
 
 def fmt_datetime(value: datetime | None) -> str:
     if value is None:
         return ""
-    return f"{value.astimezone(UTC):%-d %B %Y, %H:%M} UTC"
+    return f"{value.astimezone(UTC).day} {value.astimezone(UTC):%B %Y, %H:%M} UTC"
 
 
 def ucfirst(value: str) -> str:

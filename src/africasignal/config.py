@@ -59,6 +59,20 @@ class Settings(BaseSettings):
                 f"Missing required settings for ENV={self.env}: {', '.join(missing)}"
             )
 
+        key = self.secret_key.strip()
+        if (
+            len(key) < 32
+            or len(set(key)) < 8
+            or key.lower()
+            in {
+                "africasignal-development-only-secret-key",
+                "change-me-change-me-change-me-change-me",
+            }
+        ):
+            raise RuntimeError(
+                "SECRET_KEY must be a randomly generated secret of at least 32 characters"
+            )
+
     @property
     def effective_database_url(self) -> str:
         return self.database_url or DEV_DATABASE_URL

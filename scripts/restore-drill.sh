@@ -178,7 +178,7 @@ restored_counts="$WORKDIR/counts.restored"
 before_digests="$WORKDIR/digests.before"
 after_digests="$WORKDIR/digests.after"
 
-restore_args=(--target-url "$scratch_url" --recreate --overwrite-live)
+restore_args=(--target-url "$scratch_url" --recreate --overwrite-live --drill-only)
 [ "$verify_objects" -eq 0 ] || restore_args+=(--verify-objects "$verify_objects")
 
 if [ "$mode" = fresh ]; then

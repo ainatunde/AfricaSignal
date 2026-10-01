@@ -93,14 +93,14 @@ def test_the_worker_registers_the_publication_hook_exactly_once() -> None:
     assert out == "1"
 
 
-def test_a_fresh_install_needs_only_the_database_and_the_secret_key() -> None:
+def test_a_fresh_install_needs_only_the_database_and_the_secret_key(session: Session) -> None:
     out = run_python(
         "from africasignal.config import get_settings; from africasignal.web.app import create_app; "
         "from africasignal.jobs import handlers; "
         "get_settings(); create_app(); handlers.load_all(); print('ok')",
         ENV="production",
-        DATABASE_URL="postgresql+psycopg://u:p@localhost/x",
-        SECRET_KEY="k" * 32,
+        DATABASE_URL=os.environ["DATABASE_URL"],
+        SECRET_KEY="K6x2Pq9!A4b7C8d3E5f0G1h2J3k4L5m6",
     )
     assert out == "ok"
 

@@ -534,7 +534,9 @@ def test_the_import_job_runs_the_same_parser_on_the_uploaded_file(
     import_nbs_file(JobContext(session, ClaimedJob(job.id, job.kind, job.payload, 1, 2), "w1"))
     assert session.scalars(select(Series)).all()
     assert session.scalars(select(Measurement.id)).first() is not None
-    assert not store.exists(job.payload["storage_key"])  # the temporary upload is removed
+    assert store.exists(job.payload["storage_key"])  # still needed if this transaction rolls back
+    cleanup = session.scalars(select(Job).where(Job.kind == "discard_import_upload")).one()
+    assert cleanup.payload["storage_key"] == job.payload["storage_key"]
 
 
 @pytest.mark.parametrize(

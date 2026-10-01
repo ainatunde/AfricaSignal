@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from africasignal.evidence.capture import capture
+from africasignal.evidence.capture import capture, clear_processing_content
 from africasignal.evidence.origins import assign_origin
 from africasignal.jobs.handlers import JobContext, register
-from africasignal.models import Source
+from africasignal.models import EvidenceDocument, Source
 from africasignal.publish.claim_assessments import request_claim_assessments
 from africasignal.publish.situations import request_assessments
 from africasignal.sources.base import AdapterContext, get_adapter
@@ -35,6 +35,7 @@ def process_document(ctx: JobContext) -> None:
         datetime.fromisoformat(payload["published_at"]) if "published_at" in payload else None
     )
     store = get_store()
+    document: EvidenceDocument | None = None
     try:
         # capture refuses when the source has no approved permission to collect
         document = capture(
@@ -51,6 +52,10 @@ def process_document(ctx: JobContext) -> None:
     except Exception as exc:
         record_failure(session, source.id, f"{type(exc).__name__}: {exc}")
         raise
+    finally:
+        if document is not None:
+            clear_processing_content(document)
+    assert document is not None
     queued = request_assessments(session, result.touched, document.id, result.superseded)
     if result.claims:  # claims an adapter made by code (a tariff order) bear on T2 situations
         queued += request_claim_assessments(session, document.id)

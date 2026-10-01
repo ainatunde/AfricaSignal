@@ -349,7 +349,7 @@ def test_the_command_reapplies_deletions(
     assert count(session, AppUser) == 0
 
     monkeypatch.setattr("africasignal.storage.store_for_session", lambda s: None)
-    assert admin_cli.main(["reapply-deletions"]) == 0
+    assert admin_cli.main(["reapply-deletions"]) == 1
     assert "no object storage is configured" in capsys.readouterr().err
 
 
@@ -449,3 +449,43 @@ def test_the_export_of_feedback_includes_what_is_stored_with_it(session: Session
     (entry,) = export_account(session, user.id)["feedback"]  # type: ignore[index]
     assert entry["contact_email"] == "reader@example.org"
     assert entry["visitor_code"] == "visitor-code-0123456789"
+
+
+def test_expired_evidence_is_scrubbed_and_cleanup_is_durable(session, store):
+    from africasignal.evidence.capture import record_document
+    from africasignal.models import SourcePermission
+    from tests.integration.nbs_support import add_source
+
+    source = add_source(session)
+    permission = session.scalars(
+        select(SourcePermission).where(SourcePermission.source_id == source.id)
+    ).one()
+    permission.retention_days = 1
+    document = record_document(
+        session,
+        store,
+        source,
+        permission,
+        url="https://example.org/old",
+        content=b"<article>Expired source quotation</article>",
+        content_type="text/html",
+        now=NOW - 2 * DAY,
+    )
+    assert store.exists(document.storage_key)
+    assert retention.expire_evidence(session, NOW) == 1
+    assert document.status == "expired"
+    assert document.text_content is None and document.excerpt is None
+    cleanup = session.scalars(select(Job).where(Job.kind == "purge_expired_evidence")).one()
+    assert cleanup.payload["storage_key"] == document.storage_key
+    assert store.exists(document.storage_key)  # deletion must follow a committed invalidation
+    assert retention.expire_evidence(session, NOW) == 0
+
+
+def test_corrupt_deletion_ledger_refuses_restore_acceptance(store):
+    store.put(
+        "deletions/2026-10-01/bad.json",
+        b'{"email_hmac":"bad","deleted_at":"2026-10-01"}',
+        "application/json",
+    )
+    with pytest.raises(ValueError, match="unreadable deletion ledger"):
+        deletions.stored_entries(store)

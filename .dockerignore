@@ -1,0 +1,14 @@
+**/.venv*/
+.git/
+.env
+.env.*
+**/__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+remediate*.py
+remediation-*.txt
+audit-*.txt
+audit-*.json
+audit-probes.py
+audit-installed.txt

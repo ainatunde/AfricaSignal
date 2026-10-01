@@ -32,7 +32,7 @@ from urllib.parse import urljoin, urlparse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from africasignal.evidence.capture import excerpt
+from africasignal.evidence.capture import consume_processing_content, excerpt
 from africasignal.evidence.ocr import has_text_layer, ocr_pdf
 from africasignal.evidence.simhash import simhash
 from africasignal.evidence.text import extract_text
@@ -202,7 +202,7 @@ class NercAdapter:
             raise NercError(f"document {doc.id} has no source")
         _origin(ctx.session, doc, source.name)
 
-        content = ctx.store.get(doc.storage_key)
+        content = consume_processing_content(ctx.store, doc)
         doubtful: frozenset[str] = frozenset()
         typed = extract_text(content, doc.mime).text if has_text_layer(content) else None
         if typed is not None:

@@ -100,7 +100,9 @@ def test_unconfigured_mail_stays_pending_and_nothing_is_dropped(
     session: Session, operator: Operator, not_development: None
 ) -> None:
     user = add_user(session, "ada@example.com")
-    enqueue_email(session, "email_login", {"user_id": user.id, "link": "https://x/y"}, "login:1")
+    from tests.integration.test_outbox import login_row
+
+    login_row(session, user.id)
     assert dispatch_with_configured_provider(session, NOW) is None  # logs a warning, sends nothing
     row = session.scalars(select(Outbox)).one()
     assert (row.status, row.attempts) == ("pending", 0) and row.payload["link"]
@@ -155,17 +157,22 @@ def test_emails_built_at_send_time_use_the_current_address(
     session: Session, operator: Operator
 ) -> None:
     user = add_user(session, "ada@example.com", digest=True)
-    item = {
-        "slug": "price-pms",
-        "title": "T",
-        "headline": "H",
-        "scope_label": "L",
-        "change_summary": None,
-    }
+    from africasignal.publish.notify import item_snapshot
+    from tests.integration.email_support import add_place, add_situation, add_version
+
+    place = add_place(session, "NG-LA", "Lagos", "state")
+    situation = add_situation(session, "price-pms", place)
+    version = add_version(session, situation)
+    item = item_snapshot(situation, version)
     enqueue_email(
         session,
         "email_correction",
-        {"user_id": user.id, "notification_kind": "correction", "item": item},
+        {
+            "user_id": user.id,
+            "assessment_version_id": version.id,
+            "notification_kind": "correction",
+            "item": item,
+        },
         "correction:1",
     )
     enqueue_email(

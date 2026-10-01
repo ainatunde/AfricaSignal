@@ -8,8 +8,9 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from africasignal.models import Outbox, Setting
+from africasignal.models import LoginToken, Outbox, Setting
 from africasignal.publish.email import EmailSendError, FakeProvider
+from africasignal.publish.login_tokens import hash_token
 from africasignal.publish.outbox import MAX_ATTEMPTS, dispatch_pending, enqueue_email
 from tests.integration.email_support import NOW, add_user
 
@@ -17,6 +18,15 @@ LINK = "http://localhost:8000/signin/verify?token=secret-token"
 
 
 def login_row(session: Session, user_id: int, key: str = "login:1") -> Outbox:
+    if session.scalar(select(LoginToken.id).where(LoginToken.user_id == user_id)) is None:
+        session.add(
+            LoginToken(
+                user_id=user_id,
+                token_sha256=hash_token("secret-token"),
+                expires_at=NOW + timedelta(hours=1),
+            )
+        )
+        session.flush()
     enqueue_email(session, "email_login", {"user_id": user_id, "link": LINK}, key)
     return session.scalars(select(Outbox).where(Outbox.dedupe_key == key)).one()
 
@@ -143,10 +153,23 @@ def test_unverified_or_opted_out_recipients_get_no_notification_email(
         enqueue_email(session, kind, payload, f"{kind}:{user.id}")
     provider = FakeProvider()
     result = dispatch_pending(session, provider, NOW)
-    if kind == "email_digest":
-        assert (result.sent, result.dead) == (0, 2)
-    else:  # a correction email needs only a verified address
-        assert (result.sent, result.dead) == (1, 1)
-    assert [m.to for m in provider.sent] == (
-        ["o@example.com"] if kind == "email_correction" else []
-    )
+    assert (result.sent, result.dead) == (0, 2)
+    assert provider.sent == []
+
+
+@pytest.mark.parametrize("ended", ["expired", "used", "missing"])
+def test_login_delivery_rechecks_token(session: Session, ended: str) -> None:
+    user = add_user(session, "expired@example.com")
+    row = login_row(session, user.id)
+    token = session.scalars(select(LoginToken)).one()
+    if ended == "expired":
+        token.expires_at = NOW
+    elif ended == "used":
+        token.used_at = NOW
+    else:
+        session.delete(token)
+    session.flush()
+    provider = FakeProvider()
+    assert dispatch_pending(session, provider, NOW).dead == 1
+    assert provider.sent == []
+    assert "link" not in row.payload
