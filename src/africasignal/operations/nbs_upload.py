@@ -23,6 +23,7 @@ from africasignal.models import Operator, Source
 from africasignal.sources.nbs_workbook import NbsParseError, check_zip_size
 from africasignal.sources.permissions import current_permission
 from africasignal.storage import ObjectStore
+from africasignal.textclean import one_line
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 MAX_UPLOAD_BYTES = 20_000_000
@@ -113,7 +114,7 @@ def queue_upload(
     if vintage > now.date() or vintage.year < 2015:
         raise UploadError("the release date must be a real past date")
     url = check_original_url(original_url)
-    title = " ".join(title.split())
+    title = one_line(title)
     if not title or len(title) > MAX_TITLE:
         raise UploadError(
             "give the release title as NBS shows it, with the month, for example "

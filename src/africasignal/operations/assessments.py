@@ -9,17 +9,19 @@ import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from africasignal import audit
 from africasignal.models import AssessmentVersion, Operator, Situation
 from africasignal.publish import versions
 from africasignal.publish.invalidation import withdraw_situation
+from africasignal.textclean import one_line
 
 MIN_REASON = 8
 MAX_REASON = 200
-_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+# What the explanation check also refuses in text readers see: links, @ signs and markup.
+_NOT_PUBLIC = re.compile(r"https?:|www\.|@|[<>`*]|\[[^\]]*\]\(", re.IGNORECASE)
 STATUS_FILTERS = ("all", "published", "draft", "withheld", "stale", "withdrawn", "superseded")
 
 
@@ -36,11 +38,22 @@ class VersionRow:
 
 def clean_reason(reason: str) -> str:
     """One line, trimmed, of a sensible length."""
-    text = " ".join(_CONTROL.sub(" ", reason).split())
+    text = one_line(reason)
     if len(text) < MIN_REASON:
         raise AssessmentError(f"give a reason of at least {MIN_REASON} characters")
     if len(text) > MAX_REASON:
         raise AssessmentError(f"keep the reason under {MAX_REASON} characters")
+    return text
+
+
+def clean_public_reason(reason: str) -> str:
+    """A reason readers will see: ``clean_reason`` plus the rule that public text carries no
+    links, @ signs or markup (the same rule as the explanation check)."""
+    text = clean_reason(reason)
+    if _NOT_PUBLIC.search(text):
+        raise AssessmentError(
+            "readers will see this reason, so write it as plain text: no links, @ signs or markup"
+        )
     return text
 
 
@@ -122,6 +135,16 @@ def release_early(
     now = now or datetime.now(UTC)
     reason = clean_reason(reason)
     situation, version = _held_version(session, version_id)
+    newest = session.scalar(
+        select(func.max(AssessmentVersion.version)).where(
+            AssessmentVersion.situation_id == situation.id
+        )
+    )
+    if newest is not None and newest > version.version:
+        raise AssessmentError(
+            "a newer version of this situation exists, so publishing this one would replace it "
+            "with older figures; withhold this one and judge the newer version instead"
+        )
     held_until = version.hold_until.isoformat()  # type: ignore[union-attr]
     outcome = versions.release_version(session, version, now)
     audit.record(
@@ -153,7 +176,7 @@ def withdraw(
     """Replace the current version with a withdrawn one. The reason is shown to readers as
     "Withdrawn: <reason>", so it is written for them."""
     now = now or datetime.now(UTC)
-    reason = clean_reason(reason)
+    reason = clean_public_reason(reason)
     situation = session.scalars(
         select(Situation).where(Situation.id == situation_id).with_for_update()
     ).first()

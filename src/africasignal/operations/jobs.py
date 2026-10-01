@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from sqlalchemy import func, select, update
@@ -12,6 +13,9 @@ from africasignal.models import Job, Operator
 
 STATUSES = ("queued", "running", "failed", "dead", "done")
 ERROR_LIMIT = 600
+# A database error carries the statement and its parameter values (an email address, a token);
+# the page shows the cause only.
+_DB_DETAIL = re.compile(r"\s*\[(?:SQL|parameters):.*", re.DOTALL)
 
 
 class JobError(ValueError):
@@ -60,7 +64,7 @@ def dead_jobs(session: Session, limit: int = 100) -> list[Job]:
 
 
 def short_error(job: Job) -> str:
-    text = (job.last_error or "").strip()
+    text = _DB_DETAIL.sub("", job.last_error or "").strip()
     return text if len(text) <= ERROR_LIMIT else text[:ERROR_LIMIT] + "…"
 
 
@@ -72,7 +76,9 @@ def retry_job(session: Session, operator: Operator, job_id: int) -> Job:
         raise JobError("no such job")
     if job.status not in ("dead", "failed"):
         raise JobError(f"only a dead or failed job can be retried; this one is {job.status}")
-    before = {"status": job.status, "attempts": job.attempts, "last_error": short_error(job)}
+    # The audit log is read by every operator, so it keeps the kind of error, not its text.
+    error_type = (job.last_error or "").split(":", 1)[0][:80]
+    before = {"status": job.status, "attempts": job.attempts, "error_type": error_type}
     session.execute(
         update(Job)
         .where(Job.id == job.id)

@@ -249,7 +249,7 @@ def _source(session: Session, cache: dict[str, Source], key: str, now: datetime)
         src = Source(
             slug=key,
             name=d.name,
-            owner=d.owner,
+            owner=d.owner or d.name,  # a news outlet without an owner is not trusted (S-08)
             kind=d.kind,
             adapter=d.adapter,
             schedule_minutes=60,

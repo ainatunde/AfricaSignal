@@ -286,8 +286,14 @@ def upload_view(request: Request, auth: AdminOperator, db: DbSession) -> Respons
 
 @router.post("/nbs-upload")
 async def upload_submit(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    # The form parser spools a file to disk without a limit of its own, so the size must be
+    # declared (a chunked body has none) and within the cap before anything is read.
     declared = request.headers.get("content-length", "")
-    if declared.isdigit() and int(declared) > nbs_upload.MAX_UPLOAD_BYTES + 1_000_000:
+    if not (declared.isdigit() and declared.isascii()):
+        return _upload_page(
+            request, db, auth, 411, "The upload must state its size (a Content-Length header)."
+        )
+    if int(declared) > nbs_upload.MAX_UPLOAD_BYTES + 1_000_000:
         return _upload_page(
             request,
             db,
