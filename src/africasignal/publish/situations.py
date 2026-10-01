@@ -157,15 +157,19 @@ def source_is_trusted(session: Session, source: Source, now: datetime) -> bool:
     """Whether claims from ``source`` may corroborate or dispute anything (security review S-08).
 
     The source must be active with an approved permission to collect. A news outlet must also have
-    been under approval for ``MIN_OUTLET_AGE_DAYS``, counted from its first approval, so that a
-    batch of newly registered sites cannot earn an "independent report" badge by being approved
-    together. Official sources are vetted one by one and have no waiting period.
+    an owner on record (checked here as well as when approving, because a seed run or an older
+    approval can leave it blank) and have been under approval for ``MIN_OUTLET_AGE_DAYS``, counted
+    from its first approval, so that a batch of newly registered sites cannot earn an
+    "independent report" badge by being approved together. Official sources are vetted one by one
+    and have no waiting period.
     """
     permission = current_permission(session, source.id)
     if not source.active or permission is None or not permission.may_collect:
         return False
     if source.kind not in NEWS_SOURCE_KINDS:
         return True
+    if not (source.owner or "").strip():
+        return False  # the "same owner" rule has nothing to compare (S-08)
     first = session.scalar(
         select(func.min(SourcePermission.approved_at)).where(
             SourcePermission.source_id == source.id,
@@ -387,6 +391,21 @@ def _change_summary(previous: AssessmentVersion | None, new: PriceAssessment) ->
     return "Re-assessed after the inputs changed"
 
 
+def _range_review_decided(
+    session: Session, latest: AssessmentVersion, situation: Situation
+) -> bool:
+    """The latest version was withheld by R4 and the range check has since been decided. Rejecting
+    a value changes no input, so without this the withheld version would stay the latest forever;
+    this lets the same inputs be judged again."""
+    from africasignal.publish.versions import range_review_pending
+
+    return (
+        latest.status == "withheld"
+        and "R4" in latest.withheld_reasons
+        and not range_review_pending(session, latest, situation)
+    )
+
+
 def assess_situation(
     session: Session, situation_id: int, now: datetime, *, correction: str | None = None
 ) -> AssessmentOutcome:
@@ -415,7 +434,11 @@ def assess_situation(
         .order_by(AssessmentVersion.version.desc())
         .limit(1)
     ).first()
-    if latest is not None and latest.inputs_hash == computed.inputs_hash:
+    if (
+        latest is not None
+        and latest.inputs_hash == computed.inputs_hash
+        and not _range_review_decided(session, latest, situation)
+    ):
         latest.last_checked_at = now
         return AssessmentOutcome("unchanged", latest)
 
@@ -463,6 +486,7 @@ def request_assessments(
     touched: Iterable[tuple[str, int]],
     document_id: int,
     superseded: Iterable[int] = (),
+    dedupe_tag: str | None = None,
 ) -> list[int]:
     """Create missing situations for new or changed values and queue an ``assess_situation`` job
     for each. ``touched`` holds (item code, place id) pairs. A changed state value also changes
@@ -473,7 +497,9 @@ def request_assessments(
     re-assessment.
 
     Jobs are deduplicated per situation and source document, so importing the same document twice
-    queues nothing new.
+    queues nothing new. ``dedupe_tag`` replaces the document in that key for a re-assessment that
+    has another cause (an operator's decision on a held value), so the earlier job for the same
+    document does not swallow it.
     """
     from africasignal.publish.invalidation import plan_corrections, queue_correction
 
@@ -485,7 +511,7 @@ def request_assessments(
     corrections = plan_corrections(session, "measurement", superseded) if superseded else {}
     job_ids: list[int] = []
     for situation in ensure_situations(session, pairs):
-        key = f"assess_situation:{situation.id}:{document_id}"
+        key = f"assess_situation:{situation.id}:{dedupe_tag or document_id}"
         if situation.id in corrections:
             job_id = queue_correction(session, situation.id, corrections[situation.id], key)
         else:

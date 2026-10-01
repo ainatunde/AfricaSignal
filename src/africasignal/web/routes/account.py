@@ -172,6 +172,17 @@ def signout(request: Request, db: Db) -> Response:
     return response
 
 
+@router.post("/signout-everywhere")
+def signout_everywhere(request: Request, user: CurrentUser, db: Db) -> Response:
+    """End every session of this account, on every device, including this one."""
+    if user is not None:
+        login_tokens.revoke_all_sessions(db, user.id, now())
+        db.commit()
+    response = RedirectResponse("/", status_code=303)
+    clear_session_cookie(response)
+    return response
+
+
 # --- follows ------------------------------------------------------------------------------------
 
 

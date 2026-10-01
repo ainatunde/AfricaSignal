@@ -1,0 +1,42 @@
+{% extends "admin/base.html" %}
+{% block title %}Jobs{% endblock %}
+{% block content %}
+<h1>Jobs</h1>
+<p>
+  {% for s in statuses %}{{ s }}: <strong class="{{ 'bad' if s in ('dead','failed') and totals[s] else '' }}">{{ totals[s] }}</strong>{% if not loop.last %} · {% endif %}{% endfor %}
+</p>
+
+<h2>By kind</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Kind</th>{% for s in statuses %}<th scope="col">{{ s|capitalize }}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for k in kinds %}
+  <tr><th scope="row">{{ k.kind }}</th>{% for s in statuses %}<td class="{{ 'bad' if s in ('dead','failed') and k.counts[s] else '' }}">{{ k.counts[s] }}</td>{% endfor %}</tr>
+  {% else %}
+  <tr><td colspan="6">No jobs yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Dead and failed jobs</h2>
+<p class="muted">A dead job used up its attempts. Retrying gives it a fresh set. The newest 100 are shown.</p>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Job</th><th scope="col">Kind</th><th scope="col">Attempts</th><th scope="col">Finished</th><th scope="col">Error</th><th scope="col"></th></tr></thead>
+  <tbody>
+  {% for job, error in problems %}
+  <tr>
+    <td>#{{ job.id }}</td><td>{{ job.kind }}</td><td>{{ job.attempts }} of {{ job.max_attempts }}</td>
+    <td>{{ job.finished_at|when }}</td>
+    <td><pre>{{ error or '—' }}</pre></td>
+    <td><form method="post" action="/admin/jobs/{{ job.id }}/retry"><button type="submit">Retry</button></form></td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6">Nothing has failed.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

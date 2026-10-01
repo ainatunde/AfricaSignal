@@ -1,0 +1,83 @@
+{% extends "admin/base.html" %}
+{% block title %}Policy situations{% endblock %}
+{% block content %}
+<h1>Policy situations</h1>
+<p>A policy series follows one regulator's rate, such as a tariff or a regulated price. Each series gets one situation per place it covers. A situation shows nothing until a primary document (a regulator order or notice) for the series has been read; news reports alone never make a figure public. The series in <code>config/policies.yaml</code> are listed here but can only be changed in that file. Series you add here take effect at once: the language model is offered the code, the NERC reader accepts it and its situations are created.</p>
+
+{% for r in rows %}
+<h2>{{ r.series.title }}</h2>
+<p class="muted">
+  <code>{{ r.series.code }}</code> · {{ r.series.topic }} · {{ r.series.unit }} ·
+  {% if r.series.scope == "national" %}national{% else %}{{ r.series.state_codes|join(", ") }}{% endif %} ·
+  sources: {{ r.series.primary_sources|join(", ") }} · material change: {{ r.series.materiality_pct }}% ·
+  {% if r.from_file %}from policies.yaml{% else %}added in the console{% endif %}
+  {% if not r.active %} · <strong class="bad">retired</strong>{% endif %}
+</p>
+<p>Affected: {{ r.series.affected_groups }}</p>
+{% if not r.from_file %}
+<form method="post" action="/admin/policies/{{ r.row_id }}/{{ 'activate' if not r.active else 'retire' }}">
+  <button type="submit">{{ "Activate again" if not r.active else "Retire" }}</button>
+  {% if r.active %}<span class="muted">Retiring stops new work for the series. Situations already published stay; withdraw them on the <a href="/admin/assessments">Assessments</a> page.</span>{% endif %}
+</form>
+{% endif %}
+<div class="scroll"><table>
+  <thead><tr><th scope="col">Situation</th><th scope="col">Status</th><th scope="col">Evidence</th><th scope="col">Severity</th><th scope="col">Period</th></tr></thead>
+  <tbody>
+  {% for s in r.situations %}
+  <tr>
+    <td>{% if s.version and s.version.status == "published" %}<a href="/s/{{ s.situation.slug }}">{{ s.situation.slug }}</a>{% else %}{{ s.situation.slug }}{% endif %}</td>
+    {% if s.version %}
+    <td>{{ s.version.status }} (v{{ s.version.version }})</td><td>{{ s.version.evidence_state }}</td><td>{{ s.version.severity }}</td><td>{{ s.version.period_label }}</td>
+    {% else %}
+    <td colspan="4">Waiting for a primary document.</td>
+    {% endif %}
+  </tr>
+  {% else %}
+  <tr><td colspan="5">No situation yet: the places this series covers are not loaded, or it is retired.</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endfor %}
+
+<h2>Add a policy series</h2>
+<form method="post" action="/admin/policies" class="stack">
+  <label for="code">Code</label>
+  <input type="text" id="code" name="code" required maxlength="121" value="{{ form.code or '' }}" placeholder="electricity_tariff_band_a:abuja-electricity" aria-describedby="code-help">
+  <p id="code-help" class="muted">Lower case letters, digits and underscores, then optionally a colon and a short name. Electricity tariffs must start <code>electricity_tariff_band_a:</code> and end with the DisCo's short name, or the NERC reader cannot attach tariff figures to them. It cannot be changed later.</p>
+
+  <label for="title">Title</label>
+  <input type="text" id="title" name="title" required maxlength="120" value="{{ form.title or '' }}" placeholder="Electricity tariff, Band A, Abuja Electricity Distribution Company">
+
+  <label for="topic">Topic</label>
+  <select id="topic" name="topic">
+    {% for t in topics %}<option value="{{ t }}" {{ 'selected' if form.topic == t else '' }}>{{ t }}</option>{% endfor %}
+  </select>
+
+  <label for="unit">Unit</label>
+  <input type="text" id="unit" name="unit" required maxlength="30" value="{{ form.unit or '' }}" placeholder="NGN/kWh">
+
+  <fieldset>
+    <legend>Sources that publish it</legend>
+    {% for s in sources %}
+    <label><input type="checkbox" name="primary_sources" value="{{ s.slug }}" {{ 'checked' if form.primary_sources and s.slug in form.primary_sources else '' }}> {{ s.name }} <span class="muted">({{ s.slug }})</span></label>
+    {% endfor %}
+  </fieldset>
+
+  <fieldset>
+    <legend>Who is covered</legend>
+    <label><input type="radio" name="scope" value="national" {{ 'checked' if form.scope != 'states' else '' }}> The whole country</label>
+    <label><input type="radio" name="scope" value="states" {{ 'checked' if form.scope == 'states' else '' }}> Named states</label>
+    <label for="state_codes">State codes (when named states), for example NG-LA, NG-OG</label>
+    <input type="text" id="state_codes" name="state_codes" maxlength="400" value="{{ form.state_codes or '' }}">
+  </fieldset>
+
+  <label for="affected_groups">Who is affected</label>
+  <input type="text" id="affected_groups" name="affected_groups" required maxlength="200" value="{{ form.affected_groups or '' }}" placeholder="Band A customers of Abuja Electricity Distribution Company">
+  <p class="muted">Shown to readers as written. The model never fills this in.</p>
+
+  <label for="materiality_pct">Material change, percent</label>
+  <input type="text" id="materiality_pct" name="materiality_pct" inputmode="decimal" value="{{ form.materiality_pct or '5' }}">
+
+  <button type="submit">Add policy series</button>
+</form>
+{% endblock %}

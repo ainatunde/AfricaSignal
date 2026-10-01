@@ -29,7 +29,32 @@
   </div>
   {% endif %}
 
-  {% if summary %}
+  {% if summary and summary.kind == "policy" %}
+  <div class="callout" role="note">
+    <strong>What this is.</strong> This reports what an official document says
+    {% if summary.source %}({{ summary.source }}){% endif %}. It is not a measure of what
+    customers are being charged, and it may differ from a bill.
+  </div>
+  <section aria-labelledby="h-facts">
+    <h2 id="h-facts">Key facts</h2>
+    <table class="summary">
+      <thead><tr>
+        {% if summary.current %}<th scope="col">Rate in force ({{ summary.current.period or "date not stated" }})</th>
+        <th scope="col">Rate before</th>
+        <th scope="col">Change</th>{% endif %}
+        {% if summary.announced %}<th scope="col">Announced ({{ summary.announced.period }})</th>{% endif %}
+      </tr></thead>
+      <tbody><tr>
+        {% if summary.current %}
+        <td class="big">{{ summary.current|fact_value }}</td>
+        <td>{% if summary.previous %}{{ summary.previous|fact_value }}{% else %}Not available{% endif %}</td>
+        <td>{% if summary.change %}{{ summary.change|fact_value }}{% else %}Not available{% endif %}</td>
+        {% endif %}
+        {% if summary.announced %}<td{% if not summary.current %} class="big"{% endif %}>{{ summary.announced|fact_value }}</td>{% endif %}
+      </tr></tbody>
+    </table>
+  </section>
+  {% elif summary %}
   <section aria-labelledby="h-facts">
     <h2 id="h-facts">Key facts</h2>
     <table class="summary">

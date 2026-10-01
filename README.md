@@ -67,6 +67,21 @@ In the operator console, **Feedback** is the inbox (status and a resolution note
 Two numbers come from outside the app and are entered there by an admin: WhatsApp channel
 followers and the monthly infrastructure bill.
 
+The rest of the operator console is admin only and every change on it is audited:
+
+| Page | What it does |
+|---|---|
+| **Jobs** | Queue counts by status and kind, dead jobs with their error, and **Retry**. |
+| **Assessments** | Newest versions; the review hold (rule R7) where a first high-severity version can be withheld or published early (the publication policy still applies); withdrawing a situation with a reason readers will see. |
+| **Range checks** | NBS values outside 0.2x to 5x of last month's median: approve (stored, assessments queued) or reject, each with a note. Rule R4 withholds the situation until you decide. |
+| **Costs** | Model spend by day and purpose, today's budget, and outbox email counts. |
+| **NBS upload** | Manual upload of an NBS Excel file (or ZIP) with the address it came from; stored under a server-chosen name and imported by the `import_nbs_file` job. |
+| **Domains** | News domains GDELT linked to that no approved outlet covers: reject, or add as an inactive source with a named owner. |
+| **Channel posts** | Draft WhatsApp and X text for recent material changes. Drafts only: nothing is sent. |
+| **Alerts** | The `ops.alert.*` alerts: stale backup, failed restore drill, failing sources, dead jobs, model budget at 80 percent. |
+
+A news outlet cannot be approved until its owner is set (Sources page, security finding S-08).
+
 The email provider, sender, API key and public address are read from the console **Settings** page
 on every use (environment variables are the fallback). With no provider configured, development
 logs mail and every other environment leaves it waiting in the outbox. `console` (logs only) and
@@ -110,7 +125,9 @@ scripts/load_places.sh    # 1 country, 37 states, 774 LGAs and place aliases; sa
 
 Boundaries are geoBoundaries gbOpen for Nigeria (CC BY 4.0, attribution: William & Mary geoLab),
 pinned by SHA-256 in `src/africasignal/places/load.py`. Extra names live in
-`config/place_aliases.yaml`. Pass `--cities NG.txt` to add GeoNames cities of 50,000 or more.
+`config/place_aliases.yaml`. Pass `--geonames` to download GeoNames' Nigeria dump and add cities of 50,000 or more (or
+`--cities NG.txt` for a file you already have). In Docker:
+`docker compose --profile setup run --rm places` (see `docs/runbook.md`, section 9).
 
 ## Configuration
 

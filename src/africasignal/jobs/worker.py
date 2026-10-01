@@ -108,6 +108,13 @@ class Worker:
                 status = queue.fail(session, job.id, self.worker_id, f"{type(exc).__name__}: {exc}")
                 session.commit()
             log.info("job %s after failure", status, extra=ctx)
+            if status == "dead":
+                hook = handler_registry.DEAD_HOOKS.get(job.kind)
+                if hook is not None:
+                    try:
+                        hook(job)
+                    except Exception:  # tidying up must not hide the failure that was recorded
+                        log.exception("dead-job cleanup failed", extra=ctx)
         return True
 
     def run_forever(self) -> None:

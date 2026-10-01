@@ -224,6 +224,11 @@ def _wanted(
 # NBS workbooks are well under a megabyte unpacked; anything far past that is refused unread.
 MAX_UNPACKED_BYTES = 50_000_000
 MAX_ZIP_MEMBERS = 500
+# A sheet declares its own extent, and one cell at XFD1048576 makes ``iter_rows`` walk seventeen
+# billion empty cells. The real tables are under 100 rows by 20 columns.
+MAX_SHEETS = 50
+MAX_SHEET_ROWS = 5_000
+MAX_SHEET_COLUMNS = 200
 
 
 def check_zip_size(content: bytes) -> None:
@@ -250,6 +255,12 @@ def parse_workbook(content: bytes, publication: NbsPublication) -> ParsedWorkboo
         wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True, read_only=False)
     except Exception as exc:
         raise NbsParseError(f"not a readable Excel workbook: {exc}") from exc
+
+    if len(wb.worksheets) > MAX_SHEETS:
+        raise NbsParseError("the workbook has too many sheets and was not read")
+    for ws in wb.worksheets:
+        if (ws.max_row or 0) > MAX_SHEET_ROWS or (ws.max_column or 0) > MAX_SHEET_COLUMNS:
+            raise NbsParseError(f"sheet {ws.title!r} is far larger than a price table; not read")
 
     tables: list[ParsedTable] = []
     for ws in wb.worksheets:

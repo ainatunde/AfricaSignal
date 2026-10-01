@@ -1,0 +1,69 @@
+{% extends "admin/base.html" %}
+{% block title %}Assessments{% endblock %}
+{% block content %}
+<h1>Assessments</h1>
+{% if suspended %}<p class="error" role="status">Publication is suspended: nothing new is published. <a href="/admin/publication">Publication switch</a></p>{% endif %}
+<p><a href="/admin/range-checks">Range-check queue</a> holds NBS values waiting for review.</p>
+
+<h2>Review hold (first high-severity versions)</h2>
+<p class="muted">A first version with high severity waits 60 minutes before it is published. Withhold it if it looks wrong. Publishing early runs the publication policy again, so a rule that withholds it still applies.</p>
+<div class="scroll stack">
+<table>
+  <thead><tr><th scope="col">Situation</th><th scope="col">Headline</th><th scope="col">Published automatically</th><th scope="col">Action (a reason is needed)</th></tr></thead>
+  <tbody>
+  {% for r in held %}
+  <tr>
+    <td>{{ r.situation.title }}<br><span class="muted">{{ r.situation.slug }} · v{{ r.version.version }}</span></td>
+    <td>{{ r.version.headline }}<br><span class="muted">{{ r.version.severity }} · {{ r.version.evidence_state }}</span></td>
+    <td>{{ r.version.hold_until|when }}</td>
+    <td>
+      <form method="post" action="/admin/assessments/versions/{{ r.version.id }}/withhold">
+        <label for="w{{ r.version.id }}">Reason</label>
+        <input type="text" id="w{{ r.version.id }}" name="reason" required minlength="{{ min_reason }}" maxlength="{{ max_reason }}">
+        <button type="submit">Withhold</button>
+      </form>
+      <form method="post" action="/admin/assessments/versions/{{ r.version.id }}/release">
+        <label for="r{{ r.version.id }}">Reason</label>
+        <input type="text" id="r{{ r.version.id }}" name="reason" required minlength="{{ min_reason }}" maxlength="{{ max_reason }}">
+        <button type="submit">Publish now</button>
+      </form>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4">Nothing is waiting in the hold.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Newest versions</h2>
+<p>
+  {% for f in filters %}{% if f == status %}<strong>{{ f }}</strong>{% else %}<a href="/admin/assessments?status={{ f }}">{{ f }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}
+</p>
+<div class="scroll stack">
+<table>
+  <thead><tr><th scope="col">Situation</th><th scope="col">Version</th><th scope="col">Status</th><th scope="col">Headline</th><th scope="col">Withdraw (readers see the reason)</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td><a href="/s/{{ r.situation.slug }}">{{ r.situation.title }}</a><br><span class="muted">{{ r.situation.slug }}</span></td>
+    <td>v{{ r.version.version }}{% if r.is_current %}<br><span class="ok">current</span>{% endif %}<br><span class="muted">{{ r.version.created_at|when }}</span></td>
+    <td>{{ r.version.status }}{% if r.version.withheld_reasons %}<br><span class="warn">{{ r.version.withheld_reasons|join(', ') }}</span>{% endif %}</td>
+    <td>{{ r.version.headline }}<br><span class="muted">{{ r.version.severity }} · {{ r.version.evidence_state }}</span></td>
+    <td>
+      {% if r.is_current and r.version.status in ('published', 'stale') %}
+      <form method="post" action="/admin/assessments/situations/{{ r.situation.id }}/withdraw">
+        <label for="x{{ r.version.id }}">Reason</label>
+        <input type="text" id="x{{ r.version.id }}" name="reason" required minlength="{{ min_reason }}" maxlength="{{ max_reason }}">
+        <button type="submit">Withdraw</button>
+      </form>
+      {% endif %}
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5">No versions.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

@@ -117,6 +117,7 @@ case "$verify_objects" in '' | *[!0-9]*) die "--verify-objects needs a number" ;
 require_cmd psql pg_dump pg_restore sha256sum awk
 umask 077
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/africasignal-drill.XXXXXX")"
+pgpass_init # database passwords go in a private file, not on the command line
 
 src="$(libpq_url "$source_url")"
 src_db="$(url_dbname "$src")"

@@ -32,13 +32,13 @@ from urllib.parse import urljoin, urlparse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from africasignal.catalog import load_policies
 from africasignal.evidence.ocr import has_text_layer, ocr_pdf
 from africasignal.evidence.simhash import simhash
 from africasignal.evidence.text import extract_text
 from africasignal.extract.jobs import enqueue_extraction
 from africasignal.models import Claim, EvidenceDocument, ReportingOrigin, Source
 from africasignal.net.fetch import FetchResult, fetch_document
+from africasignal.policy_series import series_codes
 from africasignal.sources.base import (
     AdapterContext,
     DiscoveredItem,
@@ -220,8 +220,10 @@ class NercAdapter:
             result.notes.append("not a DisCo tariff order: no tariff claims made by code")
             return result
         series = TARIFF_SERIES_PREFIX + DISCO_SLUGS[code]
-        if series not in {s.code for s in load_policies().series}:
-            result.notes.append(f"{code}: no policy series {series} in policies.yaml; skipped")
+        if series not in series_codes(ctx.session):
+            result.notes.append(
+                f"{code}: no policy series {series} (add it under Policies in the console); skipped"
+            )
             return result
         already = ctx.session.scalar(
             select(Claim.id)

@@ -27,9 +27,15 @@ Design choices worth knowing:
   failures never empties the store.
 - **A dump is checked before upload** (`pg_restore --list` must read it) and **after restore** (schema
   version present, key tables present, row counts printed).
-- Dumps hold email addresses. Keep the backup bucket private. Set `BACKUP_PASSPHRASE_FILE` (or
-  `BACKUP_PASSPHRASE`) to also encrypt them (AES-256). **If you encrypt, store the passphrase somewhere
-  other than the server, or the backups are useless when the server is lost.**
+- Dumps hold email addresses. Keep the backup bucket private. Outside development (`ENV` is anything
+  but `development`) the backup **refuses to run without** `BACKUP_PASSPHRASE_FILE` (or
+  `BACKUP_PASSPHRASE`), which encrypts the dump (AES-256). **Store the passphrase somewhere other than
+  the server, or the backups are useless when the server is lost.**
+- The database password is passed to `pg_dump`, `pg_restore` and `psql` through a private pgpass file
+  in the script's temporary directory, never on their command lines.
+- Keep the expected checksum somewhere the backup job cannot write when you can (for example in your
+  password manager after each drill): the `.sha256` file beside a dump detects damage but not someone
+  with write access to the bucket replacing both files.
 
 ## 2. One-time setup
 
@@ -51,7 +57,7 @@ Design choices worth knowing:
    | `ENV` | `staging` or `production`; also the default bucket prefix `africasignal/<ENV>/` |
    | `DATABASE_URL`, `SECRET_KEY` | the same values the app uses. The backup job reads the console settings from that database, and decrypts the saved secrets with `SECRET_KEY` |
    | `BACKUP_AT_UTC` | optional; `HH:MM`, default `02:30` |
-   | `BACKUP_PASSPHRASE` or `BACKUP_PASSPHRASE_FILE` | optional; encrypts dumps |
+   | `BACKUP_PASSPHRASE` or `BACKUP_PASSPHRASE_FILE` | required unless `ENV=development`; encrypts dumps |
    | `BACKUP_HEARTBEAT_URL` | the ping URL from step 2 |
 
    Where a value is set, the console wins over `.env`: for each of `backup_s3_endpoint_url`,
@@ -89,7 +95,7 @@ bucket settings to back up to a local directory, and `OPS_USE_CONSOLE_SETTINGS=0
 ## 4. Restore
 
 `scripts/restore.sh` never has a default target and refuses to touch the live database unless told
-twice (`--overwrite-live`, and always so when `ENV=production`). It verifies the checksum, decrypts,
+twice (`--overwrite-live`, and always so when `ENV=production`). It verifies the checksum (a dump with no `.sha256` is refused unless you pass `--no-verify`), decrypts,
 restores in one transaction (all or nothing), then checks the schema version and table contents.
 
 Run it inside the backup container so it has the right tools and credentials:
@@ -287,7 +293,8 @@ result in the app database (settings `ops.backup_status` and `ops.restore_drill_
 | `backup_stale` | The last successful backup is older than **Settings > Backup storage > Alert when the last backup is older than** (default 36 hours), or, outside development, none has been recorded in that long since the job first ran. | A backup succeeds. |
 | `restore_drill_failed` | The last restore drill did not pass (the alert text says why). | A later drill passes. |
 
-Where to see them: the console's **Audit log** has an `alert.opened` row (operator "system") when an
+Where to see them: the console's **Alerts** page (admin only) lists every alert, open ones first, with
+the last backup and restore-drill results. The **Audit log** also has an `alert.opened` row (operator "system") when an
 alert opens and `alert.resolved` when it clears, and the app logs an `ALERT ... still open` error line
 every hour while it stays open. The current state is the `ops.alert.backup_stale` and
 `ops.alert.restore_drill_failed` rows of the `setting` table:
@@ -302,27 +309,27 @@ Until one does, watch the log or the audit log, and keep the external heartbeat 
 the thing that actually wakes a person. A backup job that is down and cannot even record its own
 failure shows up here as `backup_stale` once the limit passes.
 
-### 7.2 Uptime and other alerts (manual)
+### 7.2 Source, job and budget alerts (automated)
 
-The plan (AS-041) asks for an uptime check on `/healthz` and email alerts when a source is failing,
-jobs are dead, or the LLM budget is 80 % spent. **Those are not automated yet** (only the backup alerts
-above are). Until they exist, do the following.
+The scheduler runs `check_health` every 15 minutes. It keeps three more alerts in the same
+`ops.alert.*` rows, audit rows and log lines as 7.1, so they show on the **Alerts** page too:
+
+| Alert | When | Clears when |
+|---|---|---|
+| `sources_failing` | An active source is marked failing (the fetch job marks it after repeated failures). The alert lists up to 10 sources with their last error. | No active source is failing. |
+| `jobs_dead` | A job used up its attempts and died within the last 24 hours. The alert counts them by kind; payloads are never copied. | None died in the last 24 hours, or they were retried on the **Jobs** page. |
+| `llm_budget_80` | Today's model spend (Lagos day) is at 80 percent of the **Daily budget (USD)** setting or more. | The next budget day starts, or the limit is raised. |
+
+Nothing is sent to anyone (see 7.1); look at the Alerts page or the audit log.
+
+### 7.3 Uptime (manual)
+
+The plan (AS-041) also asks for an uptime check on `/healthz`. The app cannot check itself being
+down, so use an external monitor.
 
 - **Uptime:** point an external monitor (UptimeRobot, Better Stack or similar) at
   `https://<domain>/healthz` with a 1-minute interval and email alerts. The body must contain
   `"ok": true` (or `"ok":true` depending on the JSON encoder).
-- **By hand, daily** (or from a cron job that mails the output), run against the database:
-
-  ```sql
-  -- sources that are failing
-  SELECT slug, health, consecutive_failures, last_success_at, last_error FROM source WHERE active AND health = 'failing';
-  -- dead jobs (should be 0)
-  SELECT kind, count(*), max(last_error) FROM job WHERE status = 'dead' GROUP BY kind;
-  -- LLM spend today against LLM_DAILY_BUDGET_USD (default 10; alert at 8)
-  SELECT coalesce(sum(cost_usd), 0) AS spent_today_usd FROM llm_call WHERE ts >= date_trunc('day', now() AT TIME ZONE 'UTC');
-  ```
-
-  `docker compose exec db psql -U africasignal africasignal` opens a prompt.
 
 ## 8. Console access and client addresses
 
@@ -345,3 +352,20 @@ everyone after 50 failures on one account in 15 minutes (refused attempts are no
 never gets longer by being tried). To let the operator in at once:
 `python -m africasignal.admin unlock-operator --email ...`. Failures and lockouts are in the audit log
 (`operator.sign_in_failed`, `operator.sign_in_locked`).
+
+## 9. Places (first deployment)
+
+A fresh deployment has no places: situations, the place picker and claim extraction all need them.
+After the first `docker compose up` (migrations run in the `migrate` service), load them once:
+
+```sh
+docker compose --profile setup run --rm places
+```
+
+This loads the country, the 37 states, the 774 LGAs (geoBoundaries gbOpen, CC BY 4.0, pinned by
+SHA-256), the place aliases in `config/place_aliases.yaml`, and the GeoNames cities of 50,000 people
+or more (CC BY 4.0; the dump is not pinned because GeoNames updates it daily). It needs outbound
+access to `media.githubusercontent.com` and `download.geonames.org`, and is safe to re-run, for
+example after adding an alias. If the boundary hash check fails, upstream has republished the files:
+read the new files, then update `BOUNDARY_FILES` in `src/africasignal/places/load.py`. Outside
+Docker: `scripts/load_places.sh --geonames`.

@@ -425,3 +425,83 @@ def test_unknown_urls_get_an_html_page_but_the_api_keeps_json(client: TestClient
     assert page.status_code == 404 and "We could not find that page" in page.text
     api = client.get("/v1/nothing")
     assert api.status_code == 404 and api.headers["content-type"] == "application/json"
+
+
+def _policy_facts(
+    *, with_previous: bool = True, announced: bool = False
+) -> list[dict[str, object]]:
+    def fact(label: str, value: float, unit: str, period: str) -> dict[str, object]:
+        return {
+            "label": label,
+            "value": value,
+            "unit": unit,
+            "period": period,
+            "source_label": "NERC order",
+        }
+
+    facts = [fact("Current rate", 209.5, "NGN/kWh", "from 3 June 2024")]
+    if with_previous:
+        facts += [
+            fact("Previous rate", 68.0, "NGN/kWh", "from 1 March 2024"),
+            fact("Increase in rate", 141.5, "NGN/kWh", "from 3 June 2024"),
+            fact("Change in rate", 208.1, "%", "from 3 June 2024"),
+        ]
+    if announced:
+        facts.append(fact("Announced rate", 230.0, "NGN/kWh", "from 1 January 2025"))
+    return facts
+
+
+def _as_policy(version: object, facts: list[dict[str, object]]) -> None:
+    version.template, version.facts = "T2_policy_change", facts  # type: ignore[attr-defined]
+    version.evidence_state = "reported"  # type: ignore[attr-defined]
+
+
+def test_a_policy_page_shows_the_rates_and_says_it_is_an_official_statement(
+    session: Session, store: S3Store, source: Source, client: TestClient
+) -> None:
+    (_, version) = seed_petrol(session, store, source)["NG-LA"]
+    _as_policy(version, _policy_facts(announced=True))
+    session.flush()
+    page = client.get("/s/price-pms_litre-ng-la").text
+    plain = text_of(page)
+    assert "Official statement" in plain and "badge-reported" in page
+    assert "reports what an official document says (NERC order)" in plain
+    assert "not a measure of what customers are being charged" in plain
+    assert "Rate in force (from 3 June 2024)" in plain and "₦209.50 per kWh" in plain
+    assert "Rate before" in plain and "₦68.00 per kWh" in plain and "+208.1%" in plain
+    assert "Announced (from 1 January 2025)" in plain and "₦230.00 per kWh" in plain
+    assert "Change vs last month" not in plain  # that is the price layout, not this one
+
+
+def test_a_policy_page_without_an_earlier_rate_says_so(
+    session: Session, store: S3Store, source: Source, client: TestClient
+) -> None:
+    (_, version) = seed_petrol(session, store, source)["NG-LA"]
+    _as_policy(version, _policy_facts(with_previous=False))
+    session.flush()
+    plain = text_of(client.get("/s/price-pms_litre-ng-la").text)
+    assert "₦209.50 per kWh" in plain and "Rate before Change" in plain
+    assert plain.count("Not available") == 2
+
+
+def test_a_policy_page_with_only_an_announced_rate_shows_that(
+    session: Session, store: S3Store, source: Source, client: TestClient
+) -> None:
+    (_, version) = seed_petrol(session, store, source)["NG-LA"]
+    facts = [f for f in _policy_facts(announced=True) if f["label"] == "Announced rate"]
+    _as_policy(version, facts)
+    session.flush()
+    plain = text_of(client.get("/s/price-pms_litre-ng-la").text)
+    assert "Announced (from 1 January 2025)" in plain and "₦230.00 per kWh" in plain
+    assert "Rate in force" not in plain
+
+
+def test_a_policy_page_with_insufficient_evidence_shows_no_rates(
+    session: Session, store: S3Store, source: Source, client: TestClient
+) -> None:
+    (_, version) = seed_petrol(session, store, source)["NG-LA"]
+    _as_policy(version, _policy_facts())
+    version.evidence_state, version.severity = "insufficient", "none"
+    session.flush()
+    plain = text_of(client.get("/s/price-pms_litre-ng-la").text)
+    assert "Not enough evidence" in plain and "Key facts" not in plain

@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from africasignal import audit
 from africasignal.models import Operator, Source, SourcePermission
 from africasignal.sources.permissions import current_permission
+from africasignal.textclean import one_line
 
 # How long an approval stands before the console asks for a fresh review of the terms.
 REVIEW_INTERVAL = timedelta(days=365)
@@ -74,6 +75,17 @@ def validate_permission(data: PermissionInput) -> None:
         raise ConsoleError("state the rights basis before allowing collection")
 
 
+def require_owner_for_outlet(source: Source, may_collect: bool) -> None:
+    """Rule from security finding S-08: corroboration treats outlets with the same owner as one
+    voice, so a news outlet whose owner is unknown could be counted as independent of its owner's
+    other outlets. Approving collection from a news outlet therefore needs the owner on record."""
+    if may_collect and source.kind == "news_outlet" and not (source.owner or "").strip():
+        raise ConsoleError(
+            "set the owner of this news outlet before approving it: the company or group "
+            "behind it, so that outlets with the same owner count as one voice"
+        )
+
+
 def _lock_source(session: Session, source_id: int) -> Source:
     source = session.scalars(select(Source).where(Source.id == source_id).with_for_update()).first()
     if source is None:
@@ -109,6 +121,7 @@ def approve_permission(
         raise ConsoleError("only the newest version can be approved")
     if not terms_reviewed:
         raise ConsoleError("confirm that you have reviewed the source's terms")
+    require_owner_for_outlet(source, permission.may_collect)
     validate_permission(
         PermissionInput(
             **{f: getattr(permission, f) for f in PERMISSION_FIELDS},
@@ -148,6 +161,7 @@ def publish_permission_version(
     validate_permission(data)
     if data.may_collect and not terms_reviewed:
         raise ConsoleError("confirm that you have reviewed the source's terms")
+    require_owner_for_outlet(source, data.may_collect)
     before = permission_snapshot(current_permission(session, source.id))
     newest = session.scalar(
         select(func.max(SourcePermission.version)).where(SourcePermission.source_id == source.id)
@@ -197,5 +211,36 @@ def set_source_active(session: Session, operator: Operator, source_id: int, acti
         source.id,
         before={"slug": source.slug, "active": not active},
         after={"slug": source.slug, "active": active},
+    )
+    return source
+
+
+def set_source_owner(session: Session, operator: Operator, source_id: int, owner: str) -> Source:
+    """Record who owns a source (the company or group behind it). Needed before a news outlet can
+    be approved (S-08); it cannot be blanked while the outlet may be collected from."""
+    source = _lock_source(session, source_id)
+    owner = one_line(owner)
+    if len(owner) > 200:
+        raise ConsoleError("the owner must be 200 characters or fewer")
+    if not owner:
+        in_force = current_permission(session, source.id)
+        if source.kind == "news_outlet" and in_force is not None and in_force.may_collect:
+            raise ConsoleError(
+                "this outlet is approved for collection, so its owner must stay on record; "
+                "withdraw the permission first"
+            )
+    if (source.owner or "") == owner:
+        raise ConsoleError("the owner is already set to that")
+    before = source.owner
+    source.owner = owner or None
+    session.flush()
+    audit.record(
+        session,
+        operator,
+        "source.set_owner",
+        "source",
+        source.id,
+        before={"slug": source.slug, "owner": before},
+        after={"slug": source.slug, "owner": source.owner},
     )
     return source

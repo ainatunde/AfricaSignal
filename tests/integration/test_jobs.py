@@ -478,3 +478,44 @@ def test_held_versions_are_checked_every_minute(
     assert _kinds(factory) == ["release_held_versions"]
     _tick(factory, t.replace(minute=4))
     assert _kinds(factory) == ["release_held_versions"] * 2
+
+
+def test_check_health_is_enqueued_every_fifteen_minutes(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _register(monkeypatch, "check_health", lambda ctx: None)
+    t = datetime(2026, 10, 7, 10, 3, 10, tzinfo=UTC)
+    _tick(factory, t)
+    _tick(factory, t.replace(minute=10))
+    assert _kinds(factory) == ["check_health"]
+    _tick(factory, t.replace(minute=20))
+    assert _kinds(factory) == ["check_health", "check_health"]
+
+
+def test_load_all_imports_every_handler_and_source_module() -> None:
+    """A new handler file is picked up without being listed anywhere (run in a fresh interpreter
+    because the other tests here swap out the registry)."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import africasignal
+
+    root = Path(africasignal.__file__).parent
+    expected = {
+        f"africasignal.{package}.{path.stem}"
+        for package in ("jobs.handlers", "sources")
+        for path in (root / package.replace(".", "/")).glob("*.py")
+        if not path.stem.startswith("_")
+    }
+    code = (
+        "import sys; from africasignal.jobs.handlers import HANDLERS, load_all; load_all();"
+        "print('\\n'.join(sorted(m for m in sys.modules if m.startswith('africasignal.'))));"
+        "print('--'); print('\\n'.join(sorted(HANDLERS)))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code], capture_output=True, text=True, check=True
+    ).stdout
+    modules, kinds = (part.split() for part in out.split("--\n"))
+    assert expected <= set(modules)
+    assert {"fetch_source", "check_health", "check_backups", "gdelt_poll"} <= set(kinds)

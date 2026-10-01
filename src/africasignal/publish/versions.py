@@ -87,6 +87,32 @@ def _assessed_period(
     return (row[0], row[1]) if row else (None, None)
 
 
+def range_review_pending(
+    session: Session, version: AssessmentVersion, situation: Situation
+) -> bool:
+    """Rule R4: a value for the situation's place and item, in the assessed month or later, is
+    waiting in the range-check queue."""
+    if version.template != "T1_price_change":
+        return False
+    item_code, period = _assessed_period(session, version)
+    if item_code is None or period is None:
+        return False
+    return (
+        session.scalar(
+            select(func.count())
+            .select_from(MeasurementReview)
+            .join(Series, Series.id == MeasurementReview.series_id)
+            .where(
+                Series.item_code == item_code,
+                MeasurementReview.place_id == situation.place_id,
+                MeasurementReview.status == "pending",
+                MeasurementReview.period_start >= period,
+            )
+        )
+        or 0
+    ) > 0
+
+
 def build_draft(session: Session, version: AssessmentVersion, now: datetime) -> VersionDraft:
     """Everything the policy needs to judge ``version``."""
     situation = session.get(Situation, version.situation_id)
@@ -130,24 +156,7 @@ def build_draft(session: Session, version: AssessmentVersion, now: datetime) -> 
         or 0
     ) > 0
 
-    range_pending = False
-    if version.template == "T1_price_change":
-        item_code, period = _assessed_period(session, version)
-        if item_code is not None and period is not None:
-            range_pending = (
-                session.scalar(
-                    select(func.count())
-                    .select_from(MeasurementReview)
-                    .join(Series, Series.id == MeasurementReview.series_id)
-                    .where(
-                        Series.item_code == item_code,
-                        MeasurementReview.place_id == situation.place_id,
-                        MeasurementReview.status == "pending",
-                        MeasurementReview.period_start >= period,
-                    )
-                )
-                or 0
-            ) > 0
+    range_pending = range_review_pending(session, version, situation)
 
     has_primary = True  # only T2 can lack one (R5)
     if version.template == "T2_policy_change":
@@ -291,19 +300,49 @@ def release_held(session: Session, now: datetime) -> list[int]:
     ).all()
     released: list[int] = []
     for version in due:
-        situation = session.get(Situation, version.situation_id)
-        assert situation is not None
-        draft = build_draft(session, version, now)
-        decision = decide(VersionDraft(**{**draft.__dict__, "ever_published": True}))
-        if decision.status == "published":
-            _publish(session, situation, version, now)
+        if release_version(session, version, now) == "published":
             released.append(version.id)
-        else:
-            version.status = "withheld"
-            version.withheld_reasons = list(decision.reasons)
-            version.hold_until = None
     session.flush()
     return released
+
+
+NEWER_VERSION_REASON = "a newer version of this situation exists"
+
+
+def has_newer_version(session: Session, version: AssessmentVersion) -> bool:
+    """True when the situation has a later version in any state. Publishing this one would then
+    put older figures in place of whatever the later version says (or is still deciding)."""
+    newest = session.scalar(
+        select(func.max(AssessmentVersion.version)).where(
+            AssessmentVersion.situation_id == version.situation_id
+        )
+    )
+    return newest is not None and newest > version.version
+
+
+def release_version(session: Session, version: AssessmentVersion, now: datetime) -> str:
+    """Judge a held draft as if something had been published already and act on it: ``published``,
+    or ``withheld`` when a withholding rule applies now or a newer version exists. Used when the
+    hold ends and when an operator releases a version early; the rules apply either way, so an
+    operator cannot publish what the policy would withhold."""
+    situation = session.get(Situation, version.situation_id)
+    assert situation is not None
+    if has_newer_version(session, version):
+        version.status = "withheld"
+        version.withheld_reasons = [NEWER_VERSION_REASON]
+        version.hold_until = None
+        session.flush()
+        return "withheld"
+    draft = build_draft(session, version, now)
+    decision = decide(VersionDraft(**{**draft.__dict__, "ever_published": True}))
+    if decision.status == "published":
+        _publish(session, situation, version, now)
+        return "published"
+    version.status = "withheld"
+    version.withheld_reasons = list(decision.reasons)
+    version.hold_until = None
+    session.flush()
+    return "withheld"
 
 
 def withhold_version(session: Session, version_id: int, reasons: list[str]) -> bool:

@@ -1,6 +1,8 @@
 """Place loading and resolution against a small fixture cut from the real boundaries."""
 
+import io
 import json
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -10,11 +12,14 @@ import yaml
 from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from africasignal.net.fetch import FetchResult
+from africasignal.places import load as places_load
 from africasignal.places.load import (
     BOUNDARY_FILES,
     PlacesDataError,
     add_alias,
     download_boundaries,
+    download_geonames,
     load_aliases,
     load_boundaries,
     load_cities,
@@ -261,6 +266,50 @@ def test_cities_need_population_and_populated_place_class(db: Session) -> None:
     assert tuple(row) == ("city:1001", 313196, "NG-LA-ikeja")
     assert load_cities(db, GEONAMES) == 1  # idempotent
     assert _scalar(db, "SELECT count(*) FROM place WHERE kind = 'city'") == 1
+
+
+# --- GeoNames download ------------------------------------------------------------------------
+
+
+def _zip_of(name: str, text_: str) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(name, text_)
+    return buffer.getvalue()
+
+
+def test_geonames_is_downloaded_unzipped_and_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+
+    def fake(url: str) -> FetchResult:
+        calls.append(url)
+        return FetchResult(url=url, status_code=200, content=_zip_of("NG.txt", GEONAMES))
+
+    monkeypatch.setattr(places_load, "_fetch_politely", fake)
+    assert download_geonames(tmp_path) == GEONAMES
+    assert (tmp_path / "NG.txt").read_text() == GEONAMES
+    assert download_geonames(tmp_path) == GEONAMES  # second run reads the cache
+    assert calls == [places_load.GEONAMES_URL]
+
+
+def test_a_failed_or_wrong_geonames_download_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        places_load, "_fetch_politely", lambda url: FetchResult(url=url, status_code=503)
+    )
+    with pytest.raises(PlacesDataError, match="could not download"):
+        download_geonames(tmp_path)
+    monkeypatch.setattr(
+        places_load,
+        "_fetch_politely",
+        lambda url: FetchResult(url=url, status_code=200, content=_zip_of("other.txt", "x")),
+    )
+    with pytest.raises(PlacesDataError, match="not a GeoNames NG.zip"):
+        download_geonames(tmp_path)
+    assert not (tmp_path / "NG.txt").exists()
 
 
 # --- boundary download check ------------------------------------------------------------------

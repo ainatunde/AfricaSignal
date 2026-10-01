@@ -29,7 +29,9 @@ from africasignal.publish.outbox import enqueue_email
 log = logging.getLogger("africasignal.login")
 
 LOGIN_TOKEN_TTL = timedelta(minutes=15)
-SESSION_TTL = timedelta(days=30)
+SESSION_TTL = timedelta(days=30)  # the longest a session lasts, however often it is used
+IDLE_LIMIT = timedelta(days=7)  # a session not used for this long ends (security review S-17)
+TOUCH_INTERVAL = timedelta(hours=1)  # how often "last used" is written, so reads stay cheap
 MAX_LOGIN_REQUESTS_PER_HOUR = 5  # per email address; the web layer also limits per client
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -131,23 +133,49 @@ def consume_login_token(session: Session, raw: str, now: datetime) -> SignedIn |
 def _open_session(session: Session, user_id: int, now: datetime) -> SignedIn:
     raw = secrets.token_urlsafe(32)
     expires = now + SESSION_TTL
-    session.add(UserSession(user_id=user_id, token_sha256=hash_token(raw), expires_at=expires))
+    session.add(
+        UserSession(
+            user_id=user_id, token_sha256=hash_token(raw), expires_at=expires, last_seen_at=now
+        )
+    )
     session.flush()
     return SignedIn(user_id, raw, expires)
 
 
 def user_for_session(session: Session, raw: str, now: datetime) -> AppUser | None:
-    """The signed-in user for a session cookie, or ``None``."""
-    return session.scalars(
-        select(AppUser)
+    """The signed-in user for a session cookie, or ``None``. A session ends 30 days after sign-in
+    or after 7 days without use, whichever comes first; using it moves the idle clock on."""
+    last_used = func.coalesce(UserSession.last_seen_at, UserSession.created_at)
+    found = session.execute(
+        select(AppUser, UserSession.id, last_used)
         .join(UserSession, UserSession.user_id == AppUser.id)
         .where(
             UserSession.token_sha256 == hash_token(raw),
             UserSession.revoked_at.is_(None),
             UserSession.expires_at > now,
+            last_used > now - IDLE_LIMIT,
             AppUser.deleted_at.is_(None),
         )
     ).one_or_none()
+    if found is None:
+        return None
+    user: AppUser
+    user, session_id, seen = found
+    if now - seen >= TOUCH_INTERVAL:
+        session.execute(
+            update(UserSession).where(UserSession.id == session_id).values(last_seen_at=now)
+        )
+    return user
+
+
+def revoke_all_sessions(session: Session, user_id: int, now: datetime) -> int:
+    """Sign a reader out everywhere: every open session of the account ends. Returns how many."""
+    result = session.execute(
+        update(UserSession)
+        .where(UserSession.user_id == user_id, UserSession.revoked_at.is_(None))
+        .values(revoked_at=now)
+    )
+    return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
 
 def revoke_session(session: Session, raw: str, now: datetime) -> None:

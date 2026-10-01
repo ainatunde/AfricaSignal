@@ -1,0 +1,25 @@
+{% extends "admin/base.html" %}
+{% block title %}NBS upload{% endblock %}
+{% block content %}
+<h1>Upload an NBS file</h1>
+<p>Use this when automatic discovery or parsing of an NBS release has failed. Download the Excel file (or the ZIP that holds it) from NBS yourself, then upload it here with the address you got it from. The same parser runs as for a fetched file, the upload is kept as evidence under the address you give, and the import appears on the <a href="/admin/jobs">Jobs</a> page. The source must already have an approved permission.</p>
+<form method="post" action="/admin/nbs-upload" enctype="multipart/form-data">
+  <label for="source_id">Source</label>
+  <select id="source_id" name="source_id" required>
+    {% for s in sources %}<option value="{{ s.id }}" {{ 'selected' if form.get('source_id') == s.id|string }}>{{ s.name }}</option>{% endfor %}
+  </select>
+  <label for="publication">Publication</label>
+  <select id="publication" name="publication" required>
+    {% for p in publications %}<option value="{{ p }}" {{ 'selected' if form.get('publication') == p }}>{{ p }}</option>{% endfor %}
+  </select>
+  <label for="title">Release title, as NBS shows it, with the month</label>
+  <input type="text" id="title" name="title" required maxlength="200" value="{{ form.get('title', '') }}" placeholder="Premium Motor Spirit (Petrol) Price Watch (October 2024)">
+  <label for="published_on">Release date (YYYY-MM-DD)</label>
+  <input type="text" id="published_on" name="published_on" required value="{{ form.get('published_on', '') }}" pattern="\d{4}-\d{2}-\d{2}" placeholder="2024-11-19">
+  <label for="original_url">Address on nigerianstat.gov.ng where you got the file</label>
+  <input type="url" id="original_url" name="original_url" required value="{{ form.get('original_url', '') }}">
+  <label for="file">File (.xlsx or .zip, up to {{ max_mb }} MB)</label>
+  <input type="file" id="file" name="file" required accept=".xlsx,.zip">
+  <p><button type="submit">Upload and import</button></p>
+</form>
+{% endblock %}

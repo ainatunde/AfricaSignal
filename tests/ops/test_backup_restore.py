@@ -348,6 +348,7 @@ def test_s3_backup_copies_objects_and_restore_verifies_them(
     env = {
         "DATABASE_URL": scratch_db,
         "ENV": "staging",
+        "BACKUP_PASSPHRASE": "a staging passphrase",  # required outside development
         "no_proxy": host,
         "S3_ENDPOINT_URL": endpoint,
         "S3_BUCKET": "app",
@@ -502,3 +503,90 @@ def test_environment_is_used_when_the_console_cannot_be_read(
     assert done.returncode == 0, done.stderr
     assert "console settings could not be read" in done.stderr
     assert "pruning dumps older than 12 days" in done.stderr
+
+
+# --- security review S-15 ----------------------------------------------------------------------
+
+
+def test_outside_development_a_backup_must_be_encrypted(tmp_path: Path, scratch_db: str) -> None:
+    env = {"DATABASE_URL": scratch_db, "BACKUP_DIR": str(tmp_path), "ENV": "production"}
+    done = run(BACKUP, env=env)
+    assert done.returncode != 0 and "dumps must be encrypted" in done.stderr
+    assert dumps(tmp_path) == []
+    done = run(BACKUP, env={**env, "BACKUP_PASSPHRASE": "from the environment"})
+    assert done.returncode == 0, done.stderr
+    [dump] = dumps(tmp_path)
+    assert dump.name.endswith(".dump.enc")
+
+
+def test_a_restore_without_a_checksum_needs_no_verify(tmp_path: Path, scratch_db: str) -> None:
+    assert (
+        run(BACKUP, env={"DATABASE_URL": scratch_db, "BACKUP_DIR": str(tmp_path)}).returncode == 0
+    )
+    [dump] = dumps(tmp_path)
+    (tmp_path / "db" / f"{dump.name}.sha256").unlink()
+    target = sibling_url(scratch_db, "restored")
+    args = ("--target-url", target, "--recreate")
+    refused = run(RESTORE, *args, env={"BACKUP_DIR": str(tmp_path)})
+    assert refused.returncode != 0 and "cannot be checked" in refused.stderr
+    assert "--no-verify" in refused.stderr
+    done = run(RESTORE, *args, "--no-verify", env={"BACKUP_DIR": str(tmp_path)})
+    assert done.returncode == 0, done.stderr
+    assert psql(target, "SELECT count(*) FROM source") == "2"
+
+
+def _spy_on_postgres_tools(bin_dir: Path) -> Path:
+    """Wrappers for pg_dump, pg_restore and psql that record their arguments, then run the real
+    tool. Returns the log file."""
+    bin_dir.mkdir()
+    log = bin_dir / "calls.log"
+    for tool in ("pg_dump", "pg_restore", "psql"):
+        real = shutil.which(tool)
+        wrapper = bin_dir / tool
+        wrapper.write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{log}"\nexec "{real}" "$@"\n')
+        wrapper.chmod(0o755)
+    return log
+
+
+def test_the_database_password_is_not_on_any_command_line(
+    tmp_path: Path, admin_url: str, scratch_db: str
+) -> None:
+    """A password with characters that need quoting, so the pgpass escaping is exercised too."""
+    role = f"ops_pw_{uuid.uuid4().hex[:8]}"
+    password = "p:a@s/s w%rd\\"
+    quoted = password.replace("'", "''")
+    psql(admin_url, f"CREATE ROLE {role} SUPERUSER LOGIN PASSWORD '{quoted}'")
+    try:
+        from urllib.parse import quote, urlsplit  # noqa: PLC0415
+
+        parts = urlsplit(scratch_db)
+        url = (
+            f"postgresql://{role}:{quote(password, safe='')}@{parts.hostname}:{parts.port or 5432}"
+            f"{parts.path}"
+        )
+        bin_dir = tmp_path / "bin"
+        log = _spy_on_postgres_tools(bin_dir)
+        path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
+        store = tmp_path / "store"
+        done = run(BACKUP, env={"DATABASE_URL": url, "BACKUP_DIR": str(store), "PATH": path})
+        assert done.returncode == 0, done.stderr
+        target = sibling_url(scratch_db, "restored")
+        target_url = url.replace(parts.path.lstrip("/"), target.rsplit("/", 1)[1])
+        done = run(
+            RESTORE,
+            "--target-url",
+            target_url,
+            "--recreate",
+            "--overwrite-live",
+            env={"BACKUP_DIR": str(store), "DATABASE_URL": url, "PATH": path},
+        )
+        assert done.returncode == 0, done.stderr
+        assert psql(target, "SELECT count(*) FROM source") == "2"
+        calls = log.read_text()
+        assert role in calls  # the user name is still passed
+        for secret in (password, quote(password, safe=""), "s w%rd", "s%2Fs"):
+            assert secret not in calls, calls
+    finally:
+        restored = sibling_url(scratch_db, "restored").rsplit("/", 1)[1]  # the role owns it now
+        psql(admin_url, f'DROP DATABASE IF EXISTS "{restored}" WITH (FORCE)')
+        psql(admin_url, f"DROP ROLE IF EXISTS {role}")

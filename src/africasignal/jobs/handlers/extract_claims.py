@@ -58,7 +58,9 @@ def extract_claims_job(ctx: JobContext) -> None:
         return
 
     try:
-        extraction = extract_claims(build_adapter(session), document, text, job_id=ctx.job.id)
+        extraction = extract_claims(
+            build_adapter(session), document, text, job_id=ctx.job.id, session=session
+        )
     except BudgetExhausted as exc:
         defer_until_next_day(
             session,

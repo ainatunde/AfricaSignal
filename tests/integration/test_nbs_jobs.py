@@ -303,6 +303,67 @@ def test_an_upload_for_the_wrong_month_is_refused_and_stores_no_measurements(
     assert store.exists("uploads/wrong.xlsx")  # kept so the operator can retry or download it
 
 
+def _wrong_month_upload(factory: sessionmaker[Session], store: S3Store, key: str) -> None:
+    source_id = _setup(factory)
+    info = release("PMS_OCT_2024_REPORT.xlsx")
+    store.put(key, read("PMS_OCT_2024_REPORT.xlsx"), XLSX)
+    payload = {
+        "source_id": source_id, "storage_key": key,
+        "original_url": info["source_url"], "publication": "pms",
+        "published_on": "2024-10-17",
+        "title": "Premium Motor Spirit (Petrol) Price Watch (September 2024)",
+    }  # fmt: skip
+    with factory() as s:
+        queue.enqueue(s, "import_nbs_file", payload, max_attempts=2)  # as the console does
+        s.commit()
+
+
+def _run_due(factory: sessionmaker[Session]) -> None:
+    with factory() as s:
+        s.execute(text("UPDATE job SET run_at = now() WHERE status = 'queued'"))
+        s.commit()
+    _drain(factory, limit=1)
+
+
+def test_a_dead_import_job_removes_its_upload_but_a_retryable_failure_keeps_it(
+    factory: sessionmaker[Session], store: S3Store
+) -> None:
+    _wrong_month_upload(factory, store, "uploads/dies.xlsx")
+    _run_due(factory)
+    assert _job_states(factory) == {("import_nbs_file", "queued"): 1}
+    assert store.exists("uploads/dies.xlsx")  # the next attempt still needs it
+
+    _run_due(factory)
+    assert _job_states(factory) == {("import_nbs_file", "dead"): 1}
+    assert not store.exists("uploads/dies.xlsx")
+
+
+def test_a_failing_cleanup_does_not_hide_the_dead_job(
+    factory: sessionmaker[Session], store: S3Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken() -> S3Store:
+        raise OSError("storage is down")
+
+    _wrong_month_upload(factory, store, "uploads/stuck.xlsx")
+    _run_due(factory)
+    monkeypatch.setattr(import_nbs_file_module, "get_store", broken)
+    # The handler cannot reach storage either, so this attempt fails and the job dies.
+    _run_due(factory)
+    assert _job_states(factory) == {("import_nbs_file", "dead"): 1}
+    assert store.exists("uploads/stuck.xlsx")
+
+
+def test_the_dead_job_cleanup_only_deletes_files_under_uploads(
+    store: S3Store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store.put("evidence/ab/cd.xlsx", b"evidence", XLSX)
+    monkeypatch.setattr(import_nbs_file_module, "get_store", lambda: store)
+    import_nbs_file_module.discard_upload(
+        queue.ClaimedJob(1, "import_nbs_file", {"storage_key": "evidence/ab/cd.xlsx"}, 2, 2)
+    )
+    assert store.exists("evidence/ab/cd.xlsx")
+
+
 def test_an_upload_for_a_source_without_approved_permission_is_refused(
     factory: sessionmaker[Session], store: S3Store
 ) -> None:

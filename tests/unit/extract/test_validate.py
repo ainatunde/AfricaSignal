@@ -191,6 +191,27 @@ def test_an_unknown_policy_series_is_invalid() -> None:
     assert c.invalid_reason == "unknown_policy_series"
 
 
+# --- 6. enumerated words (S-09) --------------------------------------------------------------
+
+
+def test_a_word_outside_the_allowed_lists_makes_the_claim_invalid_and_is_neutralised() -> None:
+    for field, bad, neutral in (
+        ("direction", "sideways", "unknown"),
+        ("claim_type", "rumour", "other"),
+        ("time_precision", "hour", "unknown"),
+        ("direction", ["up"], "unknown"),
+    ):
+        c = check(**{field: bad})
+        assert (c.valid, c.invalid_reason) == (False, "invalid_field"), field
+        assert getattr(c, field) == neutral, field
+
+
+def test_an_earlier_reason_wins_over_a_bad_word() -> None:
+    assert check(direction="sideways", passage="not in the document").invalid_reason == (
+        "passage_not_found"
+    )
+
+
 def test_a_known_policy_series_is_valid() -> None:
     c = check(claim_type="policy_statement", item_code=None, policy_series="pms_regulated_price")
     assert c.valid

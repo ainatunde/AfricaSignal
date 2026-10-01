@@ -47,6 +47,9 @@ class UserSession(CreatedMixin, Base):
     token_sha256: Mapped[str] = mapped_column(Text, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the session was last used (moved forward at most once an hour). A session unused for
+    # ``login_tokens.IDLE_LIMIT`` ends; one that predates the column counts from ``created_at``.
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Preference(Base):

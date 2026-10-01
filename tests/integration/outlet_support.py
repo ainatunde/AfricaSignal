@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from africasignal.models import Source, SourcePermission
 
 NOW = datetime(2026, 9, 30, 12, tzinfo=UTC)
+_DEFAULT = "default"
 
 
 def approved_source(
@@ -17,7 +18,7 @@ def approved_source(
     *,
     kind: str = "news_outlet",
     adapter: str = "rss",
-    owner: str | None = None,
+    owner: str | None = _DEFAULT,
     home_url: str | None = None,
     approved_days_ago: int | None = 90,
     may_collect: bool = True,
@@ -25,7 +26,10 @@ def approved_source(
     now: datetime | None = None,
 ) -> Source:
     """A source with one approved permission, ``approved_days_ago`` days before ``now`` (None: never
-    approved)."""
+    approved). A news outlet gets an owner of its own unless ``owner`` is given (None: no owner on
+    record, which makes it untrusted)."""
+    if owner == _DEFAULT:
+        owner = f"Owner of {slug}" if kind == "news_outlet" else None
     source = Source(
         slug=slug,
         name=slug.title(),
