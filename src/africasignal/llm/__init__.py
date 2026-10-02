@@ -9,6 +9,7 @@ from africasignal.llm.errors import (
     ProviderRefused,
     SchemaValidationError,
     UnknownModelPrice,
+    WorkloadUnavailable,
 )
 
 __all__ = [
@@ -22,5 +23,6 @@ __all__ = [
     "ProviderResponse",
     "SchemaValidationError",
     "UnknownModelPrice",
+    "WorkloadUnavailable",
     "build_adapter",
 ]

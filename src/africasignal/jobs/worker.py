@@ -16,6 +16,7 @@ from africasignal.jobs import handlers as handler_registry
 from africasignal.jobs import queue
 from africasignal.jobs.handlers import JobContext
 from africasignal.jobs.log import configure_logging
+from africasignal.llm.errors import WorkloadUnavailable
 from africasignal.ops_heartbeat import ProcessHeartbeat
 from africasignal.publish.recovery import require_recovery_complete
 
@@ -111,6 +112,18 @@ class Worker:
                     return True
                 session.commit()
             log.info("job done", extra=ctx)
+        except WorkloadUnavailable as exc:
+            log.info(
+                "job deferred by workload policy",
+                extra={**ctx, "retry_at": exc.retry_at.isoformat()},
+            )
+            with self.factory() as session:
+                deferred = queue.defer_claimed(
+                    session, job.id, job.lock_owner, job.lease_token, exc.retry_at, str(exc)
+                )
+                session.commit()
+            if not deferred:
+                log.warning("could not defer stale workload attempt", extra=ctx)
         except Exception as exc:
             log.exception("job failed", extra=ctx)
             with self.factory() as session:

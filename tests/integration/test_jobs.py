@@ -45,11 +45,15 @@ def _enqueue(factory: sessionmaker[Session], kind: str = "test", **kw: object) -
     return job_id
 
 
+def _test_handler(_ctx: JobContext) -> None:
+    pass
+
+
 @pytest.fixture(autouse=True)
 def no_real_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Importing a handler module (other test modules do) registers it for good. These tests
-    decide which kinds have a handler, so start each from an empty registry."""
+    """Start with only the generic test job handler; individual cases add their own kinds."""
     monkeypatch.setattr(handlers, "HANDLERS", {})
+    monkeypatch.setitem(handlers.HANDLERS, "test", _test_handler)
 
 
 def _register(monkeypatch: pytest.MonkeyPatch, kind: str, fn: handlers.Handler) -> None:
@@ -241,8 +245,29 @@ def test_unknown_job_kind_fails_with_clear_error(factory: sessionmaker[Session])
     job_id = _enqueue(factory, "no_such_kind")
     Worker(factory, "w").run_once()
     row = _row(factory, job_id)
-    assert row["status"] == "queued"
-    assert "no handler registered" in str(row["last_error"])
+    assert row["status"] == "dead"
+    assert row["last_error"] == "unregistered job kind; quarantined by admission"
+
+    with factory() as s:
+        params = {"job_id": job_id}
+        count = s.execute(
+            text(
+                "SELECT count(*) FROM audit_log WHERE operator_id IS NULL "
+                "AND action = 'job.quarantine_unknown_kind' "
+                "AND target_kind = 'job' AND target_id = :job_id"
+            ),
+            params,
+        ).scalar_one()
+        assert count == 1
+        s.execute(
+            text(
+                "DELETE FROM audit_log WHERE operator_id IS NULL "
+                "AND action = 'job.quarantine_unknown_kind' "
+                "AND target_kind = 'job' AND target_id = :job_id"
+            ),
+            params,
+        )
+        s.commit()
 
 
 def test_failed_handler_work_is_rolled_back(

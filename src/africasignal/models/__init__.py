@@ -12,6 +12,8 @@ from africasignal.models.evidence import EvidenceDocument, GdeltDiscovery, Repor
 from africasignal.models.llm_cache import LlmResponseCache
 from africasignal.models.measurements import Measurement, MeasurementReview, Series
 from africasignal.models.ops import (
+    AgentReachCandidate,
+    AgentReachTask,
     AuditLog,
     ChannelPost,
     Event,
@@ -23,6 +25,7 @@ from africasignal.models.ops import (
     OperatorSignInFailure,
     Outbox,
     Setting,
+    WorkloadControl,
 )
 from africasignal.models.places import Place, PlaceAlias
 from africasignal.models.sources import DiscoveredDomainDecision, Source, SourcePermission
@@ -38,6 +41,8 @@ from africasignal.models.users import (
 
 __all__ = [
     "AccountDeletion",
+    "AgentReachCandidate",
+    "AgentReachTask",
     "AppUser",
     "AssessmentInput",
     "AssessmentVersion",
@@ -69,6 +74,7 @@ __all__ = [
     "ReportingOrigin",
     "Series",
     "Setting",
+    "WorkloadControl",
     "Situation",
     "Source",
     "SourcePermission",

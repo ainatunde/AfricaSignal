@@ -266,3 +266,59 @@ def set_source_owner(session: Session, operator: Operator, source_id: int, owner
         after={"slug": source.slug, "owner": source.owner},
     )
     return source
+
+
+def set_source_pacing(
+    session: Session,
+    operator: Operator,
+    source_id: int,
+    *,
+    schedule_minutes: int | None,
+    max_requests_per_hour: int,
+    now: datetime | None = None,
+) -> Source:
+    """Set bounded per-source cadence and request ceilings, preserving the override across seeds."""
+    source = _lock_source(session, source_id)
+    now = now or datetime.now(UTC)
+    if source.adapter == "gdelt":
+        if schedule_minutes is not None:
+            raise ConsoleError("GDELT cadence is configured under Sources and discovery settings.")
+    elif schedule_minutes is None or not 5 <= schedule_minutes <= 10_080:
+        raise ConsoleError("source interval must be from 5 minutes to 7 days")
+    if not 1 <= max_requests_per_hour <= 120:
+        raise ConsoleError("requests per hour must be from 1 to 120")
+    before = {
+        "schedule_minutes": source.schedule_minutes,
+        "max_requests_per_hour": source.max_requests_per_hour,
+        "pacing_override": source.pacing_override,
+    }
+    changed = (
+        source.max_requests_per_hour != max_requests_per_hour
+        or (schedule_minutes is not None and source.schedule_minutes != schedule_minutes)
+        or not source.pacing_override
+    )
+    if not changed:
+        raise ConsoleError("source pacing is already set to those values")
+    if schedule_minutes is not None:
+        source.schedule_minutes = schedule_minutes
+        if source.active:
+            source.next_due_at = now + timedelta(minutes=schedule_minutes)
+    source.max_requests_per_hour = max_requests_per_hour
+    source.pacing_override = True
+    session.flush()
+    audit.record(
+        session,
+        operator,
+        "source.set_pacing",
+        "source",
+        source.id,
+        before={"slug": source.slug, **before},
+        after={
+            "slug": source.slug,
+            "schedule_minutes": source.schedule_minutes,
+            "max_requests_per_hour": source.max_requests_per_hour,
+            "pacing_override": True,
+            "next_due_at": source.next_due_at.isoformat(),
+        },
+    )
+    return source

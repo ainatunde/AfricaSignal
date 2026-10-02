@@ -8,6 +8,13 @@ def _clean(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name.upper(), raising=False)
 
 
+def test_agent_reach_deployment_deny_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AGENT_REACH_DENY", raising=False)
+    assert Settings(_env_file=None).agent_reach_deny is False
+    monkeypatch.setenv("AGENT_REACH_DENY", "true")
+    assert Settings(_env_file=None).agent_reach_deny is True
+
+
 def test_development_needs_no_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     _clean(monkeypatch)
     monkeypatch.setenv("ENV", "development")

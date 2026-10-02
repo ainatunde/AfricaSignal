@@ -216,6 +216,88 @@ class ChannelPost(CreatedMixin, Base):
     note: Mapped[str | None] = mapped_column(Text)
 
 
+class WorkloadControl(Base):
+    """Versioned runtime switch and schedule for one resource-intensive workload."""
+
+    __tablename__ = "workload_control"
+    __table_args__ = (
+        CheckConstraint("name IN ('ai', 'agent_reach', 'processing')", name="name_valid"),
+        CheckConstraint("revision > 0", name="revision_positive"),
+    )
+
+    name: Mapped[str] = mapped_column(Text, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    schedule: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class AgentReachTask(CreatedMixin, Base):
+    """A bounded discovery request sent to an isolated Agent Reach bridge."""
+
+    __tablename__ = "agent_reach_task"
+    __table_args__ = (
+        CheckConstraint("topic IN ('energy', 'food')", name="topic_valid"),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed', 'cancellation_requested', "
+            "'cancelled', 'expired', 'outcome_unknown')",
+            name="status_valid",
+        ),
+        CheckConstraint("max_results BETWEEN 1 AND 20", name="max_results_bounds"),
+        CheckConstraint("control_revision > 0", name="control_revision_positive"),
+        Index("ix_agent_reach_task_status_created", "status", "created_at"),
+        UniqueConstraint("external_task_id", name="external_task_id_unique"),
+    )
+
+    requested_by_operator_id: Mapped[int] = mapped_column(ForeignKey("operator.id"), nullable=False)
+    topic: Mapped[str] = mapped_column(Text, nullable=False)
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    max_results: Mapped[int] = mapped_column(Integer, nullable=False)
+    control_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    runner_endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
+    external_task_id: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    retention_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AgentReachCandidate(CreatedMixin, Base):
+    """Metadata-only discovery result awaiting a human decision."""
+
+    __tablename__ = "agent_reach_candidate"
+    __table_args__ = (
+        UniqueConstraint("task_id", "canonical_url", name="task_canonical_url_unique"),
+        CheckConstraint(
+            "status IN ('pending', 'rejected', 'fetch_queued')",
+            name="status_valid",
+        ),
+        Index("ix_agent_reach_candidate_status_created", "status", "created_at"),
+    )
+
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("agent_reach_task.id", ondelete="CASCADE"), nullable=False
+    )
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    canonical_url: Mapped[str] = mapped_column(Text, nullable=False)
+    domain: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text)
+    publisher: Mapped[str | None] = mapped_column(Text)
+    platform: Mapped[str] = mapped_column(Text, nullable=False)
+    backend: Mapped[str] = mapped_column(Text, nullable=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    queued_source_id: Mapped[int | None] = mapped_column(
+        ForeignKey("source.id", ondelete="SET NULL")
+    )
+    retention_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class Setting(Base):
     """Key/value settings, including ``publication_suspended``. Keyed by name, no id column."""
 

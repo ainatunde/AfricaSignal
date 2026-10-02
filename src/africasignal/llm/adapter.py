@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Protocol
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from africasignal import settings_store
@@ -39,9 +40,10 @@ from africasignal.llm.errors import (
     ProviderRefused,
     SchemaValidationError,
     UnknownModelPrice,
+    WorkloadUnavailable,
 )
 from africasignal.llm.schema import errors as schema_errors
-from africasignal.models import LlmCall
+from africasignal.models import LlmCall, WorkloadControl
 
 log = logging.getLogger("africasignal.llm")
 
@@ -86,6 +88,58 @@ def make_provider(session: Session) -> LlmProvider:
     return AnthropicProvider(api_key=api_key)
 
 
+class RoutedProvider:
+    """Select one explicitly configured provider per route; there is no implicit fallback."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+        self._instances: dict[str, tuple[str, LlmProvider]] = {}
+
+    def complete(
+        self,
+        *,
+        model: str,
+        system: str,
+        user: str,
+        schema: dict[str, Any],
+        max_tokens: int,
+        effort: str | None,
+    ) -> ProviderResponse:
+        provider, separator, model_id = model.partition("/")
+        if not separator:
+            provider, model_id = "anthropic", provider
+        if provider not in ("anthropic", "openai") or not model_id:
+            raise LlmNotConfigured("the configured model route is not supported")
+        key_setting = "anthropic_api_key" if provider == "anthropic" else "openai_api_key"
+        api_key = settings_store.get(self.session, key_setting)
+        if not api_key:
+            raise LlmNotConfigured(
+                f"the selected {provider.title()} route has no configured API key"
+            )
+        cached = self._instances.get(provider)
+        instance: LlmProvider
+        if cached is None or cached[0] != api_key:
+            if provider == "anthropic":
+                from africasignal.llm.anthropic_provider import AnthropicProvider
+
+                instance = AnthropicProvider(api_key=api_key)
+            else:
+                from africasignal.llm.openai_provider import OpenAIProvider
+
+                instance = OpenAIProvider(api_key=api_key)
+            self._instances[provider] = (api_key, instance)
+        else:
+            instance = cached[1]
+        return instance.complete(
+            model=model_id,
+            system=system,
+            user=user,
+            schema=schema,
+            max_tokens=max_tokens,
+            effort=effort,
+        )
+
+
 class LlmAdapter:
     def __init__(
         self,
@@ -123,8 +177,26 @@ class LlmAdapter:
         value = settings_store.get_int(self.session, "llm_per_job_max_tokens")
         return DEFAULT_PER_JOB_MAX_TOKENS if value is None else value
 
+    def route_for(self, purpose: str) -> str:
+        # Only catalogued purposes have dashboard overrides. Other valid purposes still use
+        # the configured provider/model route instead of failing on an unknown setting key.
+        try:
+            override = settings_store.get(self.session, f"llm_route_{purpose}")
+        except KeyError:
+            override = None
+        if override:
+            return override
+        configured = self.config.purpose(purpose)
+        if configured.provider == "anthropic":
+            return configured.model
+        return f"{configured.provider}/{configured.model}"
+
     def model_for(self, purpose: str) -> str:
-        return self.config.purpose(purpose).model
+        route = self.route_for(purpose)
+        provider, separator, model = route.partition("/")
+        if separator and provider == "anthropic":
+            return model
+        return route
 
     def complete_json(
         self,
@@ -158,16 +230,20 @@ class LlmAdapter:
                     purpose, prompt_version, system, user, schema, max_tokens, job_id=job_id
                 )
         purpose_cfg = self.config.purpose(purpose)
-        model = purpose_cfg.model
-        price = self.config.prices.get(model)
+        route = self.route_for(purpose)
+        price = self.config.price_for(route)
         if price is None:
-            raise UnknownModelPrice(f"no price for model {model!r} in llm.yaml")
+            raise UnknownModelPrice(f"no price for model route {route!r} in llm.yaml")
+        provider_name, _, provider_model = route.partition("/")
+        model_record = provider_model if provider_name == "anthropic" else route
         now = self.clock()
-        sha = cache.input_sha256(system, user, schema)
+        sha = cache.input_sha256(
+            system, user, schema, semantic_config={"route": route, "effort": purpose_cfg.effort}
+        )
 
-        hit = cache.get(self.session, purpose, prompt_version, model, sha)
+        hit = cache.get(self.session, purpose, prompt_version, model_record, sha)
         if hit is not None:
-            self._record(purpose, prompt_version, model, 0, 0, Decimal(0), job_id, now, True)
+            self._record(purpose, prompt_version, model_record, 0, 0, Decimal(0), job_id, now, True)
             self.session.commit()
             log.info("llm cache hit", extra={"purpose": purpose, "job_id": job_id})
             cached: dict[str, Any] = json.loads(json.dumps(hit.response))
@@ -191,6 +267,17 @@ class LlmAdapter:
         if max_tokens <= 0:
             raise JobTokenLimitExceeded("no output tokens remain in the job allowance")
 
+        control = self.session.scalar(
+            select(WorkloadControl).where(WorkloadControl.name == "ai").with_for_update(read=True)
+        )
+        if control is None or not control.enabled:
+            raise WorkloadUnavailable(now, "AI provider calls are disabled")
+        from africasignal.jobs.policy import WorkloadSchedule
+
+        schedule = WorkloadSchedule.model_validate(control.schedule)
+        if not schedule.allows(now):
+            raise WorkloadUnavailable(schedule.next_open(now), "the AI operating window is closed")
+
         reservation_id = reserve_call(
             self.session,
             limit=self.daily_budget_usd,
@@ -203,7 +290,7 @@ class LlmAdapter:
         )
         try:
             reply = self.provider.complete(
-                model=model,
+                model=route,
                 system=system,
                 user=user,
                 schema=schema,
@@ -223,7 +310,7 @@ class LlmAdapter:
         self._record(
             purpose,
             prompt_version,
-            model,
+            model_record,
             reply.input_tokens,
             reply.output_tokens,
             cost,
@@ -241,7 +328,7 @@ class LlmAdapter:
             self.session,
             purpose,
             prompt_version,
-            model,
+            model_record,
             sha,
             data,
             reply.input_tokens,
@@ -307,8 +394,12 @@ class LlmAdapter:
 def build_adapter(session: Session) -> LlmAdapter:
     """The adapter handlers use: the production provider, and the key and limits from the console
     settings (falling back to the environment)."""
+    anthropic_key = settings_store.get(session, "anthropic_api_key")
+    openai_key = settings_store.get(session, "openai_api_key")
+    if not anthropic_key and not openai_key:
+        raise LlmNotConfigured("configure an Anthropic or OpenAI API key in the console")
     return LlmAdapter(
         session,
-        make_provider(session),
+        RoutedProvider(session),
         accounting_factory=sessionmaker(bind=get_engine(), expire_on_commit=False),
     )

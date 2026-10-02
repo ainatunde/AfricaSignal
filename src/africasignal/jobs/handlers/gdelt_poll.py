@@ -6,6 +6,7 @@ import logging
 from datetime import UTC, datetime
 
 from africasignal.jobs.handlers import JobContext, register
+from africasignal.settings_store import get_int
 from africasignal.sources import gdelt
 from africasignal.sources.health import record_failure
 from africasignal.sources.permissions import current_permission
@@ -27,7 +28,12 @@ def gdelt_poll(ctx: JobContext) -> None:
         )
         return
     try:
-        result = gdelt.poll(session, source)
+        result = gdelt.poll(
+            session,
+            source,
+            max_windows=get_int(session, "gdelt_windows_per_poll") or gdelt.MAX_WINDOWS_PER_POLL,
+            max_lookback_windows=4 * (get_int(session, "gdelt_max_lookback_hours") or 24),
+        )
     except Exception as exc:
         record_failure(session, source.id, f"{type(exc).__name__}: {exc}")
         raise

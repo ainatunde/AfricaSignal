@@ -239,6 +239,7 @@ def _source_page(
     status_code: int = 200,
     error: str | None = None,
     form: dict[str, Any] | None = None,
+    pacing_form: dict[str, Any] | None = None,
 ) -> Response:
     source = db.get(Source, source_id)
     if source is None:
@@ -265,6 +266,10 @@ def _source_page(
         "terms_url": newest.terms_url if newest else "",
         "rights_basis": newest.rights_basis if newest else "",
     }
+    pacing = pacing_form or {
+        "schedule_minutes": source.schedule_minutes,
+        "max_requests_per_hour": source.max_requests_per_hour,
+    }
     return _page(
         request,
         "admin/source.html",
@@ -275,6 +280,7 @@ def _source_page(
         approvers=approvers,
         state=_permission_state(source, permissions),
         defaults=defaults,
+        pacing=pacing,
         is_admin=auth.operator.role == "admin",
         error=error,
     )
@@ -363,6 +369,44 @@ def new_permission_version(
     except ConsoleError as exc:
         return _source_page(request, db, auth, source_id, 400, error=str(exc), form=form)
     return _redirect(f"/admin/sources/{source_id}?notice=new_version", auth)
+
+
+@router.post("/sources/{source_id}/pacing")
+async def set_source_pacing(
+    source_id: int,
+    request: Request,
+    auth: AdminOperator,
+    db: DbSession,
+) -> Response:
+    form = await request.form()
+    values = {
+        key: value
+        for key, value in form.items()
+        if isinstance(value, str) and key in ("schedule_minutes", "max_requests_per_hour")
+    }
+    source = db.get(Source, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail="No such source")
+    try:
+
+        def whole_number(key: str) -> int:
+            value = values.get(key, "")
+            if not value.isascii() or not value.isdigit():
+                raise ConsoleError(f"{key.replace('_', ' ')} must be a whole number")
+            return int(value)
+
+        interval = None if source.adapter == "gdelt" else whole_number("schedule_minutes")
+        max_requests = whole_number("max_requests_per_hour")
+        console.set_source_pacing(
+            db,
+            auth.operator,
+            source_id,
+            schedule_minutes=interval,
+            max_requests_per_hour=max_requests,
+        )
+    except ConsoleError as exc:
+        return _source_page(request, db, auth, source_id, 400, error=str(exc), pacing_form=values)
+    return _redirect(f"/admin/sources/{source_id}?notice=pacing_saved", auth)
 
 
 @router.post("/sources/{source_id}/owner")
@@ -454,6 +498,7 @@ def _settings_page(
                 {
                     "defn": defn,
                     "value": value,
+                    "options": settings_store.options(key),
                     "source": SOURCE_LABELS[resolved.source],
                     "source_id": resolved.source,
                     "configured": resolved.value is not None,

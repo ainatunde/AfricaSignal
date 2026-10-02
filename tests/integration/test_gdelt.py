@@ -553,7 +553,7 @@ def test_a_window_gdelt_never_published_is_skipped_after_an_hour(
     net.set_lastupdate("20260930180000")
     # 16:30, 16:45 and 17:00 are an hour or more behind the newest window and were never
     # published: skipped. 17:15 is only 45 minutes behind, so it may still appear: the poll waits.
-    outcome = gdelt.poll(session, source, fetch=net, max_windows=10)
+    outcome = gdelt.poll(session, source, fetch=net, max_windows=6)
     assert outcome.skipped == ["20260930163000", "20260930164500", "20260930170000"]
     assert outcome.windows == []
     assert outcome.stopped_early is not None and "20260930171500" in outcome.stopped_early

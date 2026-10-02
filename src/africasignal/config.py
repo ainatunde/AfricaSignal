@@ -37,12 +37,24 @@ class Settings(BaseSettings):
     s3_secret_access_key: str = Field(default="", alias="S3_SECRET_ACCESS_KEY")
 
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
+    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
+    agent_reach_deny: bool = Field(default=False, alias="AGENT_REACH_DENY")
+    agent_reach_endpoint: str = Field(default="", alias="AGENT_REACH_ENDPOINT")
+    agent_reach_api_key: str = Field(default="", alias="AGENT_REACH_API_KEY")
+    agent_reach_max_tasks_per_day: int = Field(
+        default=10, ge=1, le=100, alias="AGENT_REACH_MAX_TASKS_PER_DAY"
+    )
+    gdelt_poll_minutes: int = Field(default=15, ge=15, le=60, alias="GDELT_POLL_MINUTES")
+    gdelt_windows_per_poll: int = Field(default=6, ge=1, le=6, alias="GDELT_WINDOWS_PER_POLL")
+    gdelt_max_lookback_hours: int = Field(default=24, ge=1, le=24, alias="GDELT_MAX_LOOKBACK_HOURS")
     llm_daily_budget_usd: float = Field(default=10.0, alias="LLM_DAILY_BUDGET_USD")
     llm_per_job_max_tokens: int = Field(default=20000, alias="LLM_PER_JOB_MAX_TOKENS")
 
     email_provider: str = Field(default="", alias="EMAIL_PROVIDER")
     email_api_key: str = Field(default="", alias="EMAIL_API_KEY")
     email_from: str = Field(default="", alias="EMAIL_FROM")
+    weekly_digest_weekday: int = Field(default=0, ge=0, le=6, alias="WEEKLY_DIGEST_WEEKDAY")
+    weekly_digest_hour: int = Field(default=7, ge=0, le=23, alias="WEEKLY_DIGEST_HOUR")
     # In staging every outbound message is refused unless the normalized address appears here.
     staging_email_allowed_recipients: str = Field(
         default="", alias="STAGING_EMAIL_ALLOWED_RECIPIENTS"

@@ -1,0 +1,68 @@
+# Separate bridge deployment. Build runner/Dockerfile, publish it, then set an immutable image digest.
+# The external reverse proxy should route the public HTTPS endpoint to host 127.0.0.1:AGENT_REACH_RUNNER_PORT.
+services:
+  agent-reach-runner:
+    image: ${AGENT_REACH_RUNNER_IMAGE:?set an immutable runner image digest}
+    command: ["python", "-m", "agent_reach_runner.server"]
+    restart: unless-stopped
+    init: true
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=0700,uid=10001,gid=10001
+    mem_limit: 512m
+    cpus: 0.50
+    pids_limit: 32
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 30s
+    environment:
+      AGENT_REACH_RUNNER_TOKEN_FILE: /run/runner-secrets/bridge-token
+      AGENT_REACH_YOUTUBE_API_KEY_FILE: /run/runner-secrets/youtube-api-key
+      AGENT_REACH_YOUTUBE_ENABLED: ${AGENT_REACH_YOUTUBE_ENABLED:-false}
+      AGENT_REACH_YOUTUBE_SEARCHES_PER_QUOTA_DAY: ${AGENT_REACH_YOUTUBE_SEARCHES_PER_QUOTA_DAY:-10}
+      AGENT_REACH_MAX_CONCURRENCY: ${AGENT_REACH_MAX_CONCURRENCY:-1}
+      AGENT_REACH_HTTPS_PROXY: http://egress-proxy:3128
+      AGENT_REACH_DB_PATH: /var/lib/agent-reach/tasks.sqlite3
+      AGENT_REACH_TLS_CERT_FILE: /run/runner-secrets/tls.crt
+      AGENT_REACH_TLS_KEY_FILE: /run/runner-secrets/tls.key
+    volumes:
+      - agent_reach_data:/var/lib/agent-reach
+      - ${AGENT_REACH_RUNNER_TOKEN_FILE:?mount a dedicated random bearer token}:/run/runner-secrets/bridge-token:ro
+      - ${AGENT_REACH_YOUTUBE_API_KEY_FILE:?mount an API key restricted to YouTube Data API v3}:/run/runner-secrets/youtube-api-key:ro
+      - ${AGENT_REACH_TLS_CERT_FILE:?mount the runner HTTPS certificate}:/run/runner-secrets/tls.crt:ro
+      - ${AGENT_REACH_TLS_KEY_FILE:?mount the runner TLS private key}:/run/runner-secrets/tls.key:ro
+    ports:
+      - "127.0.0.1:${AGENT_REACH_RUNNER_PORT:-8450}:8443"
+    networks:
+      - reach_private
+    depends_on:
+      egress-proxy:
+        condition: service_started
+
+  egress-proxy:
+    image: ${AGENT_REACH_RUNNER_IMAGE:?set the same immutable runner image digest}
+    command: ["python", "-m", "agent_reach_runner.egress_proxy"]
+    restart: unless-stopped
+    init: true
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=1m,mode=0700,uid=10001,gid=10001
+    mem_limit: 96m
+    cpus: 0.20
+    pids_limit: 24
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    networks:
+      - reach_private
+      - reach_internet
+
+networks:
+  reach_private:
+    internal: true
+  reach_internet:
+    driver: bridge
+
+volumes:
+  agent_reach_data:

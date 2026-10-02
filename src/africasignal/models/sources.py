@@ -49,6 +49,7 @@ class Source(CreatedMixin, Base):
         DateTime(timezone=True), nullable=False, server_default="now()"
     )
     max_requests_per_hour: Mapped[int] = mapped_column(Integer, nullable=False, server_default="60")
+    pacing_override: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     health: Mapped[str] = mapped_column(source_health, nullable=False, server_default="healthy")
     consecutive_failures: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")

@@ -39,7 +39,9 @@ from africasignal.operators import derive_key
 log = logging.getLogger("africasignal.settings_store")
 
 PREFIX = "config."
-Kind = Literal["text", "secret", "url", "https_url", "email", "int", "float", "choice"]
+Kind = Literal[
+    "text", "secret", "url", "https_url", "email", "int", "float", "choice", "model_route"
+]
 Source = Literal["console", "environment", "default", "unset", "unreadable"]
 
 EMAIL_PROVIDERS = ("postmark", "resend")
@@ -74,6 +76,8 @@ class SettingDef:
 
 GROUPS: tuple[tuple[str, str], ...] = (
     ("llm", "Language model"),
+    ("agent", "Agent Reach runner"),
+    ("sources", "Sources and discovery"),
     ("site", "Website"),
     ("email", "Email"),
     ("storage", "Evidence storage"),
@@ -83,6 +87,76 @@ GROUPS: tuple[tuple[str, str], ...] = (
 
 _DEFS = (
     SettingDef("anthropic_api_key", "Anthropic API key", "llm", "secret", expected=True),
+    SettingDef("openai_api_key", "OpenAI API key", "llm", "secret"),
+    SettingDef(
+        "agent_reach_endpoint",
+        "Agent Reach runner URL",
+        "agent",
+        "https_url",
+        "HTTPS endpoint for the isolated AfricaSignal runner bridge. The upstream Agent Reach "
+        "package itself does not expose this API.",
+    ),
+    SettingDef(
+        "agent_reach_api_key",
+        "Agent Reach runner token",
+        "agent",
+        "secret",
+        "Scoped bearer token for this AfricaSignal deployment. Stored encrypted and never shown.",
+    ),
+    SettingDef(
+        "agent_reach_max_tasks_per_day",
+        "Agent Reach task starts per 24 hours",
+        "agent",
+        "int",
+        "External request count in rolling 24h; failed and cancelled starts also count.",
+        default="10",
+        minimum=1,
+        maximum=100,
+    ),
+    SettingDef(
+        "gdelt_poll_minutes",
+        "GDELT poll interval (minutes)",
+        "sources",
+        "int",
+        "GDELT publishes 15-minute windows. Slower polling reduces checks but delays discovery.",
+        default="15",
+        minimum=15,
+        maximum=60,
+    ),
+    SettingDef(
+        "gdelt_windows_per_poll",
+        "GDELT windows per job",
+        "sources",
+        "int",
+        "Catch-up is bounded to 1–6 windows per poll to keep work inside the job lease.",
+        default="6",
+        minimum=1,
+        maximum=6,
+    ),
+    SettingDef(
+        "gdelt_max_lookback_hours",
+        "GDELT maximum replay lookback (hours)",
+        "sources",
+        "int",
+        "Skips windows outside this bound after outages; lower values reduce recovery coverage.",
+        default="24",
+        minimum=1,
+        maximum=24,
+    ),
+    SettingDef(
+        "llm_route_claim_extract",
+        "Claim extraction model route",
+        "llm",
+        "model_route",
+        "Choose a reviewed provider/model and price from config/llm.yaml.",
+    ),
+    SettingDef(
+        "llm_route_explain",
+        "Explanation model route",
+        "llm",
+        "model_route",
+        "Choose a reviewed provider/model and price from config/llm.yaml.",
+    ),
     SettingDef(
         "llm_daily_budget_usd",
         "Daily budget (USD)",
@@ -171,6 +245,26 @@ _DEFS = (
         expected=True,
     ),
     SettingDef(
+        "weekly_digest_weekday",
+        "Weekly digest weekday (0 Monday-6 Sunday)",
+        "email",
+        "int",
+        "Weekly digest schedule in Africa/Lagos time.",
+        default="0",
+        minimum=0,
+        maximum=6,
+    ),
+    SettingDef(
+        "weekly_digest_hour",
+        "Weekly digest local hour",
+        "email",
+        "int",
+        "Hour from 0 to 23 in Africa/Lagos. Queueing begins at this hour on the selected weekday.",
+        default="7",
+        minimum=0,
+        maximum=23,
+    ),
+    SettingDef(
         "s3_endpoint_url",
         "Endpoint URL",
         "storage",
@@ -232,6 +326,18 @@ def definition(key: str) -> SettingDef:
         return REGISTRY[key]
     except KeyError:
         raise KeyError(f"unknown setting {key!r}") from None
+
+
+def options(key: str) -> list[tuple[str, str]]:
+    """Selectable values for choice fields and the reviewed model catalogue."""
+    defn = definition(key)
+    if defn.kind == "choice":
+        return [(value, value.replace("_", " ").title()) for value in defn.choices]
+    if defn.kind == "model_route":
+        from africasignal.llm.config import load_llm_config
+
+        return load_llm_config().route_options()
+    return []
 
 
 def group_keys(group: str) -> list[str]:
@@ -391,6 +497,13 @@ def normalise(defn: SettingDef, raw: str) -> str:
     if defn.kind == "choice":
         if raw not in defn.choices:
             raise SettingError(f"{defn.label}: choose one of {', '.join(defn.choices)}")
+        return raw
+    if defn.kind == "model_route":
+        from africasignal.llm.config import load_llm_config
+
+        allowed = dict(load_llm_config().route_options())
+        if raw not in allowed:
+            raise SettingError(f"{defn.label}: choose a model route with a reviewed price")
         return raw
     if defn.kind in ("int", "float"):
         try:

@@ -1,0 +1,85 @@
+{% extends "admin/base.html" %}
+{% block title %}Configuration coverage{% endblock %}
+{% block content %}
+<h1>Configuration coverage</h1>
+<p>This inventory separates controls that operators can change from runtime code ownership and deployment responsibilities. Secret values are never included. Generated {{ generated_at|when }}.</p>
+
+<h2>Coverage gaps</h2>
+{% if gaps.unmapped_settings or gaps.unmapped_job_kinds %}
+<p class="error" role="alert">Ownership mapping is incomplete:
+  {% if gaps.unmapped_settings %}settings: {{ gaps.unmapped_settings|join(', ') }}{% endif %}
+  {% if gaps.unmapped_job_kinds %}handlers: {{ gaps.unmapped_job_kinds|join(', ') }}{% endif %}
+</p>
+{% else %}
+<p class="notice" role="status">Every registered setting and job handler has an owner or disposition.</p>
+{% endif %}
+
+<h2>Workload controls</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Workload</th><th scope="col">Desired</th><th scope="col">Effective now</th><th scope="col">Concurrency</th><th scope="col">Items/run</th><th scope="col">Backlog</th><th scope="col">Revision</th></tr></thead>
+  <tbody>
+  {% for w in workloads %}
+  <tr>
+    <td>{{ w.name }}</td><td>{{ 'On' if w.enabled else 'Off' }}</td><td>{{ 'Yes' if w.effective else 'No' }}</td>
+    <td>{{ w.schedule.max_concurrency }}</td><td>{{ w.schedule.max_items_per_run }}</td>
+    <td>{{ w.queued }} queued / {{ w.running }} running</td><td>{{ w.revision }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Operator-editable settings</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Setting</th><th scope="col">Group</th><th scope="col">Type and bounds</th><th scope="col">Effective source</th><th scope="col">Runtime consumer</th><th scope="col">Apply timing</th></tr></thead>
+  <tbody>
+  {% for s in settings %}
+  <tr>
+    <td><a href="{{ s.console_route }}">{{ s.label }}</a><br><span class="muted">{{ s.key }}{% if s.secret %} · secret (value hidden){% endif %}</span></td>
+    <td>{{ s.group_title }}</td>
+    <td>{{ s.kind }}{% if s.default is not none %}<br>Default: {{ s.default }}{% endif %}
+      {% if s.minimum is not none or s.maximum is not none %}<br>{{ s.minimum if s.minimum is not none else '—' }} to {{ s.maximum if s.maximum is not none else '—' }}{% endif %}
+      {% if s.choices %}<br>{{ s.choices|join(', ') }}{% endif %}</td>
+    <td>{{ s.effective_source }}{% if s.secret %}<br>{{ 'configured' if s.configured else 'not configured' }}{% endif %}</td>
+    <td>{{ s.consumer }}</td><td>{{ s.apply_timing }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Registered job handlers</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Job kind</th><th scope="col">Owner</th><th scope="col">Workload gate</th><th scope="col">Control and disposition</th></tr></thead>
+  <tbody>
+  {% for job in jobs %}
+  <tr><td><code>{{ job.kind }}</code></td><td>{{ job.owner }}</td>
+    <td>{{ job.workload or 'Continuous/triggered' }}</td><td>{{ job.control }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Deployment- or human-owned controls</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Control</th><th scope="col">Owner</th><th scope="col">Why it is not a dashboard switch</th></tr></thead>
+  <tbody>{% for item in deployment %}
+  <tr><td>{{ item.name }}</td><td>{{ item.owner }}</td><td>{{ item.reason }}</td></tr>
+  {% endfor %}</tbody>
+</table>
+</div>
+
+<h2>Business workflows</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Function</th><th scope="col">Owner</th><th scope="col">Dashboard control</th><th scope="col">Apply timing and scope</th></tr></thead>
+  <tbody>{% for item in controls %}
+  <tr><td>{{ item.name }}</td><td>{{ item.owner }}</td><td>{{ item.control }}</td><td>{{ item.apply_timing }}<br>{{ item.scope }}</td></tr>
+  {% endfor %}</tbody>
+</table>
+</div>
+{% endblock %}

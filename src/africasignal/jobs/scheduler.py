@@ -18,6 +18,7 @@ from africasignal.jobs import queue
 from africasignal.jobs.log import configure_logging
 from africasignal.ops_heartbeat import ProcessHeartbeat
 from africasignal.publish.recovery import require_recovery_complete
+from africasignal.settings_store import get_int
 
 log = logging.getLogger("africasignal.scheduler")
 
@@ -66,20 +67,29 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
         )
 
     # 2-3. Periodic jobs, deduplicated on their time slot.
+    gdelt_poll_minutes = get_int(session, "gdelt_poll_minutes") or GDELT_SLOT_MINUTES
     periodic: list[tuple[str, str]] = [
-        ("gdelt_poll", f"gdelt_poll:{_slot(now, GDELT_SLOT_MINUTES)}"),
+        ("gdelt_poll", f"gdelt_poll:{_slot(now, gdelt_poll_minutes)}"),
         ("expire_assessments", f"expire_assessments:{_slot(now, 60)}"),
         ("release_held_versions", f"release_held_versions:{_slot(now, 1)}"),
         ("explain_backfill", f"explain_backfill:{_slot(now, 60)}"),  # AS-028
         ("dispatch_outbox", f"dispatch_outbox:{_slot(now, 1)}"),
         ("prune_events", f"prune_events:{_slot(now, 24 * 60)}"),  # retention: 13 months
         ("apply_retention", f"apply_retention:{_slot(now, 24 * 60)}"),  # accounts, feedback
+        (
+            "agent_reach_expire",
+            f"agent_reach_expire:{_slot(now, 24 * 60)}",
+        ),  # candidate/task retention
         ("check_backups", f"check_backups:{_slot(now, 60)}"),  # stale backup, failed drill alerts
         ("check_health", f"check_health:{_slot(now, 15)}"),  # failing sources, dead jobs, budget
     ]
-    # 4. Weekly digest: Monday from 07:00 Africa/Lagos, deduplicated per ISO week.
+    # 4. Weekly digest: the operator-configured weekday/hour in Africa/Lagos.
     lagos = now.astimezone(LAGOS)
-    if lagos.weekday() == 0 and lagos.hour >= 7:
+    digest_weekday = get_int(session, "weekly_digest_weekday")
+    digest_hour = get_int(session, "weekly_digest_hour")
+    if lagos.weekday() == (0 if digest_weekday is None else digest_weekday) and lagos.hour >= (
+        7 if digest_hour is None else digest_hour
+    ):
         year, week, _ = lagos.isocalendar()
         periodic.append(("weekly_digest", f"weekly_digest:{year}-W{week:02d}"))
     for kind, key in periodic:
