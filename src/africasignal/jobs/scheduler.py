@@ -80,6 +80,10 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
             "agent_reach_expire",
             f"agent_reach_expire:{_slot(now, 24 * 60)}",
         ),  # candidate/task retention
+        (
+            "external_agent_expire",
+            f"external_agent_expire:{_slot(now, 24 * 60)}",
+        ),  # task output retention and deadline cancellation
         ("check_backups", f"check_backups:{_slot(now, 60)}"),  # stale backup, failed drill alerts
         ("check_health", f"check_health:{_slot(now, 15)}"),  # failing sources, dead jobs, budget
     ]

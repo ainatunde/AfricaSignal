@@ -15,6 +15,13 @@ def test_agent_reach_deployment_deny_switch(monkeypatch: pytest.MonkeyPatch) -> 
     assert Settings(_env_file=None).agent_reach_deny is True
 
 
+def test_external_agents_deployment_deny_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("EXTERNAL_AGENTS_DENY", raising=False)
+    assert Settings(_env_file=None).external_agents_deny is False
+    monkeypatch.setenv("EXTERNAL_AGENTS_DENY", "true")
+    assert Settings(_env_file=None).external_agents_deny is True
+
+
 def test_development_needs_no_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     _clean(monkeypatch)
     monkeypatch.setenv("ENV", "development")

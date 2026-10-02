@@ -5,7 +5,7 @@
 <p>Control resource-intensive work. Times use the timezone shown for each workload. A disabled workload stays queued until it is enabled or its jobs are cancelled. Safety checks, withdrawals and retention continue to run.</p>
 {% for w in workloads %}
 <section aria-labelledby="workload-{{ w.name }}">
-  <h2 id="workload-{{ w.name }}">{{ "Language model calls" if w.name == "ai" else ("Agent Reach discovery" if w.name == "agent_reach" else "Document capture, OCR and imports") }}</h2>
+  <h2 id="workload-{{ w.name }}">{{ "Language model calls" if w.name == "ai" else ("Agent Reach discovery" if w.name == "agent_reach" else ("External agent services" if w.name == "external_agents" else "Document capture, OCR and imports")) }}</h2>
   <p>Current state:
     {% if w.name == "agent_reach" and w.deployment_denied %}<strong>Blocked by deployment</strong>
     {% elif not w.enabled %}<strong>Off</strong>
@@ -20,6 +20,10 @@
     <label class="inline"><input type="checkbox" name="enabled" value="on" {{ "checked" if w.enabled }}>
       Enable Agent Reach discovery</label>
     <p class="muted">Enabling allows the isolated discovery runner to receive eligible jobs. It does not approve sources or publish results.</p>
+    {% elif w.name == "external_agents" %}
+    <label class="inline"><input type="checkbox" name="enabled" value="on" {{ "checked" if w.enabled }}>
+      Allow new external-agent tasks</label>
+    <p class="muted">This switch is separate from Agent Reach and model-provider calls. Disabling it blocks queued submissions and requests cancellation of active remote tasks.</p>
     {% elif w.name == "processing" %}
     <label class="inline"><input type="checkbox" name="enabled" value="on" {{ "checked" if w.enabled }}>
       Allow new document capture, OCR and import jobs</label>
@@ -35,7 +39,7 @@
     <textarea id="windows-{{ w.name }}" name="windows" rows="4" maxlength="1500" required>{{ w.windows_text }}</textarea>
     <p class="muted">Days are ISO weekdays: 0 Monday through 6 Sunday. Use * for every day.
       Example: 0,1,2,3,4 01:00-04:00. Windows end at the listed time; 24:00 means midnight.</p>
-    <label for="concurrency-{{ w.name }}">{{ "Maximum concurrent remote tasks (1–32)" if w.name == "agent_reach" else "Maximum concurrent jobs (1–32)" }}</label>
+    <label for="concurrency-{{ w.name }}">{{ "Maximum concurrent remote tasks (1-32)" if w.name in ("agent_reach", "external_agents") else "Maximum concurrent jobs (1-32)" }}</label>
     <input type="number" id="concurrency-{{ w.name }}" name="max_concurrency" min="1" max="32" value="{{ w.max_concurrency }}" required>
     {% if w.name == "agent_reach" %}
     <label for="items-{{ w.name }}">Maximum candidate leads per discovery task (1–20)</label>

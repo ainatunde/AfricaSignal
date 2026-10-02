@@ -9,7 +9,12 @@ from sqlalchemy.orm import Session
 
 from africasignal import settings_store
 from africasignal.jobs import handlers as handler_registry
-from africasignal.jobs.policy import CONTENT_JOB_KINDS, LLM_JOB_KINDS, REACH_JOB_KINDS
+from africasignal.jobs.policy import (
+    CONTENT_JOB_KINDS,
+    EXTERNAL_AGENT_JOB_KINDS,
+    LLM_JOB_KINDS,
+    REACH_JOB_KINDS,
+)
 from africasignal.operations import workloads
 
 SETTING_CONSUMERS = {
@@ -61,6 +66,26 @@ JOB_OWNERS = {
     "agent_reach_poll": (
         "Agent Reach workload",
         "Default-off switch, schedule and runner contract",
+    ),
+    "external_agent_submit": (
+        "External-agent workload",
+        "Default-off switch, schedule, profile quota and local cost reservation",
+    ),
+    "external_agent_poll": (
+        "External-agent lifecycle",
+        "Continuous status polling; no new task admission",
+    ),
+    "external_agent_cancel": (
+        "External-agent lifecycle",
+        "Continuous remote cancellation and outcome visibility",
+    ),
+    "external_agent_reconcile": (
+        "External-agent lifecycle",
+        "Idempotency lookup before retrying uncertain submissions",
+    ),
+    "external_agent_expire": (
+        "External-agent cleanup",
+        "Daily task and result retention",
     ),
     "process_document": (
         "Document processing workload",
@@ -154,6 +179,16 @@ BUSINESS_CONTROLS = [
         "scope": "Anthropic/OpenAI keys, purpose routes, daily USD budget and per-job token limit",
     },
     {
+        "name": "External-agent integrations",
+        "owner": "External-agent HTTPS profile and task protocol",
+        "control": "/admin/agents and /admin/automation",
+        "apply_timing": "New task admission; polling and cancellation stay continuous",
+        "scope": (
+            "Default-off profiles, encrypted credentials, purposes, domains, bounded output "
+            "and cost reservations"
+        ),
+    },
+    {
         "name": "Agent Reach discovery and candidate review",
         "owner": "Isolated external runner bridge",
         "control": "/admin/agent-reach and /admin/automation",
@@ -208,6 +243,14 @@ DEPLOYMENT_OWNED = [
         "name": "ADMIN_TRUSTED_ORIGINS and TLS termination",
         "owner": "edge/deployment",
         "reason": "Trust boundary for authenticated browser actions.",
+    },
+    {
+        "name": "External-agent deny switch (EXTERNAL_AGENTS_DENY)",
+        "owner": "application deployment",
+        "reason": (
+            "Blocks all external-agent task admissions regardless of dashboard profile or "
+            "workload settings."
+        ),
     },
     {
         "name": "Agent Reach deny switch (AGENT_REACH_DENY)",
@@ -293,6 +336,8 @@ def manifest(session: Session) -> dict[str, Any]:
             workload = "ai"
         elif kind in REACH_JOB_KINDS:
             workload = "agent_reach"
+        elif kind in EXTERNAL_AGENT_JOB_KINDS:
+            workload = "external_agents"
         elif kind in CONTENT_JOB_KINDS:
             workload = "processing"
         else:

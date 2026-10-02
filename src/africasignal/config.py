@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     agent_reach_deny: bool = Field(default=False, alias="AGENT_REACH_DENY")
+    external_agents_deny: bool = Field(default=False, alias="EXTERNAL_AGENTS_DENY")
     agent_reach_endpoint: str = Field(default="", alias="AGENT_REACH_ENDPOINT")
     agent_reach_api_key: str = Field(default="", alias="AGENT_REACH_API_KEY")
     agent_reach_max_tasks_per_day: int = Field(

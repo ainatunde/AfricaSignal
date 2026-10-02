@@ -12,12 +12,14 @@ from africasignal.models import Job, WorkloadControl
 
 LLM_JOB_KINDS = frozenset({"extract_claims", "explain_version", "explain_backfill"})
 REACH_JOB_KINDS = frozenset({"agent_reach_search", "agent_reach_poll"})
+EXTERNAL_AGENT_JOB_KINDS = frozenset({"external_agent_submit"})
 CONTENT_JOB_KINDS = frozenset(
     {"process_document", "gdelt_fetch_article", "import_nbs_file", "resolve_places"}
 )
 WORKLOAD_KINDS = {
     "ai": LLM_JOB_KINDS,
     "agent_reach": REACH_JOB_KINDS,
+    "external_agents": EXTERNAL_AGENT_JOB_KINDS,
     "processing": CONTENT_JOB_KINDS,
 }
 
@@ -102,6 +104,22 @@ class WorkloadSchedule(BaseModel):
                 if begin <= candidate < finish:
                     return True
         return False
+
+    def current_window_end(self, moment: datetime) -> datetime | None:
+        """Return the active window's exclusive UTC end, or None when the schedule is closed."""
+        if moment.tzinfo is None:
+            raise ValueError("schedule checks require a timezone-aware instant")
+        local = moment.astimezone(ZoneInfo(self.timezone))
+        candidate = moment.astimezone(UTC)
+        for offset in (-1, 0):
+            anchor = local.date() + timedelta(days=offset)
+            for window in self.windows:
+                if anchor.isoweekday() - 1 not in window.days:
+                    continue
+                begin, finish = _utc_interval(anchor, window, self.timezone)
+                if begin <= candidate < finish:
+                    return finish
+        return None
 
     def next_open(self, moment: datetime) -> datetime:
         if moment.tzinfo is None:
@@ -200,6 +218,16 @@ def workload_defaults() -> dict[str, tuple[bool, WorkloadSchedule]]:
                     "windows": [{"days": list(range(7)), "start": "01:00", "end": "04:00"}],
                     "max_concurrency": 1,
                     "max_items_per_run": 10,
+                }
+            ),
+        ),
+        "external_agents": (
+            False,
+            WorkloadSchedule.model_validate(
+                {
+                    "windows": [{"days": list(range(7)), "start": "01:00", "end": "04:00"}],
+                    "max_concurrency": 1,
+                    "max_items_per_run": 5,
                 }
             ),
         ),

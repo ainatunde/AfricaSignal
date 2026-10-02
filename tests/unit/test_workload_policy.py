@@ -67,3 +67,16 @@ def test_overlaps_invalid_timezones_and_excessive_concurrency_fail_closed() -> N
                 "max_concurrency": 33,
             }
         )
+
+
+def test_current_window_end_returns_exclusive_utc_close() -> None:
+    policy = schedule(
+        "Africa/Lagos",
+        [{"days": [0], "start": "09:00", "end": "11:00"}],
+    )
+    assert policy.current_window_end(datetime(2026, 10, 5, 8, 30, tzinfo=UTC)) == datetime(
+        2026, 10, 5, 10, 0, tzinfo=UTC
+    )
+    assert policy.current_window_end(datetime(2026, 10, 5, 10, 0, tzinfo=UTC)) is None
+    with pytest.raises(ValueError, match="timezone-aware"):
+        policy.current_window_end(datetime(2026, 10, 5, 8, 30))

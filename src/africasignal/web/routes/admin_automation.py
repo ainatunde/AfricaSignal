@@ -85,7 +85,7 @@ def automation_view(request: Request, auth: AdminOperator, db: DbSession) -> Res
 async def automation_save(
     name: str, request: Request, auth: AdminOperator, db: DbSession
 ) -> Response:
-    if name not in ("ai", "agent_reach", "processing"):
+    if name not in ("ai", "agent_reach", "external_agents", "processing"):
         raise HTTPException(status_code=404, detail="No such workload")
     workload_name = cast(WorkloadName, name)
     form = await request.form()
@@ -141,7 +141,7 @@ def automation_api(auth: AdminOperator, db: DbSession) -> JSONResponse:
 async def automation_api_save(
     name: str, request: Request, auth: AdminOperator, db: DbSession
 ) -> JSONResponse:
-    if name not in ("ai", "agent_reach", "processing"):
+    if name not in ("ai", "agent_reach", "external_agents", "processing"):
         raise HTTPException(status_code=404, detail="No such workload")
     workload_name = cast(WorkloadName, name)
     try:
