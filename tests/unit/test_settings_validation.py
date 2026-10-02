@@ -12,6 +12,13 @@ def n(key: str, raw: str) -> str:
     return normalise(ss.definition(key), raw)
 
 
+def test_select_options_cover_static_choices_and_reviewed_model_routes() -> None:
+    assert ss.options("legal_review_confirmed") == [("no", "No"), ("yes", "Yes")]
+    routes = ss.options("llm_route_claim_extract")
+    assert routes
+    assert all(value and label for value, label in routes)
+
+
 def test_registry_is_consistent() -> None:
     assert len(ss.REGISTRY) == len(ss._DEFS)
     groups = {g for g, _ in ss.GROUPS}

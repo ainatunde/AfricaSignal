@@ -16,6 +16,10 @@ from africasignal.web.render import STATIC_DIR
 from africasignal.web.routes import (
     account,
     admin,
+    admin_agent_reach,
+    admin_agents,
+    admin_automation,
+    admin_coverage,
     admin_feedback,
     admin_ops,
     api_v1,
@@ -46,6 +50,10 @@ def create_app() -> FastAPI:
     # One line per router; streams that add pages append theirs here.
     for router in (
         admin.router,
+        admin_automation.router,
+        admin_agent_reach.router,
+        admin_agents.router,
+        admin_coverage.router,
         admin_feedback.router,
         admin_ops.router,
         public.router,

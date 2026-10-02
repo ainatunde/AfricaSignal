@@ -1,0 +1,83 @@
+{% extends "admin/base.html" %}
+{% block title %}External agents{% endblock %}
+{% block content %}
+<h1>External-agent services</h1>
+<p>Configure compatible services implementing <code>africasignal.external-agent/1</code>. This registry is separate from model-provider routes and the fixed Agent Reach runner. Profiles and the global workload default off.</p>
+<p class="muted">Send public-metadata objectives only. Do not enter reader data, private source text, credentials, or other confidential information. Results are untrusted review material and cannot publish or create evidence.</p>
+<h2>Global workload</h2>
+{% if workload %}
+<p>State: <strong>{{ "Blocked by deployment" if workload.deployment_denied else ("Off" if not workload.enabled else ("Eligible now" if workload.active_now else "Waiting for schedule")) }}</strong> · {{ workload.active_tasks }} active · {{ workload.queued }} queued · next window {{ workload.next_open|when }} · revision {{ workload.revision }}.</p>
+<p><a href="/admin/automation">Configure switch, windows, concurrency and rolling task cap</a>.</p>
+{% else %}<p class="bad">External-agent migration is required.</p>{% endif %}
+<p class="warn">Cost ceilings are local reservations sent to the service. Health confirms only that the service declares enforcement. Verify that claim in a qualified staging environment. Remote usage and cost reports are untrusted.</p>
+
+<h2>Add compatible service</h2>
+<p>Requires authenticated HTTPS health, idempotent submission, status, cancellation and lookup by idempotency key. Only the declared scopes and limits are sent.</p>
+<form method="post" action="/admin/agents/profiles">
+<label for="new-slug">Profile ID</label><input id="new-slug" type="text" name="slug" pattern="[a-z0-9]+(-[a-z0-9]+)*" maxlength="64" required>
+<label for="new-name">Display name</label><input id="new-name" type="text" name="display_name" maxlength="100" required>
+<label for="new-endpoint">HTTPS service origin</label><input id="new-endpoint" type="url" name="endpoint_url" placeholder="https://agent.example" maxlength="500" required>
+<label for="new-credential">Bearer credential</label><input id="new-credential" type="password" name="credential" autocomplete="new-password" minlength="8" maxlength="500" required>
+<fieldset><legend>Allowed purposes</legend>
+<label class="inline"><input type="checkbox" name="allowed_purposes" value="research" checked> Public research</label>
+<label class="inline"><input type="checkbox" name="allowed_purposes" value="summarize"> Summarize public material</label>
+<label class="inline"><input type="checkbox" name="allowed_purposes" value="classify"> Classify public metadata</label></fieldset>
+<label for="new-domains">Exact allowed domains, one per line</label><textarea id="new-domains" name="allowed_domains" rows="3" required placeholder="example.org"></textarea>
+<label for="new-steps">Maximum steps (1–10)</label><input id="new-steps" type="number" name="max_steps" min="1" max="10" value="4" required>
+<label for="new-timeout">Maximum runtime seconds</label><input id="new-timeout" type="number" name="timeout_seconds" min="1" max="300" value="120" required>
+<label for="new-output">Maximum output bytes</label><input id="new-output" type="number" name="max_output_bytes" min="1024" max="65536" value="16000" required>
+<label for="new-concurrency">Maximum concurrent tasks</label><input id="new-concurrency" type="number" name="max_concurrency" min="1" max="4" value="1" required>
+<label for="new-task-limit">Maximum starts per rolling 24 hours</label><input id="new-task-limit" type="number" name="max_tasks_per_day" min="1" max="100" value="5" required>
+<label for="new-task-cost">Maximum reserved cost per task (USD)</label><input id="new-task-cost" type="number" name="max_cost_per_task_usd" min="0.0001" max="100" step="0.0001" value="0.10" required>
+<label for="new-day-cost">Maximum reserved spend per rolling 24 hours (USD)</label><input id="new-day-cost" type="number" name="max_spend_per_day_usd" min="0.01" max="1000" step="0.01" value="0.50" required>
+<p><button type="submit">Save disabled profile</button></p></form>
+
+<h2>Profiles</h2>
+{% for p in profiles %}
+<section aria-labelledby="profile-{{ p.slug }}">
+<h3 id="profile-{{ p.slug }}">{{ p.display_name }} <span class="muted">({{ p.slug }})</span></h3>
+<p><strong>{{ p.state }}</strong> · revision {{ p.revision }} · {{ p.active_tasks }} active · {{ p.recent_tasks_24h }}/{{ p.max_tasks_per_day }} starts/24h · health {{ "current" if p.health_current else "stale or missing" }}.</p>
+<p>Endpoint: {{ p.endpoint_url }} · credential: {{ "write-only and configured" if p.credential_configured else "missing" }}.</p>
+<p>Purposes: {{ p.allowed_purposes|join(", ") }} · domains: {{ p.allowed_domains|join(", ") }}.</p>
+<p>Limits: {{ p.max_steps }} steps, {{ p.timeout_seconds }} sec, {{ p.max_output_bytes }} output bytes, {{ p.max_concurrency }} concurrent, USD {{ p.max_cost_per_task_usd }} per task / USD {{ p.max_spend_per_day_usd }} per rolling day.</p>
+<p class="muted">Remote declaration: {{ p.health_capabilities|join(", ") if p.health_capabilities else "not tested" }}; {{ p.health_enforced_limits|join(", ") if p.health_enforced_limits else "no limits verified" }}{% if p.health_max_concurrency %}; concurrency {{ p.health_max_concurrency }}{% endif %}. A declaration is not independent enforcement proof.</p>
+{% if p.health_checked_at %}<p class="muted">Last health check: {{ p.health_checked_at|when }}.</p>{% endif %}
+<form method="post" action="/admin/agents/profiles/{{ p.slug }}/enabled"><input type="hidden" name="expected_revision" value="{{ p.revision }}">
+<label class="inline"><input type="checkbox" name="enabled" value="on" {{ "checked" if p.enabled }}> Enable profile</label>
+<p><button type="submit">Save profile switch</button></p></form>
+<form method="post" action="/admin/agents/profiles/{{ p.slug }}/health"><button type="submit">Test authenticated protocol</button></form>
+{% if not p.enabled and p.active_tasks == 0 %}
+<details><summary>Edit profile settings</summary><p>Changing settings clears health. Leave the secret blank to retain it.</p>
+<form method="post" action="/admin/agents/profiles/{{ p.slug }}"><input type="hidden" name="expected_revision" value="{{ p.revision }}">
+<label for="name-{{ p.slug }}">Display name</label><input id="name-{{ p.slug }}" type="text" name="display_name" value="{{ p.display_name }}" maxlength="100" required>
+<label for="endpoint-{{ p.slug }}">HTTPS origin</label><input id="endpoint-{{ p.slug }}" type="url" name="endpoint_url" value="{{ p.endpoint_url }}" maxlength="500" required>
+<label for="credential-{{ p.slug }}">Replace bearer credential (optional)</label><input id="credential-{{ p.slug }}" type="password" name="credential" autocomplete="new-password" minlength="8" maxlength="500">
+<fieldset><legend>Allowed purposes</legend>{% for purpose, title in [("research", "Public research"), ("summarize", "Summarize public material"), ("classify", "Classify public metadata")] %}
+<label class="inline"><input type="checkbox" name="allowed_purposes" value="{{ purpose }}" {{ "checked" if purpose in p.allowed_purposes }}> {{ title }}</label>{% endfor %}</fieldset>
+<label for="domains-{{ p.slug }}">Exact allowed domains, one per line</label><textarea id="domains-{{ p.slug }}" name="allowed_domains" rows="3" required>{{ p.allowed_domains|join("\n") }}</textarea>
+<label for="steps-{{ p.slug }}">Maximum steps</label><input id="steps-{{ p.slug }}" type="number" name="max_steps" min="1" max="10" value="{{ p.max_steps }}" required>
+<label for="timeout-{{ p.slug }}">Maximum runtime seconds</label><input id="timeout-{{ p.slug }}" type="number" name="timeout_seconds" min="1" max="300" value="{{ p.timeout_seconds }}" required>
+<label for="output-{{ p.slug }}">Maximum output bytes</label><input id="output-{{ p.slug }}" type="number" name="max_output_bytes" min="1024" max="65536" value="{{ p.max_output_bytes }}" required>
+<label for="concurrency-{{ p.slug }}">Maximum concurrent tasks</label><input id="concurrency-{{ p.slug }}" type="number" name="max_concurrency" min="1" max="4" value="{{ p.max_concurrency }}" required>
+<label for="tasks-{{ p.slug }}">Maximum starts per rolling day</label><input id="tasks-{{ p.slug }}" type="number" name="max_tasks_per_day" min="1" max="100" value="{{ p.max_tasks_per_day }}" required>
+<label for="task-cost-{{ p.slug }}">Maximum reserved cost per task (USD)</label><input id="task-cost-{{ p.slug }}" type="number" name="max_cost_per_task_usd" min="0.0001" max="100" step="0.0001" value="{{ p.max_cost_per_task_usd }}" required>
+<label for="day-cost-{{ p.slug }}">Maximum reserved spend per rolling day (USD)</label><input id="day-cost-{{ p.slug }}" type="number" name="max_spend_per_day_usd" min="0.01" max="1000" step="0.01" value="{{ p.max_spend_per_day_usd }}" required>
+<p><button type="submit">Save profile revision</button></p></form></details>{% endif %}
+{% if workload and workload.effective and p.enabled and p.health_current %}
+<h4>Start supervised task</h4><form method="post" action="/admin/agents/profiles/{{ p.slug }}/tasks">
+<label for="purpose-{{ p.slug }}">Purpose</label><select id="purpose-{{ p.slug }}" name="purpose" required>{% for purpose in p.allowed_purposes %}<option value="{{ purpose }}">{{ purpose|title }}</option>{% endfor %}</select>
+<label for="objective-{{ p.slug }}">Public research objective</label><textarea id="objective-{{ p.slug }}" name="objective" rows="3" minlength="8" maxlength="2000" required></textarea>
+<p class="muted">Only this objective, the purpose and exact allowed domains are sent. No source documents or reader data are included.</p><button type="submit">Queue task</button></form>
+{% else %}<p class="muted">Task admission requires the global switch and window, this profile switch, and a current health check.</p>{% endif %}
+</section>
+{% else %}<p>No external-agent profiles configured.</p>{% endfor %}
+
+<h2>Recent tasks</h2><div class="scroll"><table>
+<thead><tr><th scope="col">Created</th><th scope="col">Agent and purpose</th><th scope="col">State</th><th scope="col">Output and usage</th><th scope="col">Action</th></tr></thead>
+<tbody>{% for task in tasks %}<tr>
+<td>{{ task.created_at|when }}</td><td>{{ task.profile_slug }} · {{ task.purpose|title }}<br>{{ task.objective }}</td>
+<td>{{ task.status }}<br>Local reservation USD {{ task.reserved_cost_usd }}{% if task.last_error %}<br>{{ task.last_error }}{% endif %}</td>
+<td>{% if task.result_text %}<pre>{{ task.result_text }}</pre>{% else %}—{% endif %}{% if task.reported_usage %}<p class="muted">Unverified remote usage: {{ task.reported_usage }}</p>{% endif %}</td>
+<td>{% if task.status in ("pending", "admitted", "running", "cancellation_requested", "outcome_unknown") %}<form method="post" action="/admin/agents/tasks/{{ task.id }}/cancel"><button type="submit">Cancel / reconcile</button></form>{% else %}—{% endif %}</td>
+</tr>{% else %}<tr><td colspan="5">No external-agent tasks yet.</td></tr>{% endfor %}</tbody></table></div>
+{% endblock %}

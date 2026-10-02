@@ -21,7 +21,9 @@ class BudgetExhausted(LlmError):
     """
 
     def __init__(self, spent: object, limit: object, retry_at: datetime) -> None:
-        super().__init__(f"daily LLM budget reached: spent {spent} of {limit} USD")
+        super().__init__(
+            f"daily LLM budget cannot reserve this call: projected use {spent} exceeds {limit} USD"
+        )
         self.retry_at = retry_at
 
 
@@ -44,3 +46,11 @@ class SchemaValidationError(LlmError):
 
 class ProviderRefused(LlmError):
     """The model declined the request (``stop_reason: refusal``)."""
+
+
+class WorkloadUnavailable(LlmError):
+    """A feature is disabled or its operating window is closed; defer without consuming a try."""
+
+    def __init__(self, retry_at: datetime, reason: str) -> None:
+        super().__init__(reason)
+        self.retry_at = retry_at

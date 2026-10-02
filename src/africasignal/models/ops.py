@@ -5,10 +5,12 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -16,6 +18,7 @@ from sqlalchemy import (
     Numeric,
     Text,
     UniqueConstraint,
+    Uuid,
     func,
 )
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB
@@ -86,9 +89,36 @@ class Job(CreatedMixin, Base):
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default="5")
     locked_by: Mapped[str | None] = mapped_column(Text)
+    # Worker ids are reused across claims. This unique token fences stale attempts, including
+    # a reclaim by the same worker process.
+    lease_token: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LlmBudgetReservation(CreatedMixin, Base):
+    """Durable upper-bound reservations that prevent concurrent model calls exceeding the cap."""
+
+    __tablename__ = "llm_budget_reservation"
+    __table_args__ = (
+        CheckConstraint("state IN ('reserved', 'uncertain', 'settled')", name="state_valid"),
+        CheckConstraint("reserved_usd >= 0", name="amount_nonnegative"),
+        CheckConstraint("input_token_bound >= 0", name="input_nonnegative"),
+        CheckConstraint("output_token_bound >= 0", name="output_nonnegative"),
+        Index("ix_llm_budget_reservation_day_state", "budget_day", "state"),
+        Index("ix_llm_budget_reservation_job_state", "job_id", "state"),
+    )
+
+    budget_day: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("job.id", ondelete="SET NULL"))
+    input_token_bound: Mapped[int] = mapped_column(Integer, nullable=False)
+    output_token_bound: Mapped[int] = mapped_column(Integer, nullable=False)
+    reserved_usd: Mapped[Decimal] = mapped_column(Numeric(10, 5), nullable=False)
+    actual_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(10, 5))
+    state: Mapped[str] = mapped_column(Text, nullable=False, server_default="reserved")
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(Text)
 
 
 class Event(CreatedMixin, Base):
@@ -184,6 +214,180 @@ class ChannelPost(CreatedMixin, Base):
     )
     post_url: Mapped[str | None] = mapped_column(Text)
     note: Mapped[str | None] = mapped_column(Text)
+
+
+class WorkloadControl(Base):
+    """Versioned runtime switch and schedule for one resource-intensive workload."""
+
+    __tablename__ = "workload_control"
+    __table_args__ = (
+        CheckConstraint(
+            "name IN ('ai', 'agent_reach', 'external_agents', 'processing')", name="name_valid"
+        ),
+        CheckConstraint("revision > 0", name="revision_positive"),
+    )
+
+    name: Mapped[str] = mapped_column(Text, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    schedule: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class AgentReachTask(CreatedMixin, Base):
+    """A bounded discovery request sent to an isolated Agent Reach bridge."""
+
+    __tablename__ = "agent_reach_task"
+    __table_args__ = (
+        CheckConstraint("topic IN ('energy', 'food')", name="topic_valid"),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed', 'cancellation_requested', "
+            "'cancelled', 'expired', 'outcome_unknown')",
+            name="status_valid",
+        ),
+        CheckConstraint("max_results BETWEEN 1 AND 20", name="max_results_bounds"),
+        CheckConstraint("control_revision > 0", name="control_revision_positive"),
+        Index("ix_agent_reach_task_status_created", "status", "created_at"),
+        UniqueConstraint("external_task_id", name="external_task_id_unique"),
+    )
+
+    requested_by_operator_id: Mapped[int] = mapped_column(ForeignKey("operator.id"), nullable=False)
+    topic: Mapped[str] = mapped_column(Text, nullable=False)
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    max_results: Mapped[int] = mapped_column(Integer, nullable=False)
+    control_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    runner_endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
+    external_task_id: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    retention_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AgentReachCandidate(CreatedMixin, Base):
+    """Metadata-only discovery result awaiting a human decision."""
+
+    __tablename__ = "agent_reach_candidate"
+    __table_args__ = (
+        UniqueConstraint("task_id", "canonical_url", name="task_canonical_url_unique"),
+        CheckConstraint(
+            "status IN ('pending', 'rejected', 'fetch_queued')",
+            name="status_valid",
+        ),
+        Index("ix_agent_reach_candidate_status_created", "status", "created_at"),
+    )
+
+    task_id: Mapped[int] = mapped_column(
+        ForeignKey("agent_reach_task.id", ondelete="CASCADE"), nullable=False
+    )
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    canonical_url: Mapped[str] = mapped_column(Text, nullable=False)
+    domain: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text)
+    publisher: Mapped[str | None] = mapped_column(Text)
+    platform: Mapped[str] = mapped_column(Text, nullable=False)
+    backend: Mapped[str] = mapped_column(Text, nullable=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retrieved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    queued_source_id: Mapped[int | None] = mapped_column(
+        ForeignKey("source.id", ondelete="SET NULL")
+    )
+    retention_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ExternalAgentProfile(Base):
+    """Operator-configured HTTPS agent with a bounded, versioned execution contract."""
+
+    __tablename__ = "external_agent_profile"
+    __table_args__ = (
+        CheckConstraint("slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'", name="slug_valid"),
+        CheckConstraint("revision > 0", name="revision_positive"),
+        CheckConstraint("max_steps BETWEEN 1 AND 10", name="max_steps_bounds"),
+        CheckConstraint("timeout_seconds BETWEEN 1 AND 300", name="timeout_bounds"),
+        CheckConstraint("max_output_bytes BETWEEN 1024 AND 65536", name="output_bounds"),
+        CheckConstraint("max_tasks_per_day BETWEEN 1 AND 100", name="daily_tasks_bounds"),
+        CheckConstraint("max_concurrency BETWEEN 1 AND 4", name="concurrency_bounds"),
+        CheckConstraint("max_cost_per_task_usd > 0", name="task_cost_positive"),
+        CheckConstraint("max_spend_per_day_usd >= max_cost_per_task_usd", name="daily_cost_bounds"),
+        Index("ix_external_agent_profile_enabled", "enabled", "created_at"),
+    )
+
+    slug: Mapped[str] = mapped_column(Text, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    endpoint_url: Mapped[str] = mapped_column(Text, nullable=False)
+    credential_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    allowed_purposes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    allowed_domains: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    max_steps: Mapped[int] = mapped_column(Integer, nullable=False)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_output_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_tasks_per_day: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_concurrency: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_cost_per_task_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    max_spend_per_day_usd: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    health_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    health_token_fingerprint: Mapped[str | None] = mapped_column(Text)
+    health_capabilities: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
+    health_enforced_limits: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
+    health_max_concurrency: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ExternalAgentTask(CreatedMixin, Base):
+    """Durable, supervised task sent to one compatible external-agent profile."""
+
+    __tablename__ = "external_agent_task"
+    __table_args__ = (
+        CheckConstraint("purpose IN ('research', 'summarize', 'classify')", name="purpose_valid"),
+        CheckConstraint(
+            "status IN ('pending', 'admitted', 'running', 'cancellation_requested', "
+            "'succeeded', 'failed', 'expired', 'cancelled', 'outcome_unknown')",
+            name="status_valid",
+        ),
+        CheckConstraint("profile_revision > 0", name="profile_revision_positive"),
+        CheckConstraint("workload_revision > 0", name="workload_revision_positive"),
+        CheckConstraint("reserved_cost_usd > 0", name="reserved_cost_positive"),
+        UniqueConstraint("idempotency_key", name="idempotency_key_unique"),
+        UniqueConstraint("profile_slug", "external_task_id", name="profile_external_task_unique"),
+        Index("ix_external_agent_task_status_created", "status", "created_at"),
+        Index("ix_external_agent_task_profile_status", "profile_slug", "status", "created_at"),
+    )
+
+    profile_slug: Mapped[str] = mapped_column(
+        ForeignKey("external_agent_profile.slug", ondelete="RESTRICT"), nullable=False
+    )
+    requested_by_operator_id: Mapped[int] = mapped_column(ForeignKey("operator.id"), nullable=False)
+    purpose: Mapped[str] = mapped_column(Text, nullable=False)
+    objective: Mapped[str] = mapped_column(Text, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(Text, nullable=False)
+    profile_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    workload_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    reserved_cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 4), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending")
+    external_task_id: Mapped[str | None] = mapped_column(Text)
+    result_text: Mapped[str | None] = mapped_column(Text)
+    reported_usage: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    retention_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text)
 
 
 class Setting(Base):

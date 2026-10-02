@@ -18,10 +18,10 @@ from africasignal.llm import (
     SchemaValidationError,
     UnknownModelPrice,
 )
-from africasignal.llm.budget import budget_status, defer_until_next_day
+from africasignal.llm.budget import budget_status, defer_until_next_day, reserve_call
 from africasignal.llm.config import LlmConfig, ModelPrice
 from africasignal.llm.fake import FakeProvider, FakeReply
-from africasignal.models import Job, LlmCall, LlmResponseCache
+from africasignal.models import Job, LlmBudgetReservation, LlmCall, LlmResponseCache
 
 SCHEMA = {
     "type": "object",
@@ -155,28 +155,96 @@ def test_the_schema_is_part_of_the_cache_key(session: Session) -> None:
 
 def test_budget_exhaustion_stops_calls_and_names_the_next_day(session: Session) -> None:
     fake = FakeProvider([reply(), reply()])
-    a = adapter(session, fake, budget=0.0003)  # one call (0.00035) passes the cap
+    # The first call's actual cost is small, but its maximum possible usage is reserved before
+    # sending. That leaves too little headroom to admit a second worst-case request.
+    a = adapter(session, fake, budget=0.0055)
     call(a, user="one")
     with pytest.raises(BudgetExhausted) as exc:
         call(a, user="two")
     assert len(fake.calls) == 1  # nothing was sent the second time
     # 12:00 UTC on 30 Sep is 13:00 in Lagos; the next Lagos day starts at 23:00 UTC.
     assert exc.value.retry_at == datetime(2026, 9, 30, 23, 0, tzinfo=UTC)
-    assert budget_status(session, Decimal("0.0003"), NOW).exhausted
+    status = budget_status(session, Decimal("0.0055"), NOW)
+    assert status.spent == CALL_COST and status.reserved == 0 and not status.exhausted
+
+
+def test_ambiguous_provider_failure_keeps_the_spend_reservation(session: Session) -> None:
+    def timeout(_request) -> object:  # type: ignore[no-untyped-def]
+        raise TimeoutError("provider timed out after request send")
+
+    a = adapter(session, FakeProvider(timeout), budget=0.0055)
+    with pytest.raises(TimeoutError):
+        call(a, user="ambiguous")
+    status = budget_status(session, Decimal("0.0055"), NOW)
+    assert status.spent == 0 and status.reserved > 0
+    reservation = session.execute(
+        select(LlmBudgetReservation.state, LlmBudgetReservation.error)
+    ).one()
+    assert reservation.state == "uncertain"
+    assert reservation.error == "TimeoutError"
+
+
+def test_concurrent_admissions_cannot_reserve_more_than_the_daily_limit(engine: Engine) -> None:
+    import threading
+
+    from africasignal.models import LlmBudgetReservation
+
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    start = threading.Barrier(2)
+    outcomes: list[bool] = []
+    lock = threading.Lock()
+    now = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+
+    def reserve() -> None:
+        with factory() as local:
+            start.wait()
+            try:
+                reserve_call(
+                    local,
+                    limit=Decimal("0.00001"),
+                    price=ModelPrice(input=Decimal(1), output=Decimal(1)),
+                    input_token_bound=0,
+                    output_token_bound=10,
+                    job_id=None,
+                    per_job_limit=100,
+                    now=now,
+                )
+                accepted = True
+            except BudgetExhausted:
+                accepted = False
+            with lock:
+                outcomes.append(accepted)
+
+    threads = [threading.Thread(target=reserve) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert outcomes.count(True) == 1
+    assert outcomes.count(False) == 1
+    with factory() as observer:
+        reservations = list(
+            observer.scalars(
+                select(LlmBudgetReservation).where(
+                    LlmBudgetReservation.budget_day == datetime(2026, 9, 19, 23, 0, tzinfo=UTC)
+                )
+            )
+        )
+        assert sum((r.reserved_usd for r in reservations), Decimal(0)) <= Decimal("0.00001")
 
 
 def test_a_cached_answer_is_still_served_after_the_budget_is_spent(session: Session) -> None:
     fake = FakeProvider([reply("kept")])
-    a = adapter(session, fake, budget=0.0003)
+    a = adapter(session, fake, budget=0.0055)
     call(a, user="one")
     assert call(a, user="one") == {"answer": "kept"}
 
 
 def test_the_budget_starts_again_on_the_next_lagos_day(session: Session) -> None:
     fake = FakeProvider([reply(), reply()])
-    call(adapter(session, fake, budget=0.0003), user="one")
+    call(adapter(session, fake, budget=0.0055), user="one")
     tomorrow = NOW + timedelta(hours=12)  # 00:00 UTC on 1 Oct is 01:00 in Lagos: a new day
-    call(adapter(session, fake, budget=0.0003, now=tomorrow), user="two")
+    call(adapter(session, fake, budget=0.0055, now=tomorrow), user="two")
     assert len(fake.calls) == 2
 
 
@@ -241,15 +309,16 @@ def test_a_model_without_a_price_is_refused_before_any_call(session: Session) ->
 def test_a_job_cannot_exceed_its_token_allowance(session: Session) -> None:
     job_id = enqueue(session, "extract_claims", {})
     assert job_id is not None
-    fake = FakeProvider([reply(), reply()])
-    a = adapter(session, fake, per_job=200)  # each call uses 150 tokens
+    fake = FakeProvider([reply(), reply(), reply()])
+    a = adapter(session, fake, per_job=600)  # reserve prompt plus maximum output on every call
     call(a, user="one", job_id=job_id)
-    assert fake.calls[0].max_tokens == 200  # not clamped: the allowance was 200, asked for 1000
     call(a, user="two", job_id=job_id)
-    assert fake.calls[1].max_tokens == 50  # 200 - 150 left
+    call(a, user="three", job_id=job_id)
     with pytest.raises(JobTokenLimitExceeded):
-        call(a, user="three", job_id=job_id)
-    assert len(fake.calls) == 2
+        call(a, user="four", job_id=job_id)
+    assert len(fake.calls) == 3
+    assert sum(row.input_tokens + row.output_tokens for row in calls(session)) <= 600
+    assert all(0 < request.max_tokens < 1000 for request in fake.calls)
     assert {c.job_id for c in calls(session)} == {job_id}
 
 
@@ -315,7 +384,7 @@ def test_a_budget_changed_in_the_console_applies_to_the_next_call(
     fake = FakeProvider([reply(), reply()])
     a = settings_adapter(session, fake)
     assert a.daily_budget_usd == Decimal("10.0")  # the default, nothing saved yet
-    settings_store.set_value(session, operator, "llm_daily_budget_usd", "0.0003")
+    settings_store.set_value(session, operator, "llm_daily_budget_usd", "0.0055")
     call(a, user="one")
     with pytest.raises(BudgetExhausted):
         call(a, user="two")
@@ -331,7 +400,9 @@ def test_the_budget_from_the_environment_is_the_fallback(
     assert settings_adapter(session, FakeProvider([])).daily_budget_usd == Decimal("3.5")
 
 
-def test_the_per_job_token_limit_comes_from_the_console(session: Session, operator) -> None:  # type: ignore[no-untyped-def]
+def test_the_per_job_token_limit_reserves_the_next_prompt_and_output(
+    session: Session, operator
+) -> None:  # type: ignore[no-untyped-def]
     from africasignal import settings_store
 
     settings_store.set_value(session, operator, "llm_per_job_max_tokens", "1000")
@@ -341,8 +412,10 @@ def test_the_per_job_token_limit_comes_from_the_console(session: Session, operat
     a = settings_adapter(session, fake)
     assert a.per_job_max_tokens == 1000
     call(a, user="one", job_id=job_id)
-    call(a, user="two", job_id=job_id)
-    assert fake.calls[1].max_tokens == 100  # 1000 - 900 used by the first call
+    with pytest.raises(JobTokenLimitExceeded):
+        call(a, user="two", job_id=job_id)
+    assert len(fake.calls) == 1  # prompt and output upper bounds are checked before send
+    assert fake.calls[0].max_tokens < 1000
 
 
 def test_model_accounting_does_not_commit_callers_writes(engine: Engine) -> None:

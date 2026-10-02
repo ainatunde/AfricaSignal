@@ -91,9 +91,14 @@ def evaluate(session: Session, now: datetime) -> list[Finding]:
         findings.append(
             Finding(
                 LLM_BUDGET_80,
-                f"Model spend today is ${budget.spent:.2f} of ${budget.limit:.2f} "
+                "Model budget use today is "
+                f"${budget.committed_and_reserved:.2f} of ${budget.limit:.2f} "
                 f"({budget.fraction:.0%}). New model work waits for the next day once it is spent.",
-                {"spent_usd": f"{budget.spent:.4f}", "limit_usd": f"{budget.limit:.2f}"},
+                {
+                    "spent_usd": f"{budget.spent:.4f}",
+                    "reserved_usd": f"{budget.reserved:.4f}",
+                    "limit_usd": f"{budget.limit:.2f}",
+                },
             )
         )
     return findings

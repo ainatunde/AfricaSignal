@@ -45,11 +45,15 @@ def _enqueue(factory: sessionmaker[Session], kind: str = "test", **kw: object) -
     return job_id
 
 
+def _test_handler(_ctx: JobContext) -> None:
+    pass
+
+
 @pytest.fixture(autouse=True)
 def no_real_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Importing a handler module (other test modules do) registers it for good. These tests
-    decide which kinds have a handler, so start each from an empty registry."""
+    """Start with only the generic test job handler; individual cases add their own kinds."""
     monkeypatch.setattr(handlers, "HANDLERS", {})
+    monkeypatch.setitem(handlers.HANDLERS, "test", _test_handler)
 
 
 def _register(monkeypatch: pytest.MonkeyPatch, kind: str, fn: handlers.Handler) -> None:
@@ -97,7 +101,7 @@ def test_four_threads_claim_100_jobs_each_exactly_once(factory: sessionmaker[Ses
                     return
                 with lock:
                     claimed.append(job.id)
-                queue.complete(s, job.id, worker_id)
+                queue.complete(s, job.id, job.lock_owner, job.lease_token)
                 s.commit()
 
     threads = [threading.Thread(target=run, args=(f"w{i}",)) for i in range(4)]
@@ -162,16 +166,25 @@ def test_stale_worker_cannot_complete_or_fail_a_reclaimed_job(
 ) -> None:
     job_id = _enqueue(factory)
     with factory() as s:
-        queue.claim(s, "old")
+        old_attempt = queue.claim(s, "same-worker")
+        assert old_attempt is not None
         s.execute(text("UPDATE job SET lease_until = now() - interval '1 second'"))
         queue.reclaim_expired(s)
-        queue.claim(s, "new")
+        new_attempt = queue.claim(s, "same-worker")
+        assert new_attempt is not None
         s.commit()
+    assert old_attempt.lease_token != new_attempt.lease_token
     with factory() as s:
-        assert queue.complete(s, job_id, "old") is False
-        assert queue.fail(s, job_id, "old", "boom") is None
-        assert queue.extend_lease(s, job_id, "old") is False
-    assert _row(factory, job_id)["status"] == "running"
+        assert queue.complete(s, job_id, old_attempt.lock_owner, old_attempt.lease_token) is False
+        assert (
+            queue.fail(s, job_id, old_attempt.lock_owner, old_attempt.lease_token, "boom") is None
+        )
+        assert (
+            queue.extend_lease(s, job_id, old_attempt.lock_owner, old_attempt.lease_token) is False
+        )
+        assert queue.complete(s, job_id, new_attempt.lock_owner, new_attempt.lease_token) is True
+        s.commit()
+    assert _row(factory, job_id)["status"] == "done"
 
 
 # --- failure and backoff ------------------------------------------------------------------
@@ -232,8 +245,29 @@ def test_unknown_job_kind_fails_with_clear_error(factory: sessionmaker[Session])
     job_id = _enqueue(factory, "no_such_kind")
     Worker(factory, "w").run_once()
     row = _row(factory, job_id)
-    assert row["status"] == "queued"
-    assert "no handler registered" in str(row["last_error"])
+    assert row["status"] == "dead"
+    assert row["last_error"] == "unregistered job kind; quarantined by admission"
+
+    with factory() as s:
+        params = {"job_id": job_id}
+        count = s.execute(
+            text(
+                "SELECT count(*) FROM audit_log WHERE operator_id IS NULL "
+                "AND action = 'job.quarantine_unknown_kind' "
+                "AND target_kind = 'job' AND target_id = :job_id"
+            ),
+            params,
+        ).scalar_one()
+        assert count == 1
+        s.execute(
+            text(
+                "DELETE FROM audit_log WHERE operator_id IS NULL "
+                "AND action = 'job.quarantine_unknown_kind' "
+                "AND target_kind = 'job' AND target_id = :job_id"
+            ),
+            params,
+        )
+        s.commit()
 
 
 def test_failed_handler_work_is_rolled_back(
@@ -524,10 +558,13 @@ def test_load_all_imports_every_handler_and_source_module() -> None:
 def test_expired_lease_cannot_be_completed_failed_or_revived(factory):
     job_id = _enqueue(factory)
     with factory() as session:
-        queue.claim(session, "expired-owner")
+        attempt = queue.claim(session, "expired-owner")
+        assert attempt is not None
         session.execute(text("UPDATE job SET lease_until = now() - interval '1 second'"))
         session.commit()
     with factory() as session:
-        assert not queue.complete(session, job_id, "expired-owner")
-        assert not queue.extend_lease(session, job_id, "expired-owner")
-        assert queue.fail(session, job_id, "expired-owner", "too late") is None
+        assert not queue.complete(session, job_id, attempt.lock_owner, attempt.lease_token)
+        assert not queue.extend_lease(session, job_id, attempt.lock_owner, attempt.lease_token)
+        assert (
+            queue.fail(session, job_id, attempt.lock_owner, attempt.lease_token, "too late") is None
+        )

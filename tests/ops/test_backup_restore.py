@@ -369,9 +369,25 @@ def test_s3_backup_copies_objects_and_restore_verifies_them(
     assert any(k.startswith("africasignal/staging/db/africasignal-") for k in keys)
     assert "africasignal/staging/objects/evidence/ab/cd/one.html" in keys
 
-    # Running again must not trip the immutability check on objects already copied.
+    # A second backup is idempotent. A same-size content replacement must update the mirror,
+    # while expiring an evidence object removes it from the mirror and leaves the DB dump retained.
     assert run(BACKUP, env=env).returncode == 0
+    s3.put_object(Bucket="app", Key="evidence/ab/cd/one.html", Body=b"ONE")
+    s3.delete_object(Bucket="app", Key="evidence/ef/01/two.pdf")
+    psql(scratch_db, "DELETE FROM evidence_document WHERE storage_key = 'evidence/ef/01/two.pdf'")
+    mirrored = run(BACKUP, env=env)
+    assert mirrored.returncode == 0, mirrored.stderr
+    keys = {o["Key"] for o in s3.list_objects_v2(Bucket="backups")["Contents"]}
+    assert "africasignal/staging/objects/evidence/ab/cd/one.html" in keys
+    assert "africasignal/staging/objects/evidence/ef/01/two.pdf" not in keys
+    assert (
+        s3.get_object(Bucket="backups", Key="africasignal/staging/objects/evidence/ab/cd/one.html")[
+            "Body"
+        ].read()
+        == b"ONE"
+    )
 
+    # Restore verification checks only database-referenced evidence, which should remain mirrored.
     restore_env = {
         **{k: v for k, v in env.items() if k.startswith("BACKUP_") or k == "no_proxy"},
         "BACKUP_S3_PREFIX": "africasignal/staging",
@@ -392,10 +408,10 @@ def test_s3_backup_copies_objects_and_restore_verifies_them(
     )
     assert done.returncode == 0, done.stderr
     assert "all present" in done.stderr
-    assert s3.get_object(Bucket="drill", Key="evidence/ef/01/two.pdf")["Body"].read() == b"two"
+    assert s3.get_object(Bucket="drill", Key="evidence/ab/cd/one.html")["Body"].read() == b"ONE"
 
     # An object that the database points at but the bucket lacks is reported, not ignored.
-    s3.delete_object(Bucket="drill", Key="evidence/ef/01/two.pdf")
+    s3.delete_object(Bucket="drill", Key="evidence/ab/cd/one.html")
     done = run(
         RESTORE,
         "--target-url",
@@ -405,7 +421,7 @@ def test_s3_backup_copies_objects_and_restore_verifies_them(
         "5",
         env=restore_env,
     )
-    assert done.returncode != 0 and "MISSING object: evidence/ef/01/two.pdf" in done.stderr
+    assert done.returncode != 0 and "MISSING object: evidence/ab/cd/one.html" in done.stderr
 
     # The backup bucket must not be the app bucket.
     same = {**env, "BACKUP_S3_BUCKET": "app"}

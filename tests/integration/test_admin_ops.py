@@ -75,6 +75,8 @@ def post(admin: TestClient, path: str, **form: str):  # type: ignore[no-untyped-
 
 PAGES = (
     "/admin/jobs",
+    "/admin/agents",
+    "/admin/automation",
     "/admin/assessments",
     "/admin/range-checks",
     "/admin/costs",
@@ -100,6 +102,8 @@ def test_editors_cannot_open_or_use_the_pages(client: TestClient, session: Sessi
         assert client.get(path).status_code == 403, path
     assert post(client, "/admin/jobs/1/retry").status_code == 403
     assert post(client, "/admin/domains/reject", domain="a.example").status_code == 403
+    assert post(client, "/admin/agents/profiles").status_code == 403
+    assert client.get("/admin/api/agents").status_code == 403
     assert actions(session) == ["operator.sign_in"]
 
 

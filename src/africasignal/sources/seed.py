@@ -114,6 +114,10 @@ def seed_sources(
             result.created += 1
         else:
             desired = seed.model_dump(include=set(_MANAGED_FIELDS))
+            if source.pacing_override:
+                # Runtime pacing changed in the console remains operator-owned across imports.
+                desired.pop("schedule_minutes", None)
+                desired.pop("max_requests_per_hour", None)
             if desired["owner"] is None:
                 # The file does not know this source's owner; one an operator recorded in the
                 # console stays (a news outlet cannot be approved, or trusted, without one).

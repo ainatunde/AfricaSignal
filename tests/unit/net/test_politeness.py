@@ -110,3 +110,30 @@ def test_local_file_urls_bypass_the_gate() -> None:
 )
 def test_gate_fails_closed_on_invalid_urls(bad: str) -> None:
     assert politeness_gate(bad) is False
+
+
+def test_crawl_delay_forces_single_request_spacing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(politeness, "allowed_by_robots", lambda url, user_agent=None: True)
+    monkeypatch.setattr(
+        politeness.netutil, "robots_pacing", lambda url, user_agent=None: (7.0, None)
+    )
+    monkeypatch.setattr(
+        politeness, "rate_limiter", TokenBucketRateLimiter(rate=1000.0, capacity=1000.0)
+    )
+    url = "https://slow.example.ng/a"
+    assert politeness_gate(url) is True
+    assert politeness_gate(url) is False
+
+
+def test_robots_request_rate_bounds_burst_and_steady_rate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(politeness, "allowed_by_robots", lambda url, user_agent=None: True)
+    monkeypatch.setattr(
+        politeness.netutil, "robots_pacing", lambda url, user_agent=None: (None, (3, 60))
+    )
+    monkeypatch.setattr(
+        politeness, "rate_limiter", TokenBucketRateLimiter(rate=1000.0, capacity=1000.0)
+    )
+    results = [politeness_gate("https://limited.example.ng/a") for _ in range(5)]
+    assert results == [True, True, True, False, False]

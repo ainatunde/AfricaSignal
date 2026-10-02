@@ -34,7 +34,14 @@ jobs:
         with:
           path: data/places
           key: places-boundaries-v1
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rclone tesseract-ocr  # rclone: backup scripts; tesseract: NERC tariff PDFs
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ca-certificates curl tesseract-ocr
+          curl -fsSL https://downloads.rclone.org/v1.75.1/rclone-v1.75.1-linux-amd64.zip -o /tmp/rclone.zip
+          echo '982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab  /tmp/rclone.zip' | sha256sum -c -
+          python -c "import pathlib, zipfile; z=zipfile.ZipFile('/tmp/rclone.zip'); n=next(x for x in z.namelist() if x.endswith('/rclone')); pathlib.Path('/tmp/rclone').write_bytes(z.read(n))"
+          sudo install -m 0755 /tmp/rclone /usr/local/bin/rclone
+          rm /tmp/rclone /tmp/rclone.zip
       - run: pip install pip==26.2.1 setuptools==84.0.0 wheel==0.48.0
       - run: pip install -r requirements-dev.lock && pip install --no-deps --no-build-isolation -e ".[dev]"
       - run: pip check

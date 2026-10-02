@@ -1,0 +1,98 @@
+{% extends "admin/base.html" %}
+{% block title %}Agent Reach{% endblock %}
+{% block content %}
+<h1>Agent Reach discovery</h1>
+<p>Agent Reach is an optional research capability. Search results are untrusted leads, not evidence. AfricaSignal does not fetch a candidate page until an administrator maps it to an active, permitted source.</p>
+
+<h2>Agent Reach switch</h2>
+<p>State: <strong>{{ "On" if status.enabled else "Off" }}</strong></p>
+<form method="post" action="/admin/agent-reach/enabled">
+  <input type="hidden" name="expected_revision" value="{{ status.revision }}">
+  <label class="inline"><input type="checkbox" name="enabled" value="on" {{ "checked" if status.enabled }}>
+    Enable Agent Reach discovery</label>
+  <p class="muted">Off blocks new remote tasks and requests cancellation for active searches. Source permissions and publication remain separate controls.</p>
+  <p><button type="submit">Save Agent Reach switch</button></p>
+</form>
+
+<h2>Runner status</h2>
+<p role="status"><strong>{{ status.state }}</strong> · {{ status.reason }}</p>
+<p class="muted">This build supports only public YouTube metadata search through the official YouTube Data API v3. It does not install the upstream Agent-Reach CLI or enable browser/social capabilities.{% if status.backend %} Reported backend: {{ status.backend }}.{% endif %}</p>
+<p class="muted">The API key, backend deployment flag, runner image, TLS, and egress limits are deployment-owned. The dashboard switch cannot override a deployment-disabled capability.</p>
+{% if status.connection_checked_at %}<p class="muted">Last authenticated bridge check: {{ status.connection_checked_at|when }}.</p>{% endif %}
+{% if status.configured %}<form method="post" action="/admin/agent-reach/health"><button type="submit">Test runner connection</button></form>{% endif %}
+<p class="muted">{{ status.active_tasks }}/{{ status.max_concurrency }} concurrent tasks · {{ status.recent_tasks_24h }}/{{ status.daily_task_limit }} starts in 24h · revision {{ status.revision }} · next scheduled window {{ status.next_open|when }}.</p>
+<p><a href="/admin/automation">Change the Agent Reach switch and schedule</a> · <a href="/admin/settings#agent">Configure the isolated runner</a></p>
+
+<p class="muted">The rolling task-start cap bounds request volume, not monetary spend. The runner has no verified cost meter yet.</p>
+
+<h2>Start a bounded discovery task</h2>
+{% if status.effective and status.configured and status.connection_verified and status.active_tasks < status.max_concurrency and status.recent_tasks_24h < status.daily_task_limit %}
+<form method="post" action="/admin/agent-reach/tasks">
+  <label for="topic">Topic</label>
+  <select id="topic" name="topic">
+    <option value="energy" {{ 'selected' if submitted.get('topic', 'energy') == 'energy' }}>Energy</option>
+    <option value="food" {{ 'selected' if submitted.get('topic') == 'food' }}>Food</option>
+  </select>
+  <label for="query">Nigeria-focused search query</label>
+  <input id="query" name="query" type="text" maxlength="500" minlength="8" required value="{{ submitted.get('query', '') }}">
+  <label for="max_results">Maximum metadata leads</label>
+  <input id="max_results" name="max_results" type="number" min="1" max="20" value="{{ submitted.get('max_results', '10') }}" required>
+  <p class="muted">The workload schedule imposes a lower per-run cap. The isolated runner must not fetch pages, transcripts or attachments.</p>
+  <button type="submit">Queue discovery</button>
+</form>
+{% else %}
+<p class="muted">Task submission is unavailable until the workload is enabled and open, the runner check is current, and both task limits have capacity.</p>
+{% endif %}
+
+<h2>Recent tasks</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Created</th><th scope="col">Topic and query</th><th scope="col">State</th><th scope="col">Details</th><th scope="col">Action</th></tr></thead>
+  <tbody>
+  {% for task in tasks %}
+  <tr>
+    <td>{{ task.created_at|when }}</td>
+    <td>{{ task.topic|title }}<br>{{ task.query }}</td>
+    <td>{{ task.status }}</td>
+    <td>{{ task.last_error or '—' }}</td>
+    <td>{% if task.status in ('queued', 'running') %}
+      <form method="post" action="/admin/agent-reach/tasks/{{ task.id }}/cancel"><button type="submit">Cancel</button></form>
+    {% elif task.status == 'outcome_unknown' %}
+      <form method="post" action="/admin/agent-reach/tasks/{{ task.id }}/recover"><button type="submit">Check remote status</button></form>
+    {% else %}—{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="5">No tasks yet.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2>Candidate leads for human review</h2>
+<p>Runner-reported dates and summaries are unverified. Accepting a lead queues the existing RSS capture path with current source permission checks; it does not approve rights or publish content.</p>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Lead</th><th scope="col">Runner metadata</th><th scope="col">Topic</th><th scope="col">Decision</th></tr></thead>
+  <tbody>
+  {% for candidate, task in candidates %}
+  <tr>
+    <td><a href="{{ candidate.url }}" rel="noopener noreferrer" target="_blank">{{ candidate.title }}</a><br><span class="muted">{{ candidate.domain }}</span>
+      {% if candidate.summary %}<p>{{ candidate.summary }}</p>{% endif %}</td>
+    <td>{{ candidate.publisher or 'Publisher not supplied' }} · {{ candidate.platform }} / {{ candidate.backend }}<br>
+      Runner-reported publication: {{ candidate.published_at|when }}<br>Retrieved: {{ candidate.retrieved_at|when }}</td>
+    <td>{{ task.topic|title }}<br>{{ task.query }}</td>
+    <td>
+      <form method="post" action="/admin/agent-reach/candidates/{{ candidate.id }}/accept">
+        <label for="source-{{ candidate.id }}">Map to a permitted source</label>
+        <select id="source-{{ candidate.id }}" name="source_id" required>
+          <option value="">Choose a source</option>
+          {% for source in sources %}<option value="{{ source.id }}">{{ source.name }} ({{ source.home_url }})</option>{% endfor %}
+        </select>
+        <button type="submit">Accept and queue capture</button>
+      </form>
+      <form method="post" action="/admin/agent-reach/candidates/{{ candidate.id }}/reject"><button type="submit">Reject</button></form>
+    </td>
+  </tr>
+  {% else %}<tr><td colspan="4">No pending candidates.</td></tr>{% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

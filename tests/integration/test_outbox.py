@@ -57,6 +57,35 @@ def test_sends_marks_sent_and_scrubs_the_link(session: Session) -> None:
     assert len(provider.sent) == 1
 
 
+def test_staging_sends_only_to_allowlisted_test_recipients(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from africasignal.config import Settings
+    from africasignal.publish import outbox
+
+    monkeypatch.setattr(
+        outbox,
+        "get_settings",
+        lambda: Settings(ENV="staging", STAGING_EMAIL_ALLOWED_RECIPIENTS="qa@example.test"),
+    )
+    allowed = add_user(session, "qa@example.test", verified=False)
+    blocked = add_user(session, "reader@example.org", verified=False)
+    allowed_row = login_row(session, allowed.id, "login:staging:allowed")
+    blocked_row = login_row(session, blocked.id, "login:staging:blocked")
+    provider = FakeProvider()
+
+    result = dispatch_pending(session, provider, NOW)
+
+    assert (result.sent, result.dead) == (1, 1)
+    assert [message.to for message in provider.sent] == ["qa@example.test"]
+    assert (blocked_row.status, blocked_row.last_error) == (
+        "dead",
+        "staging recipient is not allowlisted",
+    )
+    assert "link" not in blocked_row.payload
+    assert allowed_row.status == "sent"
+
+
 def test_retryable_failure_backs_off_then_goes_dead(session: Session) -> None:
     user = add_user(session, "a@example.com")
     row = login_row(session, user.id)

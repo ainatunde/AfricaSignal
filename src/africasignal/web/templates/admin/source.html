@@ -32,6 +32,23 @@
 </form>
 {% endif %}
 
+{% if is_admin %}
+<h2>Collection pacing</h2>
+<form method="post" action="/admin/sources/{{ source.id }}/pacing">
+  {% if source.adapter != 'gdelt' %}
+  <label for="schedule_minutes">Poll interval (minutes)</label>
+  <input id="schedule_minutes" name="schedule_minutes" type="number" min="5" max="10080" value="{{ pacing.schedule_minutes }}" required>
+  <p class="muted">Between 5 minutes and 7 days. Saving resets the next due time from now.</p>
+  {% else %}
+  <p class="muted">GDELT's poll interval and replay limits are configured under <a href="/admin/settings#sources">Sources and discovery settings</a>.</p>
+  {% endif %}
+  <label for="max_requests_per_hour">Request ceiling per hour</label>
+  <input id="max_requests_per_hour" name="max_requests_per_hour" type="number" min="1" max="120" value="{{ pacing.max_requests_per_hour }}" required>
+  <p class="muted">This per-source ceiling is enforced by the fetcher. Shared-domain pacing across separate worker processes remains deployment-level.</p>
+  <p class="muted">{{ 'Console override; source imports preserve these values.' if source.pacing_override else 'Using the source registry defaults.' }}</p>
+  <button type="submit">Save collection pacing</button>
+</form>
+{% endif %}
 <h2>Permission versions</h2>
 <div class="scroll">
 <table>

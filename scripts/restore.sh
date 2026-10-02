@@ -180,7 +180,7 @@ if [ "$restore_objects" -eq 1 ] || [ "$verify_objects" -gt 0 ]; then
   if [ "$restore_objects" -eq 1 ]; then
     [ -n "${BACKUP_ROOT:-}" ] || { load_backup_settings; backup_root_init; }
     log "copying objects into $RESTORE_S3_BUCKET"
-    rclone copy "$BACKUP_ROOT/objects" "restore:$RESTORE_S3_BUCKET" --size-only --transfers 8 --checkers 16
+    rclone copy "$BACKUP_ROOT/objects" "restore:$RESTORE_S3_BUCKET" --checksum --transfers 8 --checkers 16
   fi
   if [ "$verify_objects" -gt 0 ]; then
     missing=0 checked=0

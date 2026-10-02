@@ -23,6 +23,7 @@ from sqlalchemy import func, or_, select, true
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from africasignal.config import get_settings
 from africasignal.jobs.queue import backoff_seconds
 from africasignal.models import AppUser, AssessmentVersion, LoginToken, Outbox, Situation
 from africasignal.publish import email_render
@@ -204,6 +205,12 @@ def _send_one(
             _scrub(row)
             result.dead += 1
             return
+        settings = get_settings()
+        if (
+            settings.env == "staging"
+            and message.to.strip().casefold() not in settings.staging_email_recipients
+        ):
+            raise EmailSendError("staging recipient is not allowlisted", retryable=False)
         row.provider_message_id = provider.send(message)
         if not row.provider_message_id or not row.provider_message_id.strip():
             raise EmailSendError("provider returned no message id; outcome uncertain")

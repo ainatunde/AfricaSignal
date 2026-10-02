@@ -356,6 +356,53 @@ def test_a_slow_redirect_chain_is_cut_off_at_the_deadline(web: FakeWeb, clock: l
     assert URL + "/last" not in web.fetched()
 
 
+def test_deadline_includes_ssrf_preflight(web: FakeWeb, clock: list[float], monkeypatch) -> None:
+    def slow_safety(url: str) -> bool:
+        clock[0] += 2.0
+        return True
+
+    monkeypatch.setattr(fetch_mod.netutil, "is_safe_public_url", slow_safety)
+    monkeypatch.setattr(fetch_mod.politeness, "politeness_gate", lambda *a, **k: True)
+    web.add(URL, content=b"must not be requested")
+    result = fetch_document(URL, deadline=1.0)
+    assert not result.success and "whole fetch took longer than 1 seconds" in (result.error or "")
+    assert web.fetched() == []
+
+
+def test_deadline_includes_robots_preflight(web: FakeWeb, clock: list[float], monkeypatch) -> None:
+    monkeypatch.setattr(fetch_mod.netutil, "is_safe_public_url", lambda url: True)
+
+    def slow_gate(*args, **kwargs) -> bool:
+        clock[0] += 2.0
+        return True
+
+    monkeypatch.setattr(fetch_mod.politeness, "politeness_gate", slow_gate)
+    web.add(URL, content=b"must not be requested")
+    result = fetch_document(URL, deadline=1.0)
+    assert not result.success and "whole fetch took longer than 1 seconds" in (result.error or "")
+    assert web.fetched() == []
+
+
+def test_remaining_fetch_budget_is_passed_to_robots_preflight(
+    web: FakeWeb, clock: list[float], monkeypatch
+) -> None:
+    def consume_preflight_budget(url: str) -> bool:
+        clock[0] += 0.25
+        return True
+
+    monkeypatch.setattr(fetch_mod.netutil, "is_safe_public_url", consume_preflight_budget)
+    seen: list[float] = []
+
+    def gate(*args, **kwargs) -> bool:
+        seen.append(kwargs["preflight_timeout"])
+        return False
+
+    monkeypatch.setattr(fetch_mod.politeness, "politeness_gate", gate)
+    result = fetch_document(URL, deadline=1.0)
+    assert result.abstained
+    assert seen == pytest.approx([0.75])
+
+
 def test_a_fetch_inside_the_deadline_is_untouched(web: FakeWeb, clock: list[float]) -> None:
     web.add(URL, stream=SlowStream(clock, seconds=1.0, chunks=5))
     result = fetch_document(URL, deadline=60.0)

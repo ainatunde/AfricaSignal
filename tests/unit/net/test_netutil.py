@@ -145,6 +145,42 @@ def test_robots_body_is_size_capped(web: FakeWeb) -> None:
     assert netutil.allowed_by_robots("https://site.example.ng/a") is True
 
 
+def test_robots_crawl_delay_and_request_rate_are_exposed(web: FakeWeb) -> None:
+    web.add(
+        "https://site.example.ng/robots.txt",
+        content=(
+            b"User-agent: AfricaSignalBot"
+            + bytes([10])
+            + b"Crawl-delay: 7"
+            + bytes([10])
+            + b"Request-rate: 3/60"
+            + bytes([10])
+            + b"User-agent: *"
+            + bytes([10])
+            + b"Disallow:"
+            + bytes([10])
+        ),
+    )
+    assert netutil.robots_pacing("https://site.example.ng/a", "AfricaSignalBot") == (
+        7.0,
+        (3, 60),
+    )
+
+
+def test_bounded_robots_timeout_failure_does_not_poison_cache(web: FakeWeb) -> None:
+    def timed_out(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("slow robots response")
+
+    url = "https://site.example.ng/robots.txt"
+    web.add(url, handler=timed_out)
+    assert netutil.allowed_by_robots("https://site.example.ng/a", timeout=0.1) is False
+    web.add(
+        url,
+        content=b"User-agent: *" + bytes([10]) + b"Disallow:" + bytes([10]),
+    )
+    assert netutil.allowed_by_robots("https://site.example.ng/a") is True
+
+
 def test_robots_server_error_means_disallow(web: FakeWeb) -> None:
     web.add("https://site.example.ng/robots.txt", status=500, content=b"oops")
     assert netutil.allowed_by_robots("https://site.example.ng/a") is False

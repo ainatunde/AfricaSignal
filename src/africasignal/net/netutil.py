@@ -37,7 +37,7 @@ ROBOTS_MAX_BYTES = 500_000
 _robots_cache: dict[str, tuple[float, RobotFileParser | None]] = {}
 
 
-def _robots_for(host_url: str) -> RobotFileParser | None:
+def _robots_for(host_url: str, timeout: float | None = None) -> RobotFileParser | None:
     parsed = urlparse(host_url)
     base = f"{parsed.scheme}://{parsed.netloc}"
     cached = _robots_cache.get(base)
@@ -46,12 +46,22 @@ def _robots_for(host_url: str) -> RobotFileParser | None:
     parser = RobotFileParser()
     parser.set_url(f"{base}/robots.txt")
     rp: RobotFileParser | None = parser
+    request_budget = min(10.0, timeout) if timeout is not None else 10.0
+    if request_budget <= 0:
+        parser.parse(["User-agent: *", "Disallow: /"])
+        return parser
+    deadline = time.monotonic() + request_budget
+    failed = False
     try:
+        transport = pinned_http_transport(host_url)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("robots preflight deadline exceeded")
         with (
             httpx.Client(
-                timeout=10.0,
+                timeout=remaining,
                 trust_env=False,
-                transport=pinned_http_transport(host_url),
+                transport=transport,
             ) as client,
             client.stream("GET", f"{base}/robots.txt", headers={"User-Agent": USER_AGENT}) as resp,
         ):
@@ -60,11 +70,10 @@ def _robots_for(host_url: str) -> RobotFileParser | None:
             elif not resp.is_success:
                 parser.parse(["User-agent: *", "Disallow: /"])
             else:
-                deadline = time.monotonic() + 10.0
                 body = b""
                 for chunk in resp.iter_bytes():
                     if time.monotonic() > deadline:
-                        raise TimeoutError("robots body deadline exceeded")
+                        raise TimeoutError("robots preflight deadline exceeded")
                     body += chunk
                     if len(body) >= ROBOTS_MAX_BYTES:
                         break
@@ -72,19 +81,49 @@ def _robots_for(host_url: str) -> RobotFileParser | None:
     except Exception:  # unreachable robots must disallow (RFC 9309)
         parser.parse(["User-agent: *", "Disallow: /"])
         rp = parser
-    _robots_cache[base] = (time.monotonic(), rp)
+        failed = True
+    # A request bounded by a caller's shorter fetch deadline must not poison the shared cache if
+    # it times out. The next fetch can retry with a fresh deadline.
+    if not (failed and timeout is not None):
+        _robots_cache[base] = (time.monotonic(), rp)
     return rp
 
 
-def allowed_by_robots(url: str, user_agent: str = USER_AGENT) -> bool:
-    """True if ``url`` may be fetched per the host's robots.txt (or non-http)."""
+def allowed_by_robots(
+    url: str, user_agent: str = USER_AGENT, *, timeout: float | None = None
+) -> bool:
+    """True if the URL may be fetched per the host's robots.txt (or non-http)."""
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         return True  # file:// and local paths aren't governed by robots
-    rp = _robots_for(url)
+    rp = _robots_for(url, timeout=timeout)
     if rp is None:
         return True
     return rp.can_fetch(user_agent, url)
+
+
+def robots_pacing(
+    url: str, user_agent: str = USER_AGENT, *, timeout: float | None = None
+) -> tuple[float | None, tuple[int, int] | None]:
+    """Return this agent's optional crawl-delay and request-rate from cached robots rules."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return None, None
+    rp = _robots_for(url, timeout=timeout)
+    if rp is None:
+        return None, None
+    delay = rp.crawl_delay(user_agent)
+    try:
+        delay_seconds = float(delay) if delay is not None else None
+    except (TypeError, ValueError):
+        delay_seconds = None
+    request_rate = rp.request_rate(user_agent)
+    rate = (
+        (request_rate.requests, request_rate.seconds)
+        if request_rate is not None and request_rate.requests > 0 and request_rate.seconds > 0
+        else None
+    )
+    return (delay_seconds if delay_seconds is not None and delay_seconds > 0 else None), rate
 
 
 def reset_cache() -> None:

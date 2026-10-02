@@ -13,10 +13,21 @@ from sqlalchemy.orm import Session
 from africasignal.models import LlmResponseCache
 
 
-def input_sha256(system: str, user: str, schema: dict[str, Any]) -> str:
+def input_sha256(
+    system: str,
+    user: str,
+    schema: dict[str, Any],
+    *,
+    semantic_config: dict[str, Any] | None = None,
+) -> str:
     """Hash of everything that decides the answer: both prompts and the response schema."""
     canonical = json.dumps(
-        {"system": system, "user": user, "schema": schema},
+        {
+            "system": system,
+            "user": user,
+            "schema": schema,
+            "semantic_config": semantic_config or {},
+        },
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,

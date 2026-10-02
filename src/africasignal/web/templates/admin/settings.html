@@ -16,13 +16,15 @@
   {% set d = f.defn %}
   <label for="f-{{ d.key }}">{{ d.label }}
     <span class="muted">· {% if d.secret and f.configured %}configured{% else %}{{ f.source }}{% endif %}{% if d.secret and f.configured and f.source_id != 'console' %} ({{ f.source|lower }}){% endif %}</span></label>
-  {% if d.kind == "choice" %}
+  {% if d.kind in ("choice", "model_route") %}
   <select id="f-{{ d.key }}" name="{{ d.key }}">
-    <option value="" {{ 'selected' if not f.value }}>Not set</option>
-    {% for c in d.choices %}<option value="{{ c }}" {{ 'selected' if f.value == c }}>{{ c }}</option>{% endfor %}
+    <option value="" {{ 'selected' if not f.value }}>Use configured default</option>
+    {% for value, label in f.options %}<option value="{{ value }}" {{ 'selected' if f.value == value }}>{{ label }}</option>{% endfor %}
   </select>
   {% elif d.secret %}
   <input id="f-{{ d.key }}" name="{{ d.key }}" type="password" autocomplete="new-password" placeholder="{{ 'Leave empty to keep the saved key' if f.configured else 'Paste the key' }}" maxlength="500">
+  {% elif d.kind in ("int", "float") %}
+  <input id="f-{{ d.key }}" name="{{ d.key }}" type="number" step="{{ '1' if d.kind == 'int' else 'any' }}" value="{{ f.value }}" {% if d.minimum is not none %}min="{{ d.minimum }}"{% endif %} {% if d.maximum is not none %}max="{{ d.maximum }}"{% endif %} {% if d.default %}placeholder="{{ d.default }}"{% endif %}>
   {% else %}
   <input id="f-{{ d.key }}" name="{{ d.key }}" type="text" value="{{ f.value }}" maxlength="500" {% if d.default %}placeholder="{{ d.default }}"{% endif %}>
   {% endif %}

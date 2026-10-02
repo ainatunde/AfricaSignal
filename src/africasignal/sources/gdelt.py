@@ -652,6 +652,7 @@ def poll(
     *,
     fetch: Fetcher | None = None,
     max_windows: int = MAX_WINDOWS_PER_POLL,
+    max_lookback_windows: int = MAX_LOOKBACK_WINDOWS,
 ) -> PollResult:
     """Process every window published since the last poll, oldest first (spec B6.7).
 
@@ -660,6 +661,10 @@ def poll(
     the poll (it is tried again next time) unless it is a 404 an hour or more behind the newest
     window, which GDELT has evidently skipped. The caller commits.
     """
+    if not 1 <= max_windows <= MAX_WINDOWS_PER_POLL:
+        raise ValueError("max_windows must be from 1 through 6")
+    if not 1 <= max_lookback_windows <= MAX_LOOKBACK_WINDOWS:
+        raise ValueError("max_lookback_windows must be from 1 through 96")
     fetch = fetch or fetch_document
     outcome = PollResult()
     listing = fetch(
@@ -675,11 +680,11 @@ def poll(
         todo = [latest.timestamp]
     else:
         todo = windows_between(done, latest.timestamp)
-        if len(todo) > MAX_LOOKBACK_WINDOWS:
+        if len(todo) > max_lookback_windows:
             log.warning(
-                "gdelt: %d windows behind; replaying the newest %d", len(todo), MAX_LOOKBACK_WINDOWS
+                "gdelt: %d windows behind; replaying the newest %d", len(todo), max_lookback_windows
             )
-            todo = todo[-MAX_LOOKBACK_WINDOWS:]
+            todo = todo[-max_lookback_windows:]
     newest = parse_timestamp(latest.timestamp)
 
     for timestamp in todo[:max_windows]:

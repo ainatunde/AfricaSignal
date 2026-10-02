@@ -9,7 +9,7 @@ recovery time 4 hours, dumps kept 30 days.
 | What | How | Where |
 |---|---|---|
 | PostgreSQL database (all tables, including emails of signed-in users) | `pg_dump --format=custom` by `scripts/backup.sh`, nightly at 02:30 UTC | `db/africasignal-<UTC timestamp>.dump` (or `.dump.enc`) plus a `.sha256` file, in the backup bucket |
-| Evidence objects (captured source documents in the app bucket) | `rclone copy` of the whole app bucket | `objects/` in the backup bucket |
+| Evidence and deletion-ledger objects | `rclone sync` of their current app-bucket prefixes; all other object prefixes are copied immutably | `objects/evidence/` and `objects/deletions/` mirrors plus other current object copies |
 
 Not backed up: the `.env` file and secrets (keep them in your password manager, not in the
 repository), container images (rebuilt from the repository), and container logs.
@@ -18,11 +18,13 @@ Design choices worth knowing:
 
 - **The backup bucket is separate from the app bucket**, ideally in a different provider account,
   with credentials that only the backup job holds. `backup.sh` refuses to run if both are the same bucket.
-- **Objects are copied, never synced.** Deleting an object in the app bucket (a takedown, a retention
-  expiry) does not delete its backup. The copy also fails loudly if an existing backup object has a
-  different size from the source, because evidence objects are named by their SHA-256 and never change.
-  (A takedown that must also remove the backup copy is a manual step: delete the object under
-  `objects/` in the backup bucket, and dumps older than 30 days age out on their own.)
+- **Evidence and the deletion ledger mirror current state.** `backup.sh` syncs only the `evidence/`
+  and `deletions/` prefixes, then verifies each mirror. A source-rights expiry or ledger-retention
+  prune therefore removes that object from the backup bucket on the next successful backup. Other
+  object prefixes are copied immutably. Database dumps remain point-in-time snapshots and are pruned
+  only after the new dump and object mirrors verify. A restore from an older dump must stay in
+  quarantine until current evidence retention/redaction and account-deletion replay complete; expired
+  evidence may intentionally be absent from the current object mirror.
 - **Old dumps are pruned only after the new one is uploaded and its size checked**, so a run of
   failures never empties the store.
 - **A dump is checked before upload** (`pg_restore --list` must read it) and **after restore** (schema
