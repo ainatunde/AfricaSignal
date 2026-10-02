@@ -99,6 +99,10 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
     for kind, key in periodic:
         if _enqueue_if_handled(session, kind, key):
             counts["periodic"] += 1
+    from africasignal.operations.commercial_invalidation import enqueue_context_scan
+
+    if enqueue_context_scan(session, now=now) is not None:
+        counts["periodic"] += 1
 
     # 5. Jobs whose worker died.
     counts["reclaimed"] = queue.reclaim_expired(session)

@@ -295,6 +295,17 @@ _DEFS = (
         maximum=3650,
     ),
     SettingDef(
+        "commercial_privacy_review_confirmed",
+        "Commercial privacy and measurement reviewed",
+        "privacy",
+        "choice",
+        "Choose yes only after the accountable reviewer accepts the direct-sponsorship disclosure, "
+        "measurement purpose, 30-day raw event retention and applicable consent requirements. "
+        "This gate does not activate sponsorship by itself.",
+        default="no",
+        choices=("no", "yes"),
+    ),
+    SettingDef(
         "feedback_retention_months",
         "Months to keep feedback text",
         "privacy",

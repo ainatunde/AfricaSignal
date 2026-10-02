@@ -68,7 +68,8 @@ def set_anon_cookie(response: Response, anon_id: str) -> None:
         secure=get_settings().env != "development",
     )
     # A page that sets a cookie must not be stored by a shared cache and served to someone else.
-    response.headers["Cache-Control"] = "private, no-cache"
+    if "no-store" not in response.headers.get("Cache-Control", "").lower():
+        response.headers["Cache-Control"] = "private, no-cache"
 
 
 SessionFactory = Callable[[], AbstractContextManager[Session]]

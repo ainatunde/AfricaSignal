@@ -8,9 +8,35 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from africasignal.models import Job, WorkloadControl
+from africasignal.config import get_settings
+from africasignal.models import CommercialControl, Job, WorkloadControl
 
-LLM_JOB_KINDS = frozenset({"extract_claims", "explain_version", "explain_backfill"})
+COMMERCIAL_JOB_KINDS = frozenset(
+    {
+        "commercial_context_rebuild",
+        "commercial_ai_classify",
+        "commercial_package_draft",
+        "commercial_report_export",
+        "commercial_report_narrative",
+    }
+)
+COMMERCIAL_AI_JOB_KINDS = frozenset(
+    {
+        "commercial_ai_classify",
+        "commercial_package_draft",
+        "commercial_report_narrative",
+    }
+)
+LLM_JOB_KINDS = frozenset(
+    {
+        "extract_claims",
+        "explain_version",
+        "explain_backfill",
+        "commercial_ai_classify",
+        "commercial_package_draft",
+        "commercial_report_narrative",
+    }
+)
 REACH_JOB_KINDS = frozenset({"agent_reach_search", "agent_reach_poll"})
 EXTERNAL_AGENT_JOB_KINDS = frozenset({"external_agent_submit"})
 CONTENT_JOB_KINDS = frozenset(
@@ -21,6 +47,7 @@ WORKLOAD_KINDS = {
     "agent_reach": REACH_JOB_KINDS,
     "external_agents": EXTERNAL_AGENT_JOB_KINDS,
     "processing": CONTENT_JOB_KINDS,
+    "commercial": COMMERCIAL_JOB_KINDS,
 }
 
 
@@ -231,6 +258,16 @@ def workload_defaults() -> dict[str, tuple[bool, WorkloadSchedule]]:
                 }
             ),
         ),
+        "commercial": (
+            False,
+            WorkloadSchedule.model_validate(
+                {
+                    "windows": [{"days": list(range(7)), "start": "01:00", "end": "04:00"}],
+                    "max_concurrency": 1,
+                    "max_items_per_run": 10,
+                }
+            ),
+        ),
         "processing": (
             True,
             WorkloadSchedule.model_validate(
@@ -274,6 +311,17 @@ def blocked_kinds(session: Any, rows: list[WorkloadControl], now: datetime) -> s
     for (kind,) in running:
         running_counts[kind] = running_counts.get(kind, 0) + 1
     blocked: set[str] = set()
+    commercial = (
+        session.query(CommercialControl)
+        .filter(CommercialControl.singleton_id == 1)
+        .with_for_update()
+        .one_or_none()
+    )
+    if get_settings().commercial_deny or commercial is None or not commercial.global_enabled:
+        blocked.update(COMMERCIAL_JOB_KINDS)
+    elif not commercial.context_ai_enabled:
+        blocked.update(COMMERCIAL_AI_JOB_KINDS)
+
     for row in rows:
         kinds = WORKLOAD_KINDS[row.name]
         schedule = WorkloadSchedule.model_validate(row.schedule)

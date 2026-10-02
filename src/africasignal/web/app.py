@@ -19,6 +19,8 @@ from africasignal.web.routes import (
     admin_agent_reach,
     admin_agents,
     admin_automation,
+    admin_commercial,
+    admin_commercial_reports,
     admin_coverage,
     admin_feedback,
     admin_ops,
@@ -51,6 +53,8 @@ def create_app() -> FastAPI:
     for router in (
         admin.router,
         admin_automation.router,
+        admin_commercial.router,
+        admin_commercial_reports.router,
         admin_agent_reach.router,
         admin_agents.router,
         admin_coverage.router,

@@ -3,12 +3,42 @@
 {% block content %}
 <h1>AI and automation</h1>
 <p>Control resource-intensive work. Times use the timezone shown for each workload. A disabled workload stays queued until it is enabled or its jobs are cancelled. Safety checks, withdrawals and retention continue to run.</p>
+
+<section aria-labelledby="commercial-controls">
+  <h2 id="commercial-controls">Commercial features</h2>
+  <p>These switches stage operator intent. Deployment deny, the dedicated commercial privacy review, and current content/booking checks still control whether sponsorship can take effect.</p>
+  <p>Explore sponsorship: {% if commercial.explore_effective %}<strong>Effective</strong>{% elif commercial.explore_desired %}<strong>Requested but blocked</strong>{% else %}<strong>Off</strong>{% endif %}</p>
+  {% if commercial.explore_blockers %}
+  <ul>{% for reason in commercial.explore_blockers %}<li>{{ reason }}</li>{% endfor %}</ul>
+  {% endif %}
+  <p>Commercial AI classification: {% if commercial.context_ai_effective %}<strong>Effective</strong>{% elif commercial.context_ai_desired %}<strong>Requested but blocked</strong>{% else %}<strong>Off</strong>{% endif %}</p>
+  {% if commercial.context_ai_blockers %}
+  <ul>{% for reason in commercial.context_ai_blockers %}<li>{{ reason }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if commercial_error %}<p class="error" role="alert">{{ commercial_error }}</p>{% endif %}
+  <form method="post" action="/admin/automation/commercial">
+    <input type="hidden" name="expected_revision" value="{{ commercial.revision }}">
+    <fieldset>
+      <legend>Commercial feature switches</legend>
+      <label class="inline"><input type="checkbox" name="global_enabled" value="on" {{ "checked" if commercial.global_enabled }}>
+        Allow commercial features globally</label>
+      <label class="inline"><input type="checkbox" name="explore_sponsorship_enabled" value="on" {{ "checked" if commercial.explore_sponsorship_enabled }}>
+        Allow Explore sponsorship</label>
+      <label class="inline"><input type="checkbox" name="context_ai_enabled" value="on" {{ "checked" if commercial.context_ai_enabled }}>
+        Allow commercial AI classification</label>
+    </fieldset>
+    <p class="muted">All switches default off. Explore rendering is implemented, but sponsorship remains blocked until deployment deny is cleared and the legal/privacy acceptance setting is confirmed. Commercial AI remains unavailable until its later task is completed.</p>
+    <p><button type="submit">Save commercial switches</button> · Policy revision {{ commercial.revision }}</p>
+  </form>
+</section>
+
 {% for w in workloads %}
 <section aria-labelledby="workload-{{ w.name }}">
-  <h2 id="workload-{{ w.name }}">{{ "Language model calls" if w.name == "ai" else ("Agent Reach discovery" if w.name == "agent_reach" else ("External agent services" if w.name == "external_agents" else "Document capture, OCR and imports")) }}</h2>
+  <h2 id="workload-{{ w.name }}">{{ "Language model calls" if w.name == "ai" else ("Agent Reach discovery" if w.name == "agent_reach" else ("External agent services" if w.name == "external_agents" else ("Commercial processing and reports" if w.name == "commercial" else "Document capture, OCR and imports"))) }}</h2>
+  {% if w.name == "commercial" %}<p class="muted">Commercial background jobs are default-off. No commercial job handlers are available yet.</p>{% endif %}
   <p>Current state:
-    {% if w.name == "agent_reach" and w.deployment_denied %}<strong>Blocked by deployment</strong>
-    {% elif not w.enabled %}<strong>Off</strong>
+    {% if w.name in ("agent_reach", "commercial") and w.deployment_denied %}<strong>Blocked by deployment</strong>
+    {% elif not w.enabled %}<strong>Off</strong>{% elif w.name == "commercial" and w.commercial_disabled %}<strong>Blocked by global commercial switch</strong>
     {% elif w.active_now %}<strong>Eligible now</strong>
     {% else %}<strong>Waiting for schedule</strong>{% endif %}
     · {{ w.running }} running jobs · {{ w.queued }} queued jobs{% if w.name == "agent_reach" %} · {{ w.active_tasks }} active remote tasks{% endif %} · next window {{ w.next_open|when }}.
@@ -28,6 +58,10 @@
     <label class="inline"><input type="checkbox" name="enabled" value="on" {{ "checked" if w.enabled }}>
       Allow new document capture, OCR and import jobs</label>
     <p class="muted">This gates admission before source fetch/processing. Work already in progress may finish after the window closes.</p>
+    {% elif w.name == "commercial" %}
+    <label class="inline"><input type="checkbox" name="enabled" value="on" {{ "checked" if w.enabled }}>
+      Allow commercial background jobs</label>
+    <p class="muted">This workload is required for scheduled commercial processing and report jobs. Explore display is governed by the separate commercial feature switches.</p>
     {% else %}
     <label class="inline"><input type="checkbox" name="enabled" value="on" {{ "checked" if w.enabled }}>
       Allow new AI provider calls</label>
@@ -39,8 +73,8 @@
     <textarea id="windows-{{ w.name }}" name="windows" rows="4" maxlength="1500" required>{{ w.windows_text }}</textarea>
     <p class="muted">Days are ISO weekdays: 0 Monday through 6 Sunday. Use * for every day.
       Example: 0,1,2,3,4 01:00-04:00. Windows end at the listed time; 24:00 means midnight.</p>
-    <label for="concurrency-{{ w.name }}">{{ "Maximum concurrent remote tasks (1-32)" if w.name in ("agent_reach", "external_agents") else "Maximum concurrent jobs (1-32)" }}</label>
-    <input type="number" id="concurrency-{{ w.name }}" name="max_concurrency" min="1" max="32" value="{{ w.max_concurrency }}" required>
+    <label for="concurrency-{{ w.name }}">{{ "Maximum concurrent remote tasks (1-32)" if w.name in ("agent_reach", "external_agents") else ("Maximum concurrent jobs (1)" if w.name == "commercial" else "Maximum concurrent jobs (1-32)") }}</label>
+    <input type="number" id="concurrency-{{ w.name }}" name="max_concurrency" min="1" max="{{ 1 if w.name == 'commercial' else 32 }}" value="{{ w.max_concurrency }}" required>
     {% if w.name == "agent_reach" %}
     <label for="items-{{ w.name }}">Maximum candidate leads per discovery task (1–20)</label>
     <input type="number" id="items-{{ w.name }}" name="max_items_per_run" min="1" max="20" value="{{ w.max_items_per_run }}" required>

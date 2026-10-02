@@ -63,6 +63,21 @@
 </table>
 </div>
 
+<h2>Planned commercial job mappings</h2>
+<p class="muted">These job kinds have workload ownership recorded, but no handler is registered. They cannot run until their implementation packet adds a handler.</p>
+<div class="scroll">
+<table>
+  <thead><tr><th scope="col">Job kind</th><th scope="col">Owner</th><th scope="col">Workload gates</th><th scope="col">Control and disposition</th><th scope="col">Ready to run</th></tr></thead>
+  <tbody>
+  {% for job in planned_jobs %}
+  <tr><td><code>{{ job.kind }}</code></td><td>{{ job.owner }}</td>
+    <td>{{ job.workload }}{% for extra in job.additional_workloads %} + {{ extra }}{% endfor %}</td>
+    <td>{{ job.control }}</td><td>No · handler not registered</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
 <h2>Deployment- or human-owned controls</h2>
 <div class="scroll">
 <table>

@@ -1,0 +1,233 @@
+{% extends "admin/base.html" %}
+{% block title %}Commercial{% endblock %}
+{% block content %}
+<h1>Direct sponsorship</h1>
+<p><a href="/admin/commercial/reports">Private delivery report</a></p>
+<p>Admin-only workflow for reviewed sponsors, fixed manual NGN fees, creatives, and exclusive topic bookings. There is no billing, advertiser self-service, or automatic activation.</p>
+
+<section aria-labelledby="commercial-effective">
+  <h2 id="commercial-effective">Effective state</h2>
+  <p>Global switch: <strong>{{ "on" if controls.global_enabled else "off" }}</strong>.
+     Explore switch: <strong>{{ "on" if controls.explore_sponsorship_enabled else "off" }}</strong>.
+     Deployment deny: <strong>{{ "set" if controls.deployment_denied else "clear" }}</strong>.
+     Explore delivery: <strong>{{ "effective" if controls.explore_effective else "blocked" }}</strong>.
+     Policy revision {{ controls.revision }}.</p>
+  {% if controls.explore_blockers %}<ul>{% for reason in controls.explore_blockers %}<li>{{ reason }}</li>{% endfor %}</ul>{% endif %}
+  <p class="muted">Change switches in <a href="/admin/automation">AI and automation</a>. An effective switch does not replace human sponsor, campaign, creative, booking, legal, or privacy review.</p>
+</section>
+
+<section aria-labelledby="context-rebuild">
+  <h2 id="context-rebuild">Deterministic context refresh</h2>
+  <p>Current queue state:
+    {% for status, count in context_jobs.items() %}{{ status }} {{ count }}{% if not loop.last %} · {% endif %}{% else %}no queued or running rebuilds{% endfor %}.
+    Rebuild scans are bounded to the configured commercial batch and remain behind the deployment deny, global switch, workload switch, and operating window.</p>
+  <form method="post" action="/admin/commercial/context/rebuild">
+    <button type="submit">Queue a bounded current-content scan</button>
+  </form>
+  <p class="muted">A rebuild never contacts a provider or changes editorial content. Current publication, source rights, suitability, and context freshness are checked again before sponsorship eligibility.</p>
+</section>
+
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+
+<section aria-labelledby="sponsors">
+  <h2 id="sponsors">Sponsors</h2>
+  {% if sponsors %}
+  <div class="scroll"><table>
+    <thead><tr><th scope="col">Public name</th><th scope="col">Category</th><th scope="col">Website</th><th scope="col">Private contact</th><th scope="col">Status / revision</th><th scope="col">Review action</th></tr></thead>
+    <tbody>
+    {% for sponsor in sponsors %}
+      <tr>
+        <th scope="row">{{ sponsor.public_name }}</th>
+        <td>{{ sponsor.category }}</td>
+        <td><a href="{{ sponsor.website_url }}">{{ sponsor.website_url }}</a></td>
+        <td>{{ sponsor.contact_email }}</td>
+        <td>{{ sponsor.status }} · r{{ sponsor.revision }}</td>
+        <td>
+          <form method="post" action="/admin/commercial/sponsors/{{ sponsor.id }}/status">
+            <input type="hidden" name="expected_revision" value="{{ sponsor.revision }}">
+            <select name="status" aria-label="Sponsor action">
+              {% if sponsor.status == "pending_review" %}<option value="approved">Approve</option><option value="retired">Retire</option>
+              {% elif sponsor.status == "approved" %}<option value="paused">Pause</option><option value="retired">Retire</option>
+              {% elif sponsor.status == "paused" %}<option value="approved">Resume</option><option value="retired">Retire</option>
+              {% endif %}
+            </select>
+            <button type="submit">Apply</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p>No sponsor records.</p>{% endif %}
+  <h3>Add a sponsor for review</h3>
+  <form method="post" action="/admin/commercial/sponsors">
+    <label for="sponsor-name">Public name</label><input id="sponsor-name" name="public_name" type="text" maxlength="100" required>
+    <label for="sponsor-url">Reviewed website (HTTPS)</label><input id="sponsor-url" name="website_url" type="url" maxlength="500" required>
+    <label for="sponsor-contact">Private business contact email</label><input id="sponsor-contact" name="contact_email" type="email" maxlength="254" required>
+    <label for="sponsor-category">Curated advertiser category</label>
+    <select id="sponsor-category" name="category"><option value="unclassified">Unclassified</option><option value="energy_provider">Energy provider</option><option value="energy_efficiency">Energy efficiency</option><option value="food_retailer">Food retailer</option><option value="agriculture">Agriculture</option><option value="general_business">General business</option></select>
+    <p><button type="submit">Create pending sponsor</button></p>
+    <p class="muted">Contact details stay in the admin projection and are excluded from audit snapshots and public responses.</p>
+  </form>
+</section>
+
+<section aria-labelledby="campaigns">
+  <h2 id="campaigns">Campaigns and creative versions</h2>
+  {% if campaigns %}
+  <div class="scroll"><table>
+    <thead><tr><th scope="col">Campaign</th><th scope="col">Sponsor</th><th scope="col">Manual fee</th><th scope="col">Status / revision</th><th scope="col">Campaign action</th></tr></thead>
+    <tbody>
+    {% for campaign in campaigns %}
+      <tr>
+        <th scope="row">{{ campaign.internal_name }}</th>
+        <td>{{ sponsor_by_id.get(campaign.sponsor_id, "Unavailable") }}</td>
+        <td>{% if campaign.agreed_fee_minor is not none %}{{ campaign.agreed_fee_minor }} kobo NGN{% else %}Not agreed{% endif %}</td>
+        <td>{{ campaign.status }} · r{{ campaign.revision }}</td>
+        <td>
+          <form method="post" action="/admin/commercial/campaigns/{{ campaign.id }}/status">
+            <input type="hidden" name="expected_revision" value="{{ campaign.revision }}">
+            <select name="status" aria-label="Campaign action">
+              {% if campaign.status == "draft" %}<option value="approved">Approve</option><option value="ended">End</option>
+              {% elif campaign.status == "approved" %}<option value="paused">Pause</option><option value="ended">End</option>
+              {% elif campaign.status == "active" %}<option value="paused">Pause</option><option value="ended">End</option>
+              {% elif campaign.status == "paused" %}<option value="approved">Resume approval</option><option value="ended">End</option>
+              {% endif %}
+            </select>
+            <button type="submit">Apply</button>
+          </form>
+        </td>
+      </tr>
+      <tr><td colspan="5">
+        <strong>Creatives</strong>
+        {% set campaign_creatives = creatives|selectattr("campaign_id", "equalto", campaign.id)|list %}
+        {% if campaign_creatives %}
+        <ul>{% for creative in campaign_creatives %}
+          <li>Version {{ creative.version }}: {{ creative.status }} · r{{ creative.revision }} · {{ creative.body_text }} · destination {{ creative.destination_url }}
+            {% if creative.status == "draft" or creative.status == "approved" %}
+            <form method="post" action="/admin/commercial/creatives/{{ creative.id }}/review">
+              <input type="hidden" name="expected_revision" value="{{ creative.revision }}">
+              <select name="status" aria-label="Creative review action">
+                {% if creative.status == "draft" %}<option value="approved">Approve</option><option value="rejected">Reject</option>
+                {% else %}<option value="withdrawn">Withdraw</option>{% endif %}
+              </select>
+              <button type="submit">Apply review</button>
+            </form>
+            {% endif %}
+          </li>
+        {% endfor %}</ul>
+        {% else %}<p>No creative versions.</p>{% endif %}
+        {% if campaign.status != "ended" %}
+        <form method="post" action="/admin/commercial/campaigns/{{ campaign.id }}/creatives">
+          <label for="creative-copy-{{ campaign.id }}">Plain-text creative</label>
+          <textarea id="creative-copy-{{ campaign.id }}" name="body_text" maxlength="1000" rows="3" required></textarea>
+          <label for="creative-destination-{{ campaign.id }}">Validated destination (HTTPS)</label>
+          <input id="creative-destination-{{ campaign.id }}" name="destination_url" type="url" maxlength="500" required>
+          <button type="submit">Create immutable creative version</button>
+        </form>
+        {% endif %}
+      </td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p>No campaign records.</p>{% endif %}
+  <h3>Create a campaign</h3>
+  <form method="post" action="/admin/commercial/campaigns">
+    <label for="campaign-sponsor">Sponsor</label>
+    <select id="campaign-sponsor" name="sponsor_id" required>
+      {% for sponsor in sponsors if sponsor.status == "approved" %}<option value="{{ sponsor.id }}">{{ sponsor.public_name }} ({{ sponsor.status }})</option>{% endfor %}
+    </select>
+    <label for="campaign-name">Internal campaign name</label><input id="campaign-name" name="internal_name" type="text" maxlength="100" required>
+    <label for="campaign-fee">Agreed manual flat fee (integer kobo; optional until agreed)</label><input id="campaign-fee" name="agreed_fee_minor" type="number" min="0" step="1">
+    <label for="campaign-agreement">Agreement reference (optional)</label><input id="campaign-agreement" name="agreement_reference" type="text" maxlength="200">
+    <p><button type="submit">Create draft campaign</button></p>
+  </form>
+</section>
+
+<section aria-labelledby="packages">
+  <h2 id="packages">Contextual matches and package drafts</h2>
+  <p>Category matches are curated and explainable. Package drafts snapshot current eligible content, existing booking conflicts, revisions, and any recorded manual fee. Approval only approves the proposal; it does not reserve inventory, activate a campaign, or guarantee future eligibility or delivery.</p>
+  {% if package_drafts %}
+  <div class="scroll"><table>
+    <thead><tr><th scope="col">Campaign</th><th scope="col">Topic / interval</th><th scope="col">Current facts</th><th scope="col">Reasons</th><th scope="col">Decision</th></tr></thead>
+    <tbody>{% for draft in package_drafts %}
+      <tr>
+        <th scope="row">{{ draft.campaign_id }} · {{ draft.status }} · r{{ draft.revision }}</th>
+        <td>{{ draft.facts.topic }} · {{ draft.facts.starts_at }} to {{ draft.facts.ends_at }}</td>
+        <td>{{ draft.facts.inventory_status }} · {{ draft.facts.eligible_context_count }} current eligible contexts{% if draft.facts.eligible_context_count_is_lower_bound %} (sample capped){% endif %} · fee {{ draft.facts.price_status }}{% if draft.facts.agreed_fee_minor is not none %}: {{ draft.facts.agreed_fee_minor }} kobo NGN{% endif %}</td>
+        <td>{{ draft.reason_codes|join(", ") }}</td>
+        <td>{% if draft.status == "draft" %}
+          <form method="post" action="/admin/commercial/packages/{{ draft.id }}/review">
+            <input type="hidden" name="expected_revision" value="{{ draft.revision }}">
+            <button name="status" value="approved" type="submit">Approve proposal</button>
+            <button name="status" value="rejected" type="submit">Reject</button>
+          </form>
+        {% elif draft.reviewed_at %}Reviewed {{ draft.reviewed_at }}{% endif %}</td>
+      </tr>
+    {% endfor %}</tbody>
+  </table></div>
+  {% else %}<p>No package drafts.</p>{% endif %}
+
+  <h3>Draft a package snapshot</h3>
+  {% set matching_campaigns = campaigns|selectattr("status", "in", ["approved", "active"])|list %}
+  {% for campaign in matching_campaigns %}
+    {% set category = sponsor_category_by_id.get(campaign.sponsor_id, "unclassified") %}
+    {% if category in ("energy_provider", "energy_efficiency", "food_retailer", "agriculture") %}
+    {% set topic = "energy" if category in ("energy_provider", "energy_efficiency") else "food" %}
+    <form method="post" action="/admin/commercial/packages">
+      <input type="hidden" name="campaign_id" value="{{ campaign.id }}">
+      <input type="hidden" name="expected_campaign_revision" value="{{ campaign.revision }}">
+      <input type="hidden" name="expected_controls_revision" value="{{ controls.revision }}">
+      <input type="hidden" name="topic" value="{{ topic }}">
+      <p>Campaign {{ campaign.internal_name }} · {{ category }} · {{ topic }}</p>
+      <label for="package-start-{{ campaign.id }}">Start instant (ISO 8601 with offset)</label>
+      <input id="package-start-{{ campaign.id }}" name="starts_at" type="text" maxlength="40" required>
+      <label for="package-end-{{ campaign.id }}">End instant (ISO 8601 with offset; at most 90 days)</label>
+      <input id="package-end-{{ campaign.id }}" name="ends_at" type="text" maxlength="40" required>
+      <button type="submit">Create revision-bound package draft</button>
+    </form>
+    {% endif %}
+  {% else %}<p>No approved category-matched campaigns are available for package drafting.</p>{% endfor %}
+</section>
+
+<section aria-labelledby="bookings">
+  <h2 id="bookings">Topic bookings</h2>
+  {% if bookings %}
+  <div class="scroll"><table>
+    <thead><tr><th scope="col">Campaign</th><th scope="col">Scope</th><th scope="col">Interval (Africa/Lagos)</th><th scope="col">Creative</th><th scope="col">State / revision</th><th scope="col">Action</th></tr></thead>
+    <tbody>
+    {% for booking in bookings %}
+      <tr>
+        <th scope="row">{{ booking.campaign_id }}</th><td>Explore · {{ booking.topic }} · exclusive topic</td>
+        <td>{{ booking.starts_at|lagos }} to {{ booking.ends_at|lagos }}</td>
+        <td>{{ booking.creative_version_id }}</td>
+        <td>{{ booking.status }} · r{{ booking.revision }}</td>
+        <td><form method="post" action="/admin/commercial/bookings/{{ booking.id }}/status">
+          <input type="hidden" name="expected_revision" value="{{ booking.revision }}">
+          <select name="status" aria-label="Booking action">
+            {% if booking.status == "draft" %}<option value="approved">Approve</option><option value="ended">End</option>
+            {% elif booking.status == "approved" %}<option value="active">Activate</option><option value="paused">Pause</option><option value="ended">End</option>
+            {% elif booking.status == "active" %}<option value="paused">Pause</option><option value="ended">End</option>
+            {% elif booking.status == "paused" %}<option value="approved">Reapprove</option><option value="ended">End</option>{% endif %}
+          </select><button type="submit">Apply</button>
+        </form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p>No booking records.</p>{% endif %}
+  <h3>Create an unreserved draft booking</h3>
+  <form method="post" action="/admin/commercial/bookings">
+    <label for="booking-campaign">Campaign</label><select id="booking-campaign" name="campaign_id" required>
+      {% for campaign in campaigns if campaign.status in ("approved", "active") %}<option value="{{ campaign.id }}">{{ campaign.internal_name }} ({{ campaign.status }})</option>{% endfor %}
+    </select>
+    <label for="booking-topic">Topic</label><select id="booking-topic" name="topic"><option value="energy">Energy</option><option value="food">Food</option></select>
+    <label for="booking-creative">Approved creative version</label><select id="booking-creative" name="creative_version_id" required>
+      {% for creative in creatives if creative.status == "approved" %}<option value="{{ creative.id }}">Campaign {{ creative.campaign_id }} · v{{ creative.version }}</option>{% endfor %}
+    </select>
+    <label for="booking-start">Start instant (ISO 8601 with explicit offset; example 2026-10-15T09:00:00+01:00)</label><input id="booking-start" name="starts_at" type="text" maxlength="40" required>
+    <label for="booking-end">End instant (ISO 8601 with explicit offset)</label><input id="booking-end" name="ends_at" type="text" maxlength="40" required>
+    <p><button type="submit">Create draft booking</button></p>
+    <p class="muted">Drafts do not reserve inventory. Approval and activation recheck current switches, publication state, eligible content, sponsor, creative, dates, and exclusive conflicts. No reader or place targeting is available.</p>
+  </form>
+</section>
+{% endblock %}

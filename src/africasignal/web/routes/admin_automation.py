@@ -10,7 +10,13 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 
 from africasignal.jobs.policy import WorkloadSchedule, schedule_from_text
-from africasignal.operations import workloads
+from africasignal.operations import commercial_controls, workloads
+from africasignal.operations.commercial_controls import (
+    CommercialControlChange,
+)
+from africasignal.operations.commercial_controls import (
+    RevisionConflict as CommercialRevisionConflict,
+)
 from africasignal.operations.workloads import (
     RevisionConflict,
     WorkloadChange,
@@ -48,8 +54,14 @@ def _view(
     status_code: int = 200,
     error: str | None = None,
     submitted: dict[str, str] | None = None,
+    commercial_error: str | None = None,
+    commercial_submitted: dict[str, str] | None = None,
 ) -> Response:
     rows = workloads.current(db)
+    commercial = commercial_controls.current(db)
+    if commercial_submitted is not None:
+        for key in ("global_enabled", "explore_sponsorship_enabled", "context_ai_enabled"):
+            commercial[key] = commercial_submitted.get(key) == "on"
     contexts = []
     for row in rows:
         values = _form_values(row)
@@ -73,6 +85,8 @@ def _view(
         workloads=contexts,
         error=error,
         submitted=submitted,
+        commercial=commercial,
+        commercial_error=commercial_error,
     )
 
 
@@ -81,11 +95,44 @@ def automation_view(request: Request, auth: AdminOperator, db: DbSession) -> Res
     return _view(request, db, auth)
 
 
+@router.post("/automation/commercial")
+async def commercial_control_save(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    form = await request.form()
+    submitted = {key: value for key, value in form.items() if isinstance(value, str)}
+    try:
+        change = CommercialControlChange(
+            global_enabled=submitted.get("global_enabled") == "on",
+            explore_sponsorship_enabled=submitted.get("explore_sponsorship_enabled") == "on",
+            context_ai_enabled=submitted.get("context_ai_enabled") == "on",
+            expected_revision=int(submitted.get("expected_revision", "")),
+        )
+        commercial_controls.configure(db, auth.operator, change)
+    except CommercialRevisionConflict as exc:
+        return _view(
+            request,
+            db,
+            auth,
+            409,
+            commercial_error=str(exc),
+            commercial_submitted=submitted,
+        )
+    except (ValueError, TypeError, ValidationError, PermissionError) as exc:
+        return _view(
+            request,
+            db,
+            auth,
+            400,
+            commercial_error=str(exc),
+            commercial_submitted=submitted,
+        )
+    return _redirect("/admin/automation?notice=commercial_saved", auth)
+
+
 @router.post("/automation/{name}")
 async def automation_save(
     name: str, request: Request, auth: AdminOperator, db: DbSession
 ) -> Response:
-    if name not in ("ai", "agent_reach", "external_agents", "processing"):
+    if name not in ("ai", "agent_reach", "external_agents", "processing", "commercial"):
         raise HTTPException(status_code=404, detail="No such workload")
     workload_name = cast(WorkloadName, name)
     form = await request.form()
@@ -141,7 +188,7 @@ def automation_api(auth: AdminOperator, db: DbSession) -> JSONResponse:
 async def automation_api_save(
     name: str, request: Request, auth: AdminOperator, db: DbSession
 ) -> JSONResponse:
-    if name not in ("ai", "agent_reach", "external_agents", "processing"):
+    if name not in ("ai", "agent_reach", "external_agents", "processing", "commercial"):
         raise HTTPException(status_code=404, detail="No such workload")
     workload_name = cast(WorkloadName, name)
     try:

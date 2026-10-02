@@ -14,6 +14,7 @@ def n(key: str, raw: str) -> str:
 
 def test_select_options_cover_static_choices_and_reviewed_model_routes() -> None:
     assert ss.options("legal_review_confirmed") == [("no", "No"), ("yes", "Yes")]
+    assert ss.options("commercial_privacy_review_confirmed") == [("no", "No"), ("yes", "Yes")]
     routes = ss.options("llm_route_claim_extract")
     assert routes
     assert all(value and label for value, label in routes)

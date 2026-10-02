@@ -15,13 +15,14 @@ from africasignal.jobs import queue
 from africasignal.jobs.policy import WORKLOAD_KINDS, WorkloadSchedule
 from africasignal.models import (
     AgentReachTask,
+    CommercialControl,
     ExternalAgentTask,
     Job,
     Operator,
     WorkloadControl,
 )
 
-WorkloadName = Literal["ai", "agent_reach", "external_agents", "processing"]
+WorkloadName = Literal["ai", "agent_reach", "external_agents", "processing", "commercial"]
 
 
 class WorkloadChange(BaseModel):
@@ -87,8 +88,14 @@ def current(session: Session) -> list[dict[str, object]]:
                 or 0
             )
         active_now = schedule.allows(now)
-        deployment_denied = (row.name == "agent_reach" and get_settings().agent_reach_deny) or (
-            row.name == "external_agents" and get_settings().external_agents_deny
+        commercial_disabled = False
+        if row.name == "commercial":
+            control = session.get(CommercialControl, 1)
+            commercial_disabled = control is None or not control.global_enabled
+        deployment_denied = (
+            (row.name == "agent_reach" and get_settings().agent_reach_deny)
+            or (row.name == "external_agents" and get_settings().external_agents_deny)
+            or (row.name == "commercial" and get_settings().commercial_deny)
         )
         result.append(
             {
@@ -99,8 +106,12 @@ def current(session: Session) -> list[dict[str, object]]:
                 "updated_at": row.updated_at,
                 "active_now": active_now,
                 "next_open": schedule.next_open(now),
-                "effective": row.enabled and active_now and not deployment_denied,
+                "effective": row.enabled
+                and active_now
+                and not deployment_denied
+                and not commercial_disabled,
                 "deployment_denied": deployment_denied,
+                "commercial_disabled": commercial_disabled,
                 "queued": queued,
                 "running": running,
                 "active_tasks": active_tasks,
@@ -130,6 +141,10 @@ def configure(
         raise ValueError("Agent Reach results per task cannot exceed 20")
     if name == "agent_reach" and change.schedule.max_concurrency > 4:
         raise ValueError("Agent Reach runner concurrency cannot exceed 4")
+    if name == "commercial" and change.schedule.max_concurrency > 1:
+        raise ValueError("Commercial processing concurrency cannot exceed 1")
+    if name == "commercial" and change.schedule.max_items_per_run > 10:
+        raise ValueError("Commercial processing is limited to 10 items per run")
     before = {
         "enabled": row.enabled,
         "schedule": row.schedule,

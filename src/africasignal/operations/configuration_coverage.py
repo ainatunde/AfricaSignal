@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from africasignal import settings_store
 from africasignal.jobs import handlers as handler_registry
 from africasignal.jobs.policy import (
+    COMMERCIAL_JOB_KINDS,
     CONTENT_JOB_KINDS,
     EXTERNAL_AGENT_JOB_KINDS,
     LLM_JOB_KINDS,
@@ -34,6 +35,7 @@ SETTING_CONSUMERS = {
     "operator_name": "africasignal.web.routes.legal",
     "contact_email": "africasignal.web.routes.legal and crawler page",
     "legal_review_confirmed": "africasignal.web.routes.legal",
+    "commercial_privacy_review_confirmed": "africasignal.operations.commercial_controls.current",
     "trusted_proxy_hops": "africasignal.web.client_address",
     "email_provider": "africasignal.publish.email",
     "email_api_key": "africasignal.publish.email",
@@ -86,6 +88,26 @@ JOB_OWNERS = {
     "external_agent_expire": (
         "External-agent cleanup",
         "Daily task and result retention",
+    ),
+    "commercial_context_rebuild": (
+        "Commercial workload",
+        "Default-off, bounded rebuild of versioned public content context",
+    ),
+    "commercial_ai_classify": (
+        "Commercial and AI workloads",
+        "Default-off, budgeted classification of public content only",
+    ),
+    "commercial_package_draft": (
+        "Commercial and AI workloads",
+        "Operator-reviewed package draft from deterministic facts",
+    ),
+    "commercial_report_export": (
+        "Commercial workload",
+        "Bounded deterministic report export with explicit metric definitions",
+    ),
+    "commercial_report_narrative": (
+        "Commercial and AI workloads",
+        "Optional budgeted prose over supplied report facts only",
     ),
     "process_document": (
         "Document processing workload",
@@ -179,6 +201,18 @@ BUSINESS_CONTROLS = [
         "scope": "Anthropic/OpenAI keys, purpose routes, daily USD budget and per-job token limit",
     },
     {
+        "name": "Direct sponsorship and commercial context",
+        "owner": "Versioned commercial control and reviewed placement services",
+        "control": "/admin/automation (commercial controls and workload)",
+        "apply_timing": (
+            "Immediate for public switches; scheduled tasks require commercial and AI admission"
+        ),
+        "scope": (
+            "Default-off direct sponsorship, Explore surface, contextual AI, "
+            "and separate deployment deny"
+        ),
+    },
+    {
         "name": "External-agent integrations",
         "owner": "External-agent HTTPS profile and task protocol",
         "control": "/admin/agents and /admin/automation",
@@ -243,6 +277,14 @@ DEPLOYMENT_OWNED = [
         "name": "ADMIN_TRUSTED_ORIGINS and TLS termination",
         "owner": "edge/deployment",
         "reason": "Trust boundary for authenticated browser actions.",
+    },
+    {
+        "name": "Commercial deny switch (COMMERCIAL_DENY)",
+        "owner": "application deployment",
+        "reason": (
+            "Defaults on and blocks commercial rendering and processing "
+            "regardless of operator switches."
+        ),
     },
     {
         "name": "External-agent deny switch (EXTERNAL_AGENTS_DENY)",
@@ -326,13 +368,16 @@ def manifest(session: Session) -> dict[str, Any]:
 
     job_kinds = []
     job_gaps: list[str] = []
-    for kind in sorted(handler_registry.HANDLERS):
+    registered_kinds = set(handler_registry.HANDLERS)
+    for kind in sorted(registered_kinds):
         owner, control = JOB_OWNERS.get(
             kind, ("UNMAPPED", "Classification and runtime owner must be recorded")
         )
         if owner == "UNMAPPED":
             job_gaps.append(kind)
-        if kind in LLM_JOB_KINDS:
+        if kind in COMMERCIAL_JOB_KINDS:
+            workload = "commercial"
+        elif kind in LLM_JOB_KINDS:
             workload = "ai"
         elif kind in REACH_JOB_KINDS:
             workload = "agent_reach"
@@ -348,10 +393,27 @@ def manifest(session: Session) -> dict[str, Any]:
                 "owner": owner,
                 "control": control,
                 "workload": workload,
+                "additional_workloads": ["ai"]
+                if kind in COMMERCIAL_JOB_KINDS and kind in LLM_JOB_KINDS
+                else [],
                 "configuration": "/admin/automation"
                 if workload
                 else "See owner/control disposition",
                 "registered_handler": True,
+            }
+        )
+    planned_job_kinds = []
+    for kind in sorted(COMMERCIAL_JOB_KINDS - registered_kinds):
+        owner, control = JOB_OWNERS[kind]
+        planned_job_kinds.append(
+            {
+                "kind": kind,
+                "owner": owner,
+                "control": control,
+                "workload": "commercial",
+                "additional_workloads": ["ai"] if kind in LLM_JOB_KINDS else [],
+                "registered_handler": False,
+                "admission_ready": False,
             }
         )
     return {
@@ -360,6 +422,7 @@ def manifest(session: Session) -> dict[str, Any]:
         "workloads": workloads.current(session),
         "business_controls": BUSINESS_CONTROLS,
         "job_kinds": job_kinds,
+        "planned_job_kinds": planned_job_kinds,
         "deployment_owned": DEPLOYMENT_OWNED,
         "coverage_gaps": {
             "unmapped_settings": settings_gaps,

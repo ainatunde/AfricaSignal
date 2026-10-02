@@ -1,0 +1,55 @@
+{% extends "admin/base.html" %}
+{% block title %}Commercial report{% endblock %}
+{% block content %}
+<h1>Direct sponsorship report</h1>
+<p>Private operational totals from first-party event records. These measurements are not human audience, billable impressions, revenue, or causal lift.</p>
+<p><a href="/admin/commercial">Commercial operations</a></p>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+
+<form method="get" action="/admin/commercial/reports">
+  <label for="report-days">Lookback days (1–30)</label>
+  <input id="report-days" type="number" name="days" min="1" max="30" value="{{ days }}" required>
+  <button type="submit">View period</button>
+</form>
+
+<form method="post" action="/admin/commercial/reports/rebuild">
+  <input type="hidden" name="days" value="{{ days }}">
+  <p><button type="submit">Rebuild from retained raw events</button></p>
+</form>
+<p>Period: {{ report.period_start.strftime("%Y-%m-%d %H:%M UTC") }} to {{ report.period_end.strftime("%Y-%m-%d %H:%M UTC") }}.
+Display timezone for bookings: Africa/Lagos. Report version {{ report.report_version }}.
+Raw event retention: {{ report.raw_retention_days }} days. Aggregate retention: {{ report.aggregate_retention_months }} months.</p>
+
+<h2>Metric definitions</h2>
+<div class="scroll"><table>
+  <thead><tr><th scope="col">Metric</th><th scope="col">Count</th><th scope="col">Availability</th><th scope="col">Denominator</th><th scope="col">Attribution</th></tr></thead>
+  <tbody>
+  {% for metric in report.metrics %}
+    <tr>
+      <th scope="row">{{ metric.label }}</th>
+      <td>{% if metric.count is none %}Unavailable{% else %}{{ metric.count }}{% endif %}</td>
+      <td>{{ metric.availability }}</td>
+      <td>{{ metric.denominator }}</td>
+      <td>{{ metric.attribution }}</td>
+    </tr>
+  {% endfor %}
+  <tr><th scope="row">Client-observed viewability</th><td>Unavailable</td><td>Not collected</td><td>None</td><td>No client beacon or human-view claim exists.</td></tr>
+  <tr><th scope="row">Provider-billed quantity</th><td>Unavailable</td><td>No provider import</td><td>None</td><td>First-party observations do not authorize payment.</td></tr>
+  </tbody>
+</table></div>
+
+<h2>Daily observations</h2>
+{% if report.lines %}
+<div class="scroll"><table>
+  <thead><tr><th scope="col">UTC day</th><th scope="col">Booking</th><th scope="col">Creative</th><th scope="col">Surface</th><th scope="col">Topic</th><th scope="col">Metric</th><th scope="col">Count</th><th scope="col">Completeness</th></tr></thead>
+  <tbody>
+  {% for line in report.lines %}
+    <tr><td>{{ line.period_start.strftime("%Y-%m-%d") }}</td><td>{{ line.booking_id }}</td><td>{{ line.creative_version_id }}</td><td>{{ line.surface }}</td><td>{{ line.topic }}</td><td>{{ line.metric }}</td><td>{{ line.count }}</td><td>{{ line.completeness }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<p>No stored event buckets are available for this period. This is unavailable data, not a zero-event claim. A rebuild is limited to raw rows retained for 30 days.</p>
+{% endif %}
+<p class="muted">Source: AfricaSignal first-party event rows. Empty buckets are not emitted as zero because there is no coverage ledger proving collection ran continuously. Rebuilds replace eligible UTC-day aggregates from retained rows. Server renders are operational observations and are never billable impressions.</p>
+{% endblock %}

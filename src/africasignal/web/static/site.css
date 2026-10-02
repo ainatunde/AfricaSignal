@@ -126,3 +126,22 @@ form.useful { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; m
 form.useful p { margin: 0 .5rem 0 0; }
 .card form { margin-top: .5rem; }
 input[type="checkbox"]:focus-visible, textarea:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+/* Clearly separate direct sponsorship from editorial Explore results. */
+.sponsor-module {
+  border: 1px solid var(--line, #c9d2dc);
+  border-inline-start: 4px solid var(--accent, #315a77);
+  border-radius: 0.4rem;
+  margin-block: 2rem;
+  padding: 1rem 1.25rem;
+  background: var(--surface, #fff);
+}
+.sponsor-module p { margin-block: 0.45rem; }
+.sponsor-module .sponsor-label {
+  color: var(--muted, #475569);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-top: 0;
+  text-transform: uppercase;
+}

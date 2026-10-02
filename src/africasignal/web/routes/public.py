@@ -22,6 +22,14 @@ from africasignal import settings_store
 from africasignal.config import get_settings
 from africasignal.models import Place
 from africasignal.net.netutil import USER_AGENT
+from africasignal.operations.commercial_bookings import eligible_placement
+from africasignal.operations.commercial_measurement import (
+    ClickTokenError,
+    DeliveryEnvelope,
+    issue_click_token,
+    record_delivery_event,
+    record_placement_observation,
+)
 from africasignal.web import queries
 from africasignal.web.cache import TTLCache
 from africasignal.web.chart import line_chart_svg
@@ -55,6 +63,7 @@ KIND_WORDS = {
 
 # "Use my location" runs a spatial query and needs no cookie or sign-in: limited per client.
 locate_limiter = RateLimiter(limit=30, window_seconds=60)
+commercial_click_limiter = RateLimiter(limit=60, window_seconds=60)
 
 # Rendered situation pages, keyed by version (B11.3). Nothing personal is ever in these pages.
 _page_cache: TTLCache[str] = TTLCache(ttl_seconds=PAGE_CACHE_SECONDS)
@@ -256,7 +265,82 @@ def explore(
                 }
             )
         context["state_rows"] = rows
-    return render(request, "explore.html", context, cache_seconds=60)
+    sponsor = None
+    try:
+        decision = eligible_placement(
+            db,
+            surface="explore_topic",
+            topic=topic,  # type: ignore[arg-type]
+            item_code=None,
+            at=_now(),
+        )
+        if decision.eligible:
+            assert (
+                decision.booking_id is not None
+                and decision.booking_revision is not None
+                and decision.creative_version_id is not None
+                and decision.public_name is not None
+                and decision.body_text is not None
+            )
+            observed_at = _now()
+            record_placement_observation(
+                db, decision=decision, metric="eligible_opportunity", received_at=observed_at
+            )
+            click_token = issue_click_token(
+                booking_id=decision.booking_id,
+                creative_version_id=decision.creative_version_id,
+                booking_revision=decision.booking_revision,
+                at=observed_at,
+            )
+            record_placement_observation(
+                db, decision=decision, metric="server_render", received_at=observed_at
+            )
+            db.commit()
+            sponsor = {
+                "public_name": decision.public_name,
+                "body_text": decision.body_text,
+                "click_url": f"/commercial/click/{click_token}",
+            }
+    except Exception:
+        # A commercial lookup or counter outage must not take down editorial Explore content.
+        db.rollback()
+    context["sponsor"] = sponsor
+    response = render(request, "explore.html", context)
+    # This response is sponsor-capable even when no placement is currently eligible.
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@router.get("/commercial/click/{token}", name="commercial_click")
+def commercial_click(token: str, request: Request, db: Db) -> Response:
+    """Rate-limited first-party redirect using only the approved stored destination."""
+    allowed, retry_after = commercial_click_limiter.check(client_address(request))
+    if not allowed:
+        return Response(
+            status_code=429,
+            headers={"Retry-After": str(retry_after), "Cache-Control": "no-store"},
+        )
+    if request.query_params:
+        return Response(status_code=400, headers={"Cache-Control": "no-store"})
+    try:
+        envelope = DeliveryEnvelope(
+            event_schema_version=1,
+            event_kind="click",
+            token=token,
+        )
+        receipt = record_delivery_event(db, envelope=envelope, received_at=_now())
+        db.commit()
+    except (ClickTokenError, ValueError):
+        db.rollback()
+        return Response(status_code=404, headers={"Cache-Control": "no-store"})
+    except Exception:
+        db.rollback()
+        return Response(status_code=503, headers={"Cache-Control": "no-store"})
+    return RedirectResponse(
+        receipt.destination_url,
+        status_code=303,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
 
 
 # --- situation pages ---------------------------------------------------------------------------

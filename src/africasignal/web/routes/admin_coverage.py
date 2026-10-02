@@ -24,6 +24,7 @@ def configuration_coverage_view(request: Request, auth: AdminOperator, db: DbSes
         workloads=data["workloads"],
         controls=data["business_controls"],
         jobs=data["job_kinds"],
+        planned_jobs=data["planned_job_kinds"],
         deployment=data["deployment_owned"],
         gaps=data["coverage_gaps"],
         generated_at=data["generated_at"],

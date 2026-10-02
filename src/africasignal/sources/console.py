@@ -163,6 +163,9 @@ def approve_permission(
         before={"source": source.slug, "in_force": before},
         after={"source": source.slug, "in_force": permission_snapshot(permission)},
     )
+    from africasignal.operations.commercial_invalidation import invalidate_source_contexts
+
+    invalidate_source_contexts(session, source.id, reason="source_permission_changed", now=now)
     return permission
 
 
@@ -215,6 +218,9 @@ def publish_permission_version(
         before={"source": source.slug, "in_force": before},
         after={"source": source.slug, "in_force": permission_snapshot(permission)},
     )
+    from africasignal.operations.commercial_invalidation import invalidate_source_contexts
+
+    invalidate_source_contexts(session, source.id, reason="source_permission_changed", now=now)
     return permission
 
 
@@ -225,6 +231,14 @@ def set_source_active(session: Session, operator: Operator, source_id: int, acti
         raise ConsoleError("the source is already " + ("active" if active else "paused"))
     source.active = active
     session.flush()
+    from africasignal.operations.commercial_invalidation import invalidate_source_contexts
+
+    invalidate_source_contexts(
+        session,
+        source.id,
+        reason="source_resumed" if active else "source_paused",
+        now=datetime.now(UTC),
+    )
     audit.record(
         session,
         operator,

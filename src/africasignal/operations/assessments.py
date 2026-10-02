@@ -211,6 +211,9 @@ def withdraw(
     new = withdraw_situation(session, situation, now, reason[0].lower() + reason[1:])
     if new is None:
         raise AssessmentError("there is no published version to withdraw")
+    from africasignal.operations.commercial_invalidation import invalidate_situation_contexts
+
+    invalidate_situation_contexts(session, situation.id, reason="content_withdrawn", now=now)
     audit.record(
         session,
         operator,

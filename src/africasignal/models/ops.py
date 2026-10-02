@@ -13,6 +13,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Identity,
     Index,
     Integer,
     Numeric,
@@ -222,7 +223,8 @@ class WorkloadControl(Base):
     __tablename__ = "workload_control"
     __table_args__ = (
         CheckConstraint(
-            "name IN ('ai', 'agent_reach', 'external_agents', 'processing')", name="name_valid"
+            "name IN ('ai', 'agent_reach', 'external_agents', 'processing', 'commercial')",
+            name="name_valid",
         ),
         CheckConstraint("revision > 0", name="revision_positive"),
     )
@@ -231,6 +233,26 @@ class WorkloadControl(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
     schedule: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class CommercialControl(Base):
+    """Versioned default-off public and AI commercial switches."""
+
+    __tablename__ = "commercial_control"
+    __table_args__ = (
+        CheckConstraint("singleton_id = 1", name="singleton_only"),
+        CheckConstraint("revision > 0", name="revision_positive"),
+    )
+
+    singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    global_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    explore_sponsorship_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    context_ai_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    updated_by_operator_id: Mapped[int | None] = mapped_column(ForeignKey("operator.id"))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -398,5 +420,331 @@ class Setting(Base):
     key: Mapped[str] = mapped_column(Text, primary_key=True)
     value: Mapped[Any] = mapped_column(JSONB, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Sponsor(Base):
+    """Reviewed business identity for first-party topic sponsorship."""
+
+    __tablename__ = "sponsor"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending_review', 'approved', 'paused', 'retired')", name="status_valid"
+        ),
+        CheckConstraint("revision > 0", name="revision_positive"),
+        CheckConstraint("length(public_name) BETWEEN 1 AND 100", name="public_name_bounds"),
+        CheckConstraint("length(website_url) BETWEEN 12 AND 500", name="website_url_bounds"),
+        CheckConstraint("length(contact_email) BETWEEN 3 AND 254", name="contact_email_bounds"),
+        CheckConstraint(
+            "category IN ('energy_provider', 'energy_efficiency', 'food_retailer', "
+            "'agriculture', 'general_business', 'unclassified')",
+            name="category_valid",
+        ),
+        Index("ix_sponsor_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    public_name: Mapped[str] = mapped_column(Text, nullable=False)
+    website_url: Mapped[str] = mapped_column(Text, nullable=False)
+    contact_email: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(Text, nullable=False, server_default="unclassified")
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending_review")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    created_by_operator_id: Mapped[int] = mapped_column(ForeignKey("operator.id"), nullable=False)
+    updated_by_operator_id: Mapped[int] = mapped_column(ForeignKey("operator.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class Campaign(Base):
+    """Versioned direct-sponsorship agreement; amounts are integer kobo in NGN."""
+
+    __tablename__ = "campaign"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'approved', 'active', 'paused', 'ended')", name="status_valid"
+        ),
+        CheckConstraint("revision > 0", name="revision_positive"),
+        CheckConstraint("currency = 'NGN'", name="currency_supported"),
+        CheckConstraint(
+            "agreed_fee_minor IS NULL OR agreed_fee_minor >= 0", name="fee_nonnegative"
+        ),
+        UniqueConstraint("sponsor_id", "internal_name", name="sponsor_internal_name_unique"),
+        Index("ix_campaign_status_updated", "status", "updated_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    sponsor_id: Mapped[int] = mapped_column(
+        ForeignKey("sponsor.id", ondelete="RESTRICT"), nullable=False
+    )
+    internal_name: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    currency: Mapped[str] = mapped_column(Text, nullable=False, server_default="NGN")
+    agreed_fee_minor: Mapped[int | None] = mapped_column(BigInteger)
+    agreement_reference: Mapped[str | None] = mapped_column(Text)
+    created_by_operator_id: Mapped[int] = mapped_column(ForeignKey("operator.id"), nullable=False)
+    approved_by_operator_id: Mapped[int | None] = mapped_column(ForeignKey("operator.id"))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class CreativeVersion(Base):
+    """Immutable reviewed creative content once approved; edits create another version."""
+
+    __tablename__ = "creative_version"
+    __table_args__ = (
+        CheckConstraint("version > 0", name="version_positive"),
+        CheckConstraint("revision > 0", name="revision_positive"),
+        CheckConstraint(
+            "status IN ('draft', 'approved', 'rejected', 'withdrawn')", name="status_valid"
+        ),
+        UniqueConstraint("campaign_id", "version", name="campaign_version_unique"),
+        Index("ix_creative_version_campaign_status", "campaign_id", "status", "version"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(
+        ForeignKey("campaign.id", ondelete="RESTRICT"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    body_text: Mapped[str] = mapped_column(Text, nullable=False)
+    asset_key: Mapped[str | None] = mapped_column(Text)
+    alt_text: Mapped[str | None] = mapped_column(Text)
+    destination_url: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")
+    reviewer_operator_id: Mapped[int | None] = mapped_column(ForeignKey("operator.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by_operator_id: Mapped[int] = mapped_column(ForeignKey("operator.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class ContentContext(Base):
+    """Commercial-only context projection bound to an exact published assessment revision."""
+
+    __tablename__ = "content_context"
+    __table_args__ = (
+        CheckConstraint("content_hash ~ '^[0-9a-f]{64}$'", name="content_hash_sha256"),
+        CheckConstraint("revision > 0", name="revision_positive"),
+        CheckConstraint(
+            "length(taxonomy_version) BETWEEN 1 AND 80", name="taxonomy_version_bounds"
+        ),
+        CheckConstraint(
+            "length(classifier_version) BETWEEN 1 AND 80", name="classifier_version_bounds"
+        ),
+        CheckConstraint(
+            "suitability IN ('eligible', 'restricted', 'unknown', 'invalidated')",
+            name="suitability_valid",
+        ),
+        UniqueConstraint(
+            "assessment_version_id",
+            "content_hash",
+            "taxonomy_version",
+            "classifier_version",
+            "revision",
+            name="assessment_taxonomy_classifier_unique",
+        ),
+        Index("ix_content_context_assessment_suitability", "assessment_version_id", "suitability"),
+        Index("ix_content_context_expiry", "expires_at"),
+        Index("ix_content_context_source_refs", "source_refs", postgresql_using="gin"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    assessment_version_id: Mapped[int] = mapped_column(
+        ForeignKey("assessment_version.id", ondelete="RESTRICT"), nullable=False
+    )
+    canonical_place_id: Mapped[int] = mapped_column(
+        ForeignKey("place.id", ondelete="RESTRICT"), nullable=False
+    )
+    content_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    taxonomy_version: Mapped[str] = mapped_column(Text, nullable=False)
+    classifier_version: Mapped[str] = mapped_column(Text, nullable=False)
+    topic_tags: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    evidence_refs: Mapped[list[int]] = mapped_column(JSONB, nullable=False)
+    source_refs: Mapped[list[int]] = mapped_column(JSONB, nullable=False)
+    reason_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    suitability: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    invalidation_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class PlacementBooking(Base):
+    """Exclusive topic-scoped direct sponsorship interval on the Explore surface."""
+
+    __tablename__ = "placement_booking"
+    __table_args__ = (
+        CheckConstraint("surface = 'explore_topic'", name="surface_allowed"),
+        CheckConstraint("topic IN ('energy', 'food')", name="topic_allowed"),
+        CheckConstraint("ends_at > starts_at", name="interval_positive"),
+        CheckConstraint("exclusive IS TRUE", name="exclusive_only"),
+        CheckConstraint(
+            "status IN ('draft', 'approved', 'active', 'paused', 'ended')", name="status_valid"
+        ),
+        CheckConstraint("revision > 0", name="revision_positive"),
+        Index(
+            "ix_booking_scope_status_interval", "surface", "topic", "status", "starts_at", "ends_at"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(
+        ForeignKey("campaign.id", ondelete="RESTRICT"), nullable=False
+    )
+    surface: Mapped[str] = mapped_column(Text, nullable=False, server_default="explore_topic")
+    topic: Mapped[str] = mapped_column(Text, nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    creative_version_id: Mapped[int] = mapped_column(
+        ForeignKey("creative_version.id", ondelete="RESTRICT"), nullable=False
+    )
+    exclusive: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    created_by_operator_id: Mapped[int] = mapped_column(ForeignKey("operator.id"), nullable=False)
+    approved_by_operator_id: Mapped[int | None] = mapped_column(ForeignKey("operator.id"))
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    activated_by_operator_id: Mapped[int | None] = mapped_column(ForeignKey("operator.id"))
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class DeliveryEvent(Base):
+    """Minimal first-party event record without reader or request identifiers."""
+
+    __tablename__ = "delivery_event"
+    __table_args__ = (
+        CheckConstraint("event_schema_version > 0", name="event_schema_positive"),
+        CheckConstraint("booking_revision > 0", name="booking_revision_positive"),
+        CheckConstraint("metric_version > 0", name="metric_version_positive"),
+        CheckConstraint(
+            "metric IN ('eligible_opportunity', 'server_render', 'click')", name="metric_valid"
+        ),
+        CheckConstraint("deduplication_hash ~ '^[0-9a-f]{64}$'", name="deduplication_hash_sha256"),
+        CheckConstraint(
+            "validity_status IN ('accepted', 'rejected')", name="validity_status_valid"
+        ),
+        CheckConstraint(
+            "(validity_status = 'accepted' AND rejection_reason IS NULL) OR "
+            "(validity_status = 'rejected' AND rejection_reason IS NOT NULL)",
+            name="rejection_reason_matches_status",
+        ),
+        UniqueConstraint("deduplication_hash", name="deduplication_hash_unique"),
+        Index("ix_delivery_event_booking_metric_received", "booking_id", "metric", "received_at"),
+        Index("ix_delivery_event_retention", "retention_until"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    booking_id: Mapped[int] = mapped_column(
+        ForeignKey("placement_booking.id", ondelete="RESTRICT"), nullable=False
+    )
+    creative_version_id: Mapped[int] = mapped_column(
+        ForeignKey("creative_version.id", ondelete="RESTRICT"), nullable=False
+    )
+    booking_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_schema_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    metric: Mapped[str] = mapped_column(Text, nullable=False)
+    metric_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    deduplication_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    validity_status: Mapped[str] = mapped_column(Text, nullable=False, server_default="accepted")
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
+    retention_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class DeliveryAggregate(Base):
+    """Rebuildable UTC-day totals with explicit completeness and metric definition versions."""
+
+    __tablename__ = "delivery_aggregate"
+    __table_args__ = (
+        CheckConstraint("metric_version > 0", name="metric_version_positive"),
+        CheckConstraint(
+            "metric IN ('eligible_opportunity', 'server_render', 'click')", name="metric_valid"
+        ),
+        CheckConstraint("count >= 0", name="count_nonnegative"),
+        CheckConstraint(
+            "completeness IN ('complete', 'partial', 'unavailable')", name="completeness_valid"
+        ),
+        UniqueConstraint(
+            "booking_id",
+            "creative_version_id",
+            "metric",
+            "metric_version",
+            "period_start",
+            name="booking_creative_metric_period_unique",
+        ),
+        Index("ix_delivery_aggregate_period", "period_start", "metric"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    booking_id: Mapped[int] = mapped_column(
+        ForeignKey("placement_booking.id", ondelete="RESTRICT"), nullable=False
+    )
+    creative_version_id: Mapped[int] = mapped_column(
+        ForeignKey("creative_version.id", ondelete="RESTRICT"), nullable=False
+    )
+    surface: Mapped[str] = mapped_column(Text, nullable=False)
+    topic: Mapped[str] = mapped_column(Text, nullable=False)
+    metric: Mapped[str] = mapped_column(Text, nullable=False)
+    metric_version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    count: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
+    completeness: Mapped[str] = mapped_column(Text, nullable=False, server_default="complete")
+    retention_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    rebuilt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class CommercialDraft(Base):
+    """Immutable revision-bound package proposal; approval never creates a booking."""
+
+    __tablename__ = "commercial_draft"
+    __table_args__ = (
+        CheckConstraint("kind = 'package'", name="kind_valid"),
+        CheckConstraint("status IN ('draft', 'approved', 'rejected')", name="status_valid"),
+        CheckConstraint("revision > 0", name="revision_positive"),
+        CheckConstraint("input_hash ~ '^[0-9a-f]{64}$'", name="input_hash_sha256"),
+        UniqueConstraint("kind", "input_hash", name="kind_input_hash_unique"),
+        Index("ix_commercial_draft_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(
+        ForeignKey("campaign.id", ondelete="RESTRICT"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False, server_default="package")
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    input_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    input_refs: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    facts: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    reason_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    created_by_operator_id: Mapped[int] = mapped_column(ForeignKey("operator.id"), nullable=False)
+    reviewed_by_operator_id: Mapped[int | None] = mapped_column(ForeignKey("operator.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

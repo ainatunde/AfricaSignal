@@ -13,7 +13,7 @@
 <h2>The short version</h2>
 <ul>
   <li>Our software does not store your IP address, your browser details or the full address of the pages you visit. (The companies that host the site may keep short technical logs; see “Technical logs” below.)</li>
-  <li>We do not use advertising or third-party analytics, and the site loads no scripts, fonts or images from other companies.</li>
+  <li>When enabled, AfricaSignal may show an operator-reviewed direct-sponsorship module on Explore. It is separate from editorial content and does not affect our reporting or conclusions. Sponsors receive no reader data, and we use no third-party ad tracking.</li>
   <li>An account needs only your email address. The weekly email is off until you turn it on.</li>
   <li>When you use “Use my location”, your position is turned into a state and local government area and then thrown away.</li>
   <li>You can download your data and delete your account yourself, at any time, on the <a href="/account">account page</a>.</li>
@@ -26,6 +26,7 @@
   <li><strong>A visitor code.</strong> The first time you open a page we put a random code in a cookie (<code>{{ anon_cookie }}</code>). It is not made from anything about you. It lets us count how many people visit and how many come back, and limit feedback to {{ feedback_limit }} submissions per visitor per day.</li>
   <li><strong>Page-view records.</strong> For each page you open we record the time, the kind of page (for example “situation” or “coverage”), which situation it was if it was a situation page, and where you came from if the link ended in <code>?ref=wa</code>, <code>x</code>, <code>email</code> or <code>share</code>. We also record when you follow or unfollow a situation, send feedback, tap Share, or open the weekly email. If you are signed in, the record also carries your account number, so we can tell which signed-in people find the site useful.</li>
   <li><strong>Not collected:</strong> IP address, user agent, the full URL or the search text you type into the place picker. Link previews and crawlers (for example a WhatsApp preview of a shared link) are not counted as visitors.</li>
+  <li><strong>If a sponsored module is served:</strong> we record an eligible opportunity and server render against the booking, creative version, topic and time. If you follow its link, we record a validated click using a short-lived token. The token contains no reader or account identifier. We do not join these records to page-view cookies, accounts, visit cookies or reader history.</li>
   <li><strong>Your choices in cookies.</strong> The state or area you pick, and the times of your last visits, are kept in cookies in your browser so the home page can show “since your last visit”. They are sent back to us with each page request, but we do not copy them into our database.</li>
 </ul>
 
@@ -60,12 +61,13 @@
     <tr><td>Visitor code and page-view records</td><td>Our legitimate interest in knowing whether people use the service, which pages help, and whether it is worth continuing. We keep it to the minimum: no IP address, no user agent, and deletion after {{ event_retention }}.</td></tr>
     <tr><td>Error reports and useful/not useful answers</td><td>Our legitimate interest in finding and fixing mistakes. If you give an email address to get a reply, it is given voluntarily for that purpose.</td></tr>
     <tr><td>Short-lived address handling to limit abuse, and security logs</td><td>Our legitimate interest in keeping the service available and safe.</td></tr>
+    <tr><td>Direct-sponsorship delivery measurements</td><td>Operational reporting of eligible server opportunities, server renders and validated clicks. The lawful basis and any consent requirement must be confirmed by the accountable reviewer before sponsorship is activated.</td></tr>
   </tbody>
 </table>
-<p>{{ todo("counsel to confirm the lawful basis for each row against the Act, and whether the visitor-code cookie needs a consent banner") }}</p>
+<p>{{ todo("counsel to confirm the lawful basis for each row, the sponsorship measurement purpose and whether any cookie requires consent before sponsorship is activated") }}</p>
 
 <h2>Cookies</h2>
-<p>These are the only cookies the site sets. All are first-party (set by AfricaSignal itself), none is used for advertising, and none is shared with anyone. The site works without them; you would lose your remembered place, “since your last visit” and staying signed in.</p>
+<p>These are the only cookies the site sets. All are first-party (set by AfricaSignal itself), none is used to select sponsorship or measure ad delivery, and none is shared with sponsors. The site works without them; you would lose your remembered place, “since your last visit” and staying signed in.</p>
 <table>
   <thead><tr><th scope="col">Cookie</th><th scope="col">What it does</th><th scope="col">Set when</th><th scope="col">Lasts</th></tr></thead>
   <tbody>
@@ -81,7 +83,7 @@
   <li><strong>Our email provider</strong>{% if email_provider %} (currently {{ email_provider|capitalize }}){% endif %} receives your email address and the text of each email we send you, so it can deliver them.</li>
   <li><strong>Our hosting and storage providers</strong> hold the database and its backups on our behalf. {{ todo("name the hosting and backup providers and their countries") }}</li>
   <li><strong>The language model we use to read source documents</strong> is sent only text from public sources such as news articles and official releases. It is never sent anything about our readers.</li>
-  <li>We do not sell your information, and we do not share it with advertisers or data brokers. We will disclose it if the law requires.</li>
+  <li>We do not sell your information or share reader information or identifiers with sponsors or data brokers. We will disclose information if the law requires.</li>
 </ul>
 <p>Some of these providers may store or process information outside Nigeria. {{ todo("the countries involved and the safeguards or contracts relied on for transfers under the Act") }}</p>
 
@@ -89,7 +91,8 @@
 <table>
   <thead><tr><th scope="col">What</th><th scope="col">How long</th></tr></thead>
   <tbody>
-    <tr><td>Page-view and other event records</td><td>{{ event_retention }}, then deleted automatically. If you delete your account, your account number is removed from them straight away.</td></tr>
+    <tr><td>Page-view and other account-linked event records</td><td>{{ event_retention }}, then deleted automatically. If you delete your account, your account number is removed from them straight away.</td></tr>
+    <tr><td>Commercial delivery event rows</td><td>30 days, then deleted automatically. Daily aggregates that contain only booking, creative version, topic, metric and count are retained for 24 months. Empty periods are shown as unavailable where collection coverage cannot be confirmed.</td></tr>
     <tr><td>Account, follows, choices and notifications</td><td>Until you delete your account, which removes them immediately. An address that was entered but never confirmed with the sign-in link is deleted {{ unverified_days }} days later.</td></tr>
     <tr><td>Sign-in link and session records</td><td>Deleted {{ login_record_days }} days after the link or session stops working, or when you delete your account, whichever is first.</td></tr>
     <tr><td>Feedback and error reports</td><td>{{ feedback_months }} months. After that the text, any email address you typed, your visitor code and the link to your account are removed, and only the yes or no, the date and whether the report led to a correction are kept. When you delete your account, your reports are cut loose from it straight away and your address is removed from the text.</td></tr>
