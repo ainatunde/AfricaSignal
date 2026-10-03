@@ -143,10 +143,18 @@ def test_invalid_seed_is_rejected(tmp_path: Path) -> None:
 @pytest.fixture
 def factory(engine: Engine) -> Iterator[sessionmaker[Session]]:
     with engine.begin() as conn:
-        conn.execute(text("DELETE FROM job; DELETE FROM source_permission; DELETE FROM source"))
+        conn.execute(
+            text(
+                "DELETE FROM job; DELETE FROM job_deduplication; DELETE FROM source_permission; DELETE FROM source"
+            )
+        )
     yield sessionmaker(bind=engine, expire_on_commit=False)
     with engine.begin() as conn:
-        conn.execute(text("DELETE FROM job; DELETE FROM source_permission; DELETE FROM source"))
+        conn.execute(
+            text(
+                "DELETE FROM job; DELETE FROM job_deduplication; DELETE FROM source_permission; DELETE FROM source"
+            )
+        )
 
 
 class FakeAdapter:

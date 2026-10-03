@@ -1,17 +1,21 @@
-"""In-memory rate limit for the public API: 60 requests per minute per client (B11.4).
+"""Sliding request limits shared in staging/production, local in development.
 
-The client address is only ever a key in this process's memory, salted and hashed, and entries
-disappear when their window ends. Nothing is written to the database, a file or a log.
+Shared state stores only an HMAC of the client address and expires after the window.
+Raw client addresses never enter SQL, files or logs.
 """
 
 from __future__ import annotations
 
 import hashlib
+import logging
+import math
 import secrets
 import threading
 import time
 from collections import deque
 from collections.abc import Callable
+
+from africasignal.shared_limits import SharedLimits, private_key, shared_enabled
 
 
 class RateLimiter:
@@ -20,7 +24,9 @@ class RateLimiter:
         limit: int = 60,
         window_seconds: float = 60,
         clock: Callable[[], float] = time.monotonic,
+        scope: str = "public",
     ) -> None:
+        self.scope = scope
         self.limit = limit
         self.window = window_seconds
         self._clock = clock
@@ -34,6 +40,21 @@ class RateLimiter:
 
     def check(self, client: str) -> tuple[bool, int]:
         """Record a request. Returns (allowed, seconds to wait when refused)."""
+        if shared_enabled():
+            try:
+                allowed, retry = SharedLimits().take(
+                    self.scope,
+                    private_key(self.scope, client),
+                    rate=self.limit / self.window,
+                    capacity=self.limit,
+                    window=self.window,
+                )
+                return allowed, max(1, math.ceil(retry)) if not allowed else 0
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "shared request limit unavailable", extra={"scope": self.scope}
+                )
+                return False, 1
         now = self._clock()
         key = self._key(client)
         with self._lock:

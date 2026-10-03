@@ -1,6 +1,6 @@
 """Accounts, follows and in-site notifications (AS-031, web half), and unsubscribe (AS-032).
 
-Sign-in is a magic link. The email links to ``/signin/verify?token=…``, which only shows a button:
+Sign-in is a magic link. The email links to ``/signin/verify?token=â€¦``, which only shows a button:
 mail scanners open links before people do, so the token is used up by the POST behind the button,
 never by the GET. A sign-in request always answers "check your email", whether or not the address
 is known or limited, so the page reveals nothing about who has an account.
@@ -45,7 +45,7 @@ from africasignal.web.user_dep import (
 router = APIRouter()
 
 # Sign-in requests per client per hour, on top of the per-address limit in ``login_tokens``.
-signin_limiter = RateLimiter(limit=10, window_seconds=3600)
+signin_limiter = RateLimiter(scope="account.signin_limiter", limit=10, window_seconds=3600)
 
 TOPICS = ("energy", "food")
 NOTICES = {

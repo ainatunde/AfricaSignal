@@ -39,11 +39,11 @@ MAX_FEEDBACK_PER_DAY = 10
 MAX_TEXT_CHARS = 2000
 MAX_CONTACT_CHARS = 254
 
-share_limiter = RateLimiter(limit=30, window_seconds=60)
+share_limiter = RateLimiter(scope="feedback.share_limiter", limit=30, window_seconds=60)
 # Feedback is also limited per visitor code (below), but a script can drop its cookie and get a
 # new code on every request, so a second limit keys on the client. It is generous, because readers
 # behind one shared address (an office, a mobile carrier) must not lock each other out.
-feedback_limiter = RateLimiter(limit=30, window_seconds=3600)
+feedback_limiter = RateLimiter(scope="feedback.feedback_limiter", limit=30, window_seconds=3600)
 
 # A 1x1 transparent GIF.
 _PIXEL = bytes.fromhex(

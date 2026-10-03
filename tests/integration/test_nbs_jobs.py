@@ -40,7 +40,7 @@ from tests.unit.sources.nbs_fixtures import read
 
 TABLES = (
     "measurement_review, measurement, series, evidence_document, reporting_origin, "
-    "place_alias, place, source_permission, source, job"
+    "place_alias, place, source_permission, source, job, job_deduplication"
 )
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 

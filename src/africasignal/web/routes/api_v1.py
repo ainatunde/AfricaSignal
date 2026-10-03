@@ -23,7 +23,7 @@ from africasignal.web.client_address import client_address
 from africasignal.web.ratelimit import RateLimiter
 from africasignal.web.session_dep import get_db
 
-rate_limiter = RateLimiter(limit=60, window_seconds=60)
+rate_limiter = RateLimiter(scope="api_v1.rate_limiter", limit=60, window_seconds=60)
 CACHE_SECONDS = 60
 DEFAULT_LIMIT, MAX_LIMIT = 50, 200
 

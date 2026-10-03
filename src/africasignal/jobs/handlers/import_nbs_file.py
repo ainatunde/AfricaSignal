@@ -19,6 +19,7 @@ from datetime import date
 
 from africasignal.catalog import load_items
 from africasignal.evidence.capture import SourceNotApproved, record_document
+from africasignal.jobs.execution import fenced_effect
 from africasignal.jobs.handlers import JobContext, on_dead, register
 from africasignal.jobs.queue import ClaimedJob, enqueue
 from africasignal.models import Source
@@ -102,7 +103,8 @@ def discard_upload(job: ClaimedJob) -> None:
     key = str(job.payload.get("storage_key", ""))
     if not UPLOAD_KEY.fullmatch(key):
         return  # same rule as the handler: only ever delete a flat name under uploads/
-    get_store().delete(key)
+    with fenced_effect():
+        get_store().delete(key)
     log.info("removed the upload of dead job %d", job.id, extra={"job_id": job.id})
 
 
@@ -111,4 +113,5 @@ def discard_import_upload(ctx: JobContext) -> None:
     key = str(ctx.job.payload.get("storage_key", ""))
     if not UPLOAD_KEY.fullmatch(key):
         raise ValueError("storage_key must be a file name under uploads/")
-    get_store().delete(key)
+    with fenced_effect():
+        get_store().delete(key)

@@ -46,6 +46,11 @@ def fake_dns(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[str]]:
         return list(_real_getaddrinfo(host, port, *args, **kwargs))
 
     monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    monkeypatch.setattr(
+        netutil,
+        "_dns_addresses",
+        lambda host, port: [str(x[4][0]) for x in getaddrinfo(host, port)],
+    )
     return table
 
 

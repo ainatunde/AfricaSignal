@@ -1,6 +1,6 @@
 """Alerts on sources, jobs and the model budget (AS-041).
 
-The scheduler's ``check_health`` job (every 15 minutes) calls :func:`check`, which keeps three
+The scheduler's ``check_health`` job (every 15 minutes) calls :func:`check`, which keeps operational
 alerts in the same ``ops.alert.<code>`` rows, audit rows and log lines as the backup alerts (see
 ``africasignal.backup_alerts``) and so shows on the console's Alerts page:
 
@@ -24,13 +24,15 @@ from sqlalchemy.orm import Session
 
 from africasignal import backup_alerts
 from africasignal.backup_alerts import CheckResult, Finding
-from africasignal.models import Job, Source
+from africasignal.jobs.retention import COMPLETED_JOB_RETENTION_DAYS
+from africasignal.models import Job, RateLimitState, Source
 from africasignal.operations import costs
 
 SOURCES_FAILING = "sources_failing"
 JOBS_DEAD = "jobs_dead"
 LLM_BUDGET_80 = "llm_budget_80"
-ALERT_CODES = (SOURCES_FAILING, JOBS_DEAD, LLM_BUDGET_80)
+RETENTION_BACKLOG = "retention_backlog"
+ALERT_CODES = (SOURCES_FAILING, JOBS_DEAD, LLM_BUDGET_80, RETENTION_BACKLOG)
 DEAD_JOB_WINDOW = timedelta(hours=24)
 ERROR_LIMIT = 200
 
@@ -101,10 +103,35 @@ def evaluate(session: Session, now: datetime) -> list[Finding]:
                 },
             )
         )
+    old_job = session.scalar(
+        select(Job.id)
+        .where(
+            Job.status == "done",
+            Job.finished_at < now - timedelta(days=COMPLETED_JOB_RETENTION_DAYS + 1),
+        )
+        .limit(1)
+    )
+    old_limit = session.scalar(
+        select(RateLimitState.key_hash)
+        .where(RateLimitState.expires_at < now - timedelta(hours=1))
+        .limit(1)
+    )
+    if old_job is not None or old_limit is not None:
+        findings.append(
+            Finding(
+                RETENTION_BACKLOG,
+                "Operational retention is behind; inspect archive jobs "
+                "and unresolved provider reservations.",
+                {
+                    "completed_jobs_overdue": old_job is not None,
+                    "expired_limits_overdue": old_limit is not None,
+                },
+            )
+        )
     return findings
 
 
 def check(session: Session, now: datetime | None = None) -> CheckResult:
-    """Open, update and resolve the three alerts. The caller commits."""
+    """Open, update and resolve the operational alerts. The caller commits."""
     now = now or datetime.now(UTC)
     return backup_alerts.apply(session, now, ALERT_CODES, evaluate(session, now))

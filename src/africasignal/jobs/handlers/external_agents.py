@@ -15,6 +15,7 @@ from africasignal.external_agents.client import (
     ExternalAgentProtocolError,
 )
 from africasignal.jobs import queue
+from africasignal.jobs.execution import fenced_effect
 from africasignal.jobs.handlers import JobContext, register
 from africasignal.jobs.policy import WorkloadSchedule
 from africasignal.llm.errors import WorkloadUnavailable
@@ -241,7 +242,8 @@ def external_agent_submit(ctx: JobContext) -> None:
         return
     task.status = "admitted"
     try:
-        reply = _client(profile).submit(task, profile)
+        with fenced_effect():
+            reply = _client(profile).submit(task, profile)
     except AmbiguousExternalAgentOutcome as exc:
         task.status = "outcome_unknown"
         task.last_error = str(exc)
@@ -367,7 +369,8 @@ def external_agent_cancel(ctx: JobContext) -> None:
         _schedule_reconcile(session, task, now, 1)
         return
     try:
-        reply = _client(profile).cancel(task.external_task_id, task, profile)
+        with fenced_effect():
+            reply = _client(profile).cancel(task.external_task_id, task, profile)
     except ExternalAgentProtocolError as exc:
         task.last_error = _safe_error(str(exc), "Remote cancellation could not be confirmed.")
         task.status = "cancellation_requested"

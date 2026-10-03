@@ -24,6 +24,7 @@ from africasignal.assess.explain import (
     versions_missing_explanation,
 )
 from africasignal.jobs import queue
+from africasignal.jobs.execution import checkpoint
 from africasignal.jobs.handlers import JobContext, register
 from africasignal.llm import BudgetExhausted, build_adapter
 from africasignal.llm.budget import defer_until_next_day
@@ -86,6 +87,7 @@ def explain_backfill_job(ctx: JobContext) -> None:
     done = 0
     try:
         for version_id in versions_missing_explanation(ctx.session, BACKFILL_BATCH):
+            checkpoint()
             explain_version(ctx.session, adapter, version_id, job_id=ctx.job.id)
             ctx.session.flush()
             done += 1

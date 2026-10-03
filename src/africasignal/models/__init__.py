@@ -39,6 +39,7 @@ from africasignal.models.ops import (
     WorkloadControl,
 )
 from africasignal.models.places import Place, PlaceAlias
+from africasignal.models.runtime import JobArchive, JobDeduplication, RateLimitState
 from africasignal.models.sources import DiscoveredDomainDecision, Source, SourcePermission
 from africasignal.models.users import (
     AccountDeletion,
@@ -77,6 +78,9 @@ __all__ = [
     "Follow",
     "GdeltDiscovery",
     "Job",
+    "JobArchive",
+    "JobDeduplication",
+    "RateLimitState",
     "LlmBudgetReservation",
     "LlmCall",
     "LlmResponseCache",

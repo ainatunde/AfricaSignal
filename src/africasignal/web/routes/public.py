@@ -62,8 +62,10 @@ KIND_WORDS = {
 }
 
 # "Use my location" runs a spatial query and needs no cookie or sign-in: limited per client.
-locate_limiter = RateLimiter(limit=30, window_seconds=60)
-commercial_click_limiter = RateLimiter(limit=60, window_seconds=60)
+locate_limiter = RateLimiter(scope="public.locate_limiter", limit=30, window_seconds=60)
+commercial_click_limiter = RateLimiter(
+    scope="public.commercial_click_limiter", limit=60, window_seconds=60
+)
 
 # Rendered situation pages, keyed by version (B11.3). Nothing personal is ever in these pages.
 _page_cache: TTLCache[str] = TTLCache(ttl_seconds=PAGE_CACHE_SECONDS)

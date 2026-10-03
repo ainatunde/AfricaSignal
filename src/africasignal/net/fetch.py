@@ -17,15 +17,20 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import wraps
+from inspect import signature
 from urllib.parse import urljoin, urlparse
 
 import httpx
 
 import africasignal.net.netutil as netutil
 import africasignal.net.politeness as politeness
+from africasignal.jobs.execution import check_cancelled, checkpoint
 from africasignal.net.httpcache import HttpCache
 from africasignal.net.netutil import pinned_http_transport
+from africasignal.net.resolver import dns_budget
 
 log = logging.getLogger("africasignal.net.fetch")
 
@@ -77,6 +82,23 @@ def _cached_result(
     )
 
 
+def _with_dns_budget[**P, R](fn: Callable[P, R]) -> Callable[P, R]:
+    parameters = signature(fn)
+
+    @wraps(fn)
+    def bounded(*args: P.args, **kwargs: P.kwargs) -> R:
+        checkpoint()
+        budget = parameters.bind(*args, **kwargs).arguments.get(
+            "deadline", DEFAULT_DEADLINE_SECONDS
+        )
+        seconds = float(budget) if isinstance(budget, (float, int)) else DEFAULT_DEADLINE_SECONDS
+        with dns_budget(seconds):
+            return fn(*args, **kwargs)
+
+    return bounded
+
+
+@_with_dns_budget
 def fetch_document(
     url: str,
     user_agent: str | None = None,
@@ -175,6 +197,7 @@ def fetch_document(
                 req = client.build_request(
                     "GET", current_url, headers=current_headers, timeout=min(timeout, remaining)
                 )
+                checkpoint()
                 resp = client.send(req, stream=True)
                 if out_of_time():
                     resp.close()
@@ -286,6 +309,7 @@ def fetch_document(
             chunks: list[bytes] = []
             total_size = 0
             for chunk in resp.iter_bytes():
+                check_cancelled()
                 if out_of_time():
                     resp.close()
                     return FetchResult(

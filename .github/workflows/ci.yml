@@ -2,12 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, "codex/africasignal-growth"]
   pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       db:
         image: postgis/postgis:16-3.4
@@ -23,20 +28,24 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql+psycopg://africasignal:africasignal@localhost:5432/africasignal_test
       DATABASE_URL: postgresql+psycopg://africasignal:africasignal@localhost:5432/africasignal_test
+      REQUIRE_OPS_TESTS: "1"
       RUN_NETWORK_TESTS: "1"  # downloads the real boundary files (see tests/integration/test_places_full.py)
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
           cache: pip
-      - uses: actions/cache@v5
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: data/places
           key: places-boundaries-v1
       - run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ca-certificates curl tesseract-ocr
+          sudo apt-get install -y --no-install-recommends ca-certificates curl tesseract-ocr postgresql-client-16
+          echo "/usr/lib/postgresql/16/bin" >> "$GITHUB_PATH"
           curl -fsSL https://downloads.rclone.org/v1.75.1/rclone-v1.75.1-linux-amd64.zip -o /tmp/rclone.zip
           echo '982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab  /tmp/rclone.zip' | sha256sum -c -
           python -c "import pathlib, zipfile; z=zipfile.ZipFile('/tmp/rclone.zip'); n=next(x for x in z.namelist() if x.endswith('/rclone')); pathlib.Path('/tmp/rclone').write_bytes(z.read(n))"
@@ -44,6 +53,8 @@ jobs:
           rm /tmp/rclone /tmp/rclone.zip
       - run: pip install pip==26.2.1 setuptools==84.0.0 wheel==0.48.0
       - run: pip install -r requirements-dev.lock && pip install --no-deps --no-build-isolation -e ".[dev]"
+      - name: Verify required operations prerequisites
+        run: python scripts/check-test-prerequisites.py
       - run: pip check
       - run: ruff check .
       - run: ruff format --check .

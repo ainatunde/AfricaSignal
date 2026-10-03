@@ -27,7 +27,7 @@ from africasignal.sources.rss import RssAdapter, parse_feed
 from africasignal.storage import S3Store
 from tests.integration.nbs_support import make_store
 
-TABLES = "evidence_document, reporting_origin, source_permission, source, job"
+TABLES = "evidence_document, reporting_origin, source_permission, source, job, job_deduplication"
 FEED = Path(__file__).resolve().parents[1] / "fixtures" / "rss" / "nairametrics.xml"
 FEED_URL = "https://nairametrics.com/feed/"
 

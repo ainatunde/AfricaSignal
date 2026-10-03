@@ -54,6 +54,16 @@ def enqueue(
     max_attempts: int = 5,
 ) -> int | None:
     """Insert a job. Returns its id, or ``None`` when ``dedupe_key`` already exists."""
+    if dedupe_key is not None:
+        registered = session.execute(
+            text(
+                "INSERT INTO job_deduplication (dedupe_key) VALUES (:key) "
+                "ON CONFLICT DO NOTHING RETURNING dedupe_key"
+            ),
+            {"key": dedupe_key},
+        ).scalar_one_or_none()
+        if registered is None:
+            return None
     row = session.execute(
         text(
             """

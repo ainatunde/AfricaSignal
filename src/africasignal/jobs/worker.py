@@ -9,11 +9,13 @@ import socket
 import threading
 from types import FrameType
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from africasignal.db import get_engine
 from africasignal.jobs import handlers as handler_registry
 from africasignal.jobs import queue
+from africasignal.jobs.execution import Attempt, LeaseLost, executing
 from africasignal.jobs.handlers import JobContext
 from africasignal.jobs.log import configure_logging
 from africasignal.llm.errors import WorkloadUnavailable
@@ -54,7 +56,8 @@ class _Heartbeat:
                     if not renewed:
                         self.lost.set()
                         return
-            except Exception:  # a missed heartbeat is retried on the next tick
+            except Exception:  # stop new work when ownership cannot be confirmed
+                self.lost.set()
                 log.exception("lease extension failed", extra={"job_id": self._job.id})
 
     def __enter__(self) -> _Heartbeat:
@@ -103,7 +106,8 @@ class Worker:
                 raise LookupError(f"no handler registered for job kind {job.kind!r}")
             with self.factory() as session:
                 with _Heartbeat(self.factory, job, self.heartbeat_seconds) as heartbeat:
-                    handler(JobContext(session=session, job=job, worker_id=self.worker_id))
+                    with executing(Attempt(job, self.factory, heartbeat.lost), session):
+                        handler(JobContext(session=session, job=job, worker_id=self.worker_id))
                 if heartbeat.lost.is_set() or not queue.complete(
                     session, job.id, job.lock_owner, job.lease_token
                 ):
@@ -112,6 +116,8 @@ class Worker:
                     return True
                 session.commit()
             log.info("job done", extra=ctx)
+        except LeaseLost:
+            log.warning("job lease lost; attempt stopped", extra=ctx)
         except WorkloadUnavailable as exc:
             log.info(
                 "job deferred by workload policy",
@@ -136,7 +142,18 @@ class Worker:
                 hook = handler_registry.DEAD_HOOKS.get(job.kind)
                 if hook is not None:
                     try:
-                        hook(job)
+                        # Manual retry must not overlap terminal-attempt cleanup.
+                        with self.factory() as terminal:
+                            terminal.execute(text("SET LOCAL lock_timeout = '2s'"))
+                            dead = terminal.execute(
+                                text(
+                                    "SELECT id FROM job WHERE id=:id AND status='dead' FOR UPDATE"
+                                ),
+                                {"id": job.id},
+                            ).scalar_one_or_none()
+                            if dead is not None:
+                                hook(job)
+                            terminal.rollback()
                     except Exception:  # tidying up must not hide the failure that was recorded
                         log.exception("dead-job cleanup failed", extra=ctx)
         return True

@@ -3,7 +3,7 @@
 Date: 2 October 2026
 Base: dfa16550904b36a6990be6d4cd644b4fa7a7af4c
 Implementation checkout: isolated codex/africasignal-growth worktree
-Status: source implementation and local qualification complete; runtime and external acceptance remain open. No commit, deployment, production migration, provider call, advertiser outreach, or commercial activation.
+Status: source implementation and local qualification complete; runtime and external acceptance remain open. Growth source committed as `b84c707`; CI Node runtime updated as `795975d`. No deployment, production migration, provider call, advertiser outreach, or commercial activation.
 
 ## Task disposition
 
@@ -55,7 +55,7 @@ No owner name or evidence is inferred from a test fixture or a switch value.
 
 ## Result fields to complete
 
-- Result commit: none; source remains an uncommitted `codex/africasignal-growth` worktree.
+- Result commits: `b84c707` (growth implementation) and `795975d` (Node 24 CI actions), pushed to `codex/africasignal-growth`. Further runtime-hardening changes are documented separately.
 - Exact local checks: Ruff lint and format pass; mypy succeeds on 190 source files; pip check passes; pip-audit reports no known vulnerabilities and skips the unpublished local package. Final offline full suite passes 2,127 tests with 41 skipped in 2,014.64 seconds (`RUN_NETWORK_TESTS=0`). A first run exposed a collection-time token expiry in the public test; freezing the route test clock fixed it, and the affected module passes 6/6. The GDELT raw-byte fixture group passes 7/7 with explicit LF checkout rules.
 - Database/image checks: disposable PostGIS upgrade 0039 -> 0046 and source seed pass; local backup/restore drill passes with 50 tables compared; app and backup images both build.
 - Runtime acceptance: pending; not inferred from TestClient or source tests.

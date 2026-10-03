@@ -183,6 +183,8 @@ setting_value() {
 
 # Fill BACKUP_S3_* and BACKUP_RETAIN_DAYS from the console (or the environment).
 load_backup_settings() {
+  # Initialize in the parent shell: command substitutions cannot cache this state.
+  console_settings_init
   BACKUP_RETAIN_DAYS="$(setting_value backup_retain_days BACKUP_RETAIN_DAYS)"
   [ -z "${BACKUP_DIR:-}" ] || return 0
   BACKUP_S3_ENDPOINT_URL="$(setting_value backup_s3_endpoint_url BACKUP_S3_ENDPOINT_URL)"
@@ -194,6 +196,7 @@ load_backup_settings() {
 
 # Fill S3_* (the app's evidence bucket) from the console (or the environment).
 load_app_bucket_settings() {
+  console_settings_init
   S3_ENDPOINT_URL="$(setting_value s3_endpoint_url S3_ENDPOINT_URL)"
   S3_BUCKET="$(setting_value s3_bucket S3_BUCKET)"
   S3_ACCESS_KEY_ID="$(setting_value s3_access_key_id S3_ACCESS_KEY_ID)"

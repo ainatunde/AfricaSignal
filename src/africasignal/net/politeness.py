@@ -12,6 +12,7 @@ Enforces:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import threading
 import time
@@ -19,6 +20,7 @@ from urllib.parse import urlparse
 
 import africasignal.net.netutil as netutil
 from africasignal.net.netutil import USER_AGENT, allowed_by_robots
+from africasignal.shared_limits import SharedLimits, shared_enabled
 
 log = logging.getLogger("africasignal.net.politeness")
 
@@ -181,6 +183,26 @@ def politeness_gate(
         rate = min(rate, requests / seconds)
         burst = float(min(requests, MAX_BURST))
         capacity = min(capacity, burst) if source_has_limit or crawl_delay else burst
+    if shared_enabled():
+        deadline = time.monotonic() + max(0.0, max_wait_seconds)
+        if preflight_timeout is not None:
+            deadline = min(deadline, gate_started + preflight_timeout)
+        try:
+            while True:
+                acquired, retry = SharedLimits().take(
+                    "crawl",
+                    hashlib.sha256(domain.encode()).hexdigest(),
+                    rate=rate,
+                    capacity=capacity,
+                )
+                if acquired:
+                    return True
+                if retry <= 0 or time.monotonic() + retry > deadline:
+                    return False
+                time.sleep(retry)
+        except Exception:
+            log.exception("Shared crawl pacing unavailable; acquisition refused")
+            return False
     rate_limiter.configure_domain(domain, rate=rate, capacity=capacity)
     remaining_wait = max_wait_seconds
     if preflight_timeout is not None:

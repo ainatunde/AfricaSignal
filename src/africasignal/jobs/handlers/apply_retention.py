@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 
+from africasignal.jobs.execution import fenced_effect
 from africasignal.jobs.handlers import JobContext, register
 from africasignal.models import EvidenceDocument
 from africasignal.publish import deletions, retention
@@ -47,4 +48,5 @@ def purge_expired_evidence(ctx: JobContext) -> None:
     store = store_for_session(ctx.session)
     if store is None:
         raise RuntimeError("Evidence purge requires object storage")
-    store.delete(key)
+    with fenced_effect():
+        store.delete(key)

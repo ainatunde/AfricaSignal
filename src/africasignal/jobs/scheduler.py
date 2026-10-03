@@ -75,6 +75,7 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
         ("explain_backfill", f"explain_backfill:{_slot(now, 60)}"),  # AS-028
         ("dispatch_outbox", f"dispatch_outbox:{_slot(now, 1)}"),
         ("prune_events", f"prune_events:{_slot(now, 24 * 60)}"),  # retention: 13 months
+        ("archive_operations", f"archive_operations:{_slot(now, 1)}"),
         ("apply_retention", f"apply_retention:{_slot(now, 24 * 60)}"),  # accounts, feedback
         (
             "agent_reach_expire",

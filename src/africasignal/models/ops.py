@@ -21,6 +21,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import CITEXT, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -78,7 +79,14 @@ class Outbox(CreatedMixin, Base):
 
 class Job(CreatedMixin, Base):
     __tablename__ = "job"
-    __table_args__ = (Index("ix_job_status_run_at", "status", "run_at"),)
+    __table_args__ = (
+        Index("ix_job_status_run_at", "status", "run_at"),
+        Index(
+            "ix_job_finished_retention",
+            "finished_at",
+            postgresql_where=text("status IN ('done', 'dead')"),
+        ),
+    )
 
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
@@ -190,7 +198,7 @@ class LlmCall(CreatedMixin, Base):
     input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     cost_usd: Mapped[Decimal] = mapped_column(Numeric(10, 5), nullable=False)
-    job_id: Mapped[int | None] = mapped_column(ForeignKey("job.id"))
+    job_id: Mapped[int | None] = mapped_column(ForeignKey("job.id", ondelete="SET NULL"))
     ts: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

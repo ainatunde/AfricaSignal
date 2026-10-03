@@ -24,10 +24,10 @@ from africasignal.jobs.worker import Worker
 def factory(engine: Engine) -> Iterator[sessionmaker[Session]]:
     """Sessions that really commit; the job and source tables are emptied around each test."""
     with engine.begin() as conn:
-        conn.execute(text("DELETE FROM job; DELETE FROM source"))
+        conn.execute(text("DELETE FROM job; DELETE FROM job_deduplication; DELETE FROM source"))
     yield sessionmaker(bind=engine, expire_on_commit=False)
     with engine.begin() as conn:
-        conn.execute(text("DELETE FROM job; DELETE FROM source"))
+        conn.execute(text("DELETE FROM job; DELETE FROM job_deduplication; DELETE FROM source"))
 
 
 def _row(factory: sessionmaker[Session], job_id: int) -> dict[str, object]:

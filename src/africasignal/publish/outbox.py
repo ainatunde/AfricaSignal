@@ -24,6 +24,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from africasignal.config import get_settings
+from africasignal.jobs.execution import fenced_effect
 from africasignal.jobs.queue import backoff_seconds
 from africasignal.models import AppUser, AssessmentVersion, LoginToken, Outbox, Situation
 from africasignal.publish import email_render
@@ -211,7 +212,8 @@ def _send_one(
             and message.to.strip().casefold() not in settings.staging_email_recipients
         ):
             raise EmailSendError("staging recipient is not allowlisted", retryable=False)
-        row.provider_message_id = provider.send(message)
+        with fenced_effect():
+            row.provider_message_id = provider.send(message)
         if not row.provider_message_id or not row.provider_message_id.strip():
             raise EmailSendError("provider returned no message id; outcome uncertain")
     except EmailSendError as exc:
