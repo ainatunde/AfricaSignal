@@ -72,9 +72,15 @@ def test_youtube_checks_channel_before_resumable_upload(monkeypatch: pytest.Monk
 
     mock_client(monkeypatch, handler)
     receipt = platforms.upload_youtube_video(
-        client_id="id", client_secret="secret", refresh_token="refresh",
-        expected_channel_id="expected", title="title", description="description",
-        category_id="25", privacy_status="unlisted", video=b"0000ftypvideo",
+        client_id="id",
+        client_secret="secret",
+        refresh_token="refresh",
+        expected_channel_id="expected",
+        title="title",
+        description="description",
+        category_id="25",
+        privacy_status="unlisted",
+        video=b"0000ftypvideo",
     )
     assert receipt.external_id == "video_id"
     assert calls[-1] == "/upload/session"
@@ -94,8 +100,14 @@ def test_youtube_refuses_wrong_authorized_channel_before_upload(
     mock_client(monkeypatch, handler)
     with pytest.raises(platforms.SocialRejected, match="does not match"):
         platforms.upload_youtube_video(
-            client_id="id", client_secret="secret", refresh_token="refresh",
-            expected_channel_id="expected", title="title", description="description",
-            category_id="25", privacy_status="public", video=b"0000ftypvideo",
+            client_id="id",
+            client_secret="secret",
+            refresh_token="refresh",
+            expected_channel_id="expected",
+            title="title",
+            description="description",
+            category_id="25",
+            privacy_status="public",
+            video=b"0000ftypvideo",
         )
     assert not any(path.endswith("/videos") for path in calls)

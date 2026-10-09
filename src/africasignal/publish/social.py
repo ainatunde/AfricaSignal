@@ -222,9 +222,7 @@ def queue_current_social_post(
         )
 
     version = session.scalar(
-        select(AssessmentVersion)
-        .where(AssessmentVersion.id == version_id)
-        .with_for_update()
+        select(AssessmentVersion).where(AssessmentVersion.id == version_id).with_for_update()
     )
     situation = session.get(Situation, version.situation_id) if version else None
     if (
@@ -287,9 +285,9 @@ def queue_current_social_post(
 
     local_day = now.astimezone(LAGOS).date()
     day_start = datetime.combine(local_day, time.min, tzinfo=LAGOS).astimezone(UTC)
-    next_day = datetime.combine(
-        local_day + timedelta(days=1), time.min, tzinfo=LAGOS
-    ).astimezone(UTC)
+    next_day = datetime.combine(local_day + timedelta(days=1), time.min, tzinfo=LAGOS).astimezone(
+        UTC
+    )
     lock_name = f"africasignal.{channel}-posts.{local_day}"
     session.execute(select(func.pg_advisory_xact_lock(func.hashtext(lock_name))))
     count = _daily_usage(session, day_start, next_day, channel)
@@ -333,9 +331,7 @@ def publications_for_versions(
     if not version_ids:
         return {}
     rows = session.scalars(
-        select(SocialPublication).where(
-            SocialPublication.assessment_version_id.in_(version_ids)
-        )
+        select(SocialPublication).where(SocialPublication.assessment_version_id.in_(version_ids))
     )
     return {(row.assessment_version_id, row.channel): row for row in rows}
 
@@ -347,9 +343,7 @@ def retry_rejected_post(
     if versions.publication_suspended(session):
         raise SocialPublicationError("publication is suspended")
     row = session.scalar(
-        select(SocialPublication)
-        .where(SocialPublication.id == publication_id)
-        .with_for_update()
+        select(SocialPublication).where(SocialPublication.id == publication_id).with_for_update()
     )
     if row is None or row.status != "failed":
         raise SocialPublicationError("only a definitively failed post can be requeued")
@@ -376,9 +370,9 @@ def retry_rejected_post(
 
     local_day = now.astimezone(LAGOS).date()
     day_start = datetime.combine(local_day, time.min, tzinfo=LAGOS).astimezone(UTC)
-    next_day = datetime.combine(
-        local_day + timedelta(days=1), time.min, tzinfo=LAGOS
-    ).astimezone(UTC)
+    next_day = datetime.combine(local_day + timedelta(days=1), time.min, tzinfo=LAGOS).astimezone(
+        UTC
+    )
     lock_name = f"africasignal.{row.channel}-posts.{local_day}"
     session.execute(select(func.pg_advisory_xact_lock(func.hashtext(lock_name))))
     if settings_store.get(session, PUBLISHING_ENABLED_SETTINGS[row.channel]) != "yes":
@@ -575,9 +569,7 @@ def dispatch_pending(session: Session, now: datetime, limit: int = MAX_BATCH) ->
 
         row = candidate
         version = session.scalar(
-            select(AssessmentVersion).where(
-                AssessmentVersion.id == row.assessment_version_id
-            )
+            select(AssessmentVersion).where(AssessmentVersion.id == row.assessment_version_id)
         )
         situation = session.get(Situation, version.situation_id) if version else None
         if (
@@ -604,45 +596,39 @@ def dispatch_pending(session: Session, now: datetime, limit: int = MAX_BATCH) ->
             if channel == "x":
                 token = settings_store.get(session, "x_user_access_token")
                 if not token:
-                    raise social_platforms.SocialRejected(
-                        "X user access token is not configured"
-                    )
-                receipt = create_post(token, body)
-                external_id = receipt.post_id
+                    raise social_platforms.SocialRejected("X user access token is not configured")
+                external_id = create_post(token, body).post_id
             elif channel == "facebook":
-                receipt = social_platforms.create_facebook_post(
+                external_id = social_platforms.create_facebook_post(
                     settings_store.get(session, "facebook_page_id") or "",
                     settings_store.get(session, "facebook_page_access_token") or "",
                     settings_store.get(session, "meta_graph_api_version") or "v26.0",
                     body,
-                )
-                external_id = receipt.external_id
+                ).external_id
             elif channel == "instagram":
                 public_url = settings_store.get(session, "public_base_url") or ""
                 if not media_key or not public_url:
                     raise social_platforms.SocialRejected("Instagram media is not configured")
-                receipt = social_platforms.create_instagram_post(
+                external_id = social_platforms.create_instagram_post(
                     settings_store.get(session, "instagram_professional_account_id") or "",
                     settings_store.get(session, "instagram_access_token") or "",
                     settings_store.get(session, "meta_graph_api_version") or "v26.0",
                     body,
                     social_creative.signed_asset_url(public_url, media_key, now),
-                )
-                external_id = receipt.external_id
+                ).external_id
             elif channel == "telegram":
-                receipt = social_platforms.create_telegram_post(
+                external_id = social_platforms.create_telegram_post(
                     settings_store.get(session, "telegram_bot_token") or "",
                     settings_store.get(session, "telegram_channel_id") or "",
                     body,
-                )
-                external_id = receipt.external_id
+                ).external_id
             else:
                 if not media_key or store is None:
                     raise social_platforms.SocialRejected(
                         "YouTube video is unavailable in object storage"
                     )
                 video = store.get(media_key)
-                receipt = social_platforms.upload_youtube_video(
+                external_id = social_platforms.upload_youtube_video(
                     client_id=settings_store.get(session, "youtube_oauth_client_id") or "",
                     client_secret=settings_store.get(session, "youtube_oauth_client_secret") or "",
                     refresh_token=settings_store.get(session, "youtube_refresh_token") or "",
@@ -654,8 +640,7 @@ def dispatch_pending(session: Session, now: datetime, limit: int = MAX_BATCH) ->
                         settings_store.get(session, "youtube_video_privacy") or "unlisted"
                     ),
                     video=video,
-                )
-                external_id = receipt.external_id
+                ).external_id
         except (XPostRejected, social_platforms.SocialRejected) as exc:
             _finish(session, row_id, "failed", error=str(exc), now=now)
             result.rejected += 1
@@ -669,10 +654,8 @@ def dispatch_pending(session: Session, now: datetime, limit: int = MAX_BATCH) ->
                 row_id,
                 "outcome_unknown",
                 error=(
-                    (
                     f"Unexpected {type(exc).__name__}; confirm the {channel} account "
                     "before retrying."
-                )
                 ),
                 now=now,
             )

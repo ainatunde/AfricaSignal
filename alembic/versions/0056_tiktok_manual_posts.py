@@ -1,7 +1,7 @@
 """Add TikTok to manual, operator-recorded channel posts.
 
-Revision ID: 0046
-Revises: 0045
+Revision ID: 0056
+Revises: 0055
 Create Date: 2026-10-09
 """
 
@@ -9,8 +9,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0046"
-down_revision = "0045"
+revision = "0056"
+down_revision = "0055"
 branch_labels = None
 depends_on = None
 
@@ -20,11 +20,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    has_posts = op.get_bind().execute(
-        sa.text("SELECT EXISTS (SELECT 1 FROM channel_post WHERE channel = 'tiktok')")
-    ).scalar_one()
+    has_posts = (
+        op.get_bind()
+        .execute(sa.text("SELECT EXISTS (SELECT 1 FROM channel_post WHERE channel = 'tiktok')"))
+        .scalar_one()
+    )
     if has_posts:
-        raise RuntimeError("Remove TikTok manual-post records before downgrading migration 0046.")
+        raise RuntimeError("Remove TikTok manual-post records before downgrading migration 0056.")
     op.execute("ALTER TYPE channel_post_channel RENAME TO channel_post_channel_old")
     op.execute("CREATE TYPE channel_post_channel AS ENUM ('wa', 'x')")
     op.execute(

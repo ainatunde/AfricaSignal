@@ -1,7 +1,7 @@
 """Add opt-in email delivery for reviewed editorial insights.
 
-Revision ID: 0044
-Revises: 0043
+Revision ID: 0054
+Revises: 0053
 Create Date: 2026-10-09
 """
 
@@ -9,8 +9,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0044"
-down_revision = "0043"
+revision = "0054"
+down_revision = "0053"
 branch_labels = None
 depends_on = None
 

@@ -319,6 +319,7 @@ _DEFS = (
         "instagram_publishing_enabled",
         "Instagram publishing",
         "social_publishing",
+        "choice",
         "Off by default; enable after professional-account media publishing is verified.",
         default="no",
         choices=("no", "yes"),
@@ -346,7 +347,8 @@ _DEFS = (
         "Unresolved social media retention (days)",
         "social_publishing",
         "int",
-        "Successful uploads are deleted immediately; unresolved media expires after the configured period.",
+        "Successful uploads are deleted immediately; unresolved media expires after the "
+        "configured period.",
         default="30",
         minimum=1,
         maximum=90,
@@ -832,18 +834,16 @@ def normalise(defn: SettingDef, raw: str) -> str:
     # text
     if defn.key == "meta_graph_api_version" and not re.fullmatch(r"v[0-9]{1,2}\.[0-9]", raw):
         raise SettingError("Meta Graph API version must look like v26.0")
-    if (
-        defn.key in {"facebook_page_id", "instagram_professional_account_id"}
-        and not re.fullmatch(r"[0-9]{5,30}", raw)
+    if defn.key in {"facebook_page_id", "instagram_professional_account_id"} and not re.fullmatch(
+        r"[0-9]{5,30}", raw
     ):
         raise SettingError(f"{defn.label}: enter the numeric account ID")
     if defn.key == "youtube_channel_id" and not re.fullmatch(r"UC[A-Za-z0-9_-]{22}", raw):
         raise SettingError("YouTube channel ID must be the standard UC-prefixed channel ID")
     if defn.key == "youtube_category_id" and not re.fullmatch(r"[0-9]{1,4}", raw):
         raise SettingError("YouTube category ID must contain 1 to 4 digits")
-    if (
-        defn.key == "telegram_channel_id"
-        and not re.fullmatch(r"@[A-Za-z0-9_]{5,32}|-?[0-9]{5,20}", raw)
+    if defn.key == "telegram_channel_id" and not re.fullmatch(
+        r"@[A-Za-z0-9_]{5,32}|-?[0-9]{5,20}", raw
     ):
         raise SettingError("Telegram destination must be a channel @username or numeric chat ID")
     if len(raw) > 500:

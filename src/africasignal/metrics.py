@@ -43,7 +43,15 @@ EVENT_NAMES = (
 )
 # Where a visit came from (``?ref=``). Anything else is dropped rather than stored.
 ALLOWED_REFS = (
-    "wa", "x", "facebook", "instagram", "telegram", "youtube", "tiktok", "email", "share"
+    "wa",
+    "x",
+    "facebook",
+    "instagram",
+    "telegram",
+    "youtube",
+    "tiktok",
+    "email",
+    "share",
 )
 RETENTION = timedelta(days=13 * 31)  # 13 months, a little generous
 

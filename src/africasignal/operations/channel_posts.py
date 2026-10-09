@@ -1,7 +1,8 @@
 """Manual WhatsApp/TikTok records and source-checked draft generation for recent changes.
 
-WhatsApp and TikTok remain copy-and-post; X and other supported networks use separate operator-approved
-social publication records. A manual "posted" entry records only that a person posted by hand.
+WhatsApp and TikTok remain copy-and-post; X and other supported networks use separate
+operator-approved social publication records. A manual "posted" entry records only that a person
+posted by hand.
 
 A situation whose post breaks a rule (a number the facts do not state, a headline too long for the
 channel) is listed as a problem and does not hide the others. Publication suspension hides drafts

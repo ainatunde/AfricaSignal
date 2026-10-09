@@ -1,7 +1,7 @@
 """Add budgeted X Recent Search watch queries and ID-only leads.
 
-Revision ID: 0041
-Revises: 0040
+Revision ID: 0051
+Revises: 0050
 Create Date: 2026-10-09
 """
 
@@ -9,8 +9,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0041"
-down_revision = "0040"
+revision = "0051"
+down_revision = "0050"
 branch_labels = None
 depends_on = None
 

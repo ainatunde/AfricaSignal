@@ -61,9 +61,7 @@ def _id(payload: dict[str, object], platform: str, *path: str) -> str:
     return str(value)
 
 
-def create_facebook_post(
-    page_id: str, access_token: str, api_version: str, text: str
-) -> Receipt:
+def create_facebook_post(page_id: str, access_token: str, api_version: str, text: str) -> Receipt:
     url = f"https://graph.facebook.com/{api_version}/{page_id}/feed"
     try:
         with _client() as client:

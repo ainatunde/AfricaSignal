@@ -1,7 +1,7 @@
 """Add private operator-reviewed editorial insight drafts.
 
-Revision ID: 0043
-Revises: 0042
+Revision ID: 0053
+Revises: 0052
 Create Date: 2026-10-09
 """
 
@@ -10,8 +10,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision = "0043"
-down_revision = "0042"
+revision = "0053"
+down_revision = "0052"
 branch_labels = None
 depends_on = None
 

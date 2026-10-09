@@ -618,11 +618,11 @@ def _channel_page(
                     "instagram_access_token",
                     "meta_graph_api_version",
                 )
-            ) and store_for_session(db) is not None,
+            )
+            and store_for_session(db) is not None,
             "telegram": settings_store.get(db, "telegram_publishing_enabled") == "yes"
             and all(
-                settings_store.get(db, key)
-                for key in ("telegram_channel_id", "telegram_bot_token")
+                settings_store.get(db, key) for key in ("telegram_channel_id", "telegram_bot_token")
             ),
             "youtube": settings_store.get(db, "youtube_publishing_enabled") == "yes"
             and all(
@@ -633,7 +633,8 @@ def _channel_page(
                     "youtube_oauth_client_secret",
                     "youtube_refresh_token",
                 )
-            ) and store_for_session(db) is not None,
+            )
+            and store_for_session(db) is not None,
         },
         channels=channel_ops.CHANNEL_NAMES,
         days=days,

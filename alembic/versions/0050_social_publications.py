@@ -1,6 +1,6 @@
 """Add durable, operator-approved social publication attempts.
 
-Revision ID: 0040
+Revision ID: 0050
 Revises: 0039
 Create Date: 2026-10-09
 """
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0040"
+revision = "0050"
 down_revision = "0039"
 branch_labels = None
 depends_on = None
