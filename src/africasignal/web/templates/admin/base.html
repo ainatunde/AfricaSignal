@@ -11,8 +11,14 @@
   body { font: 16px/1.5 system-ui, sans-serif; color: var(--fg); background: var(--bg); margin: 0; }
   header, main { max-width: 64rem; margin: 0 auto; padding: 0 1rem; }
   header { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; border-bottom: 1px solid var(--line); padding-top: .75rem; padding-bottom: .75rem; }
-  header nav { display: flex; flex-wrap: wrap; gap: .5rem 1rem; flex: 1; }
-  @media (max-width: 40rem) { header nav { flex-basis: 100%; } }
+  header nav { display: flex; flex-wrap: wrap; gap: .5rem 1rem; flex: 1; align-items: center; }
+  header nav details { position: relative; }
+  header nav summary { cursor: pointer; color: var(--accent); }
+  .nav-menu { position: absolute; top: calc(100% + .5rem); left: 0; z-index: 5; display: grid; gap: .35rem; min-width: 12rem; padding: .75rem; border: 1px solid var(--line); background: var(--bg); box-shadow: 0 .3rem 1rem rgba(0,0,0,.16); }
+  @media (max-width: 40rem) {
+    header nav { flex-basis: 100%; gap: .75rem; }
+    .nav-menu { position: static; box-shadow: none; margin-top: .4rem; }
+  }
   a { color: var(--accent); }
   h1 { font-size: 1.4rem; } h2 { font-size: 1.15rem; margin-top: 2rem; }
   table { border-collapse: collapse; width: 100%; }
@@ -44,11 +50,15 @@
   <strong>AfricaSignal console</strong>
   {% if operator %}
   <nav aria-label="Console">
-    <a href="/admin/sources">Sources</a>
-    <a href="/admin/feedback">Feedback</a>
-    <a href="/admin/metrics">Metrics</a>
-    {% if operator.role == "admin" %}<a href="/admin/jobs">Jobs</a><a href="/admin/assessments">Assessments</a><a href="/admin/policies">Policies</a><a href="/admin/range-checks">Range checks</a><a href="/admin/costs">Costs</a><a href="/admin/domains">Domains</a><a href="/admin/nbs-upload">NBS upload</a><a href="/admin/channel-posts">Channel posts</a><a href="/admin/alerts">Alerts</a><a href="/admin/automation">AI and automation</a><a href="/admin/agent-reach">Agent Reach</a><a href="/admin/agents">External agents</a><a href="/admin/configuration-coverage">Configuration coverage</a><a href="/admin/publication">Publication</a><a href="/admin/settings">Settings</a>{% endif %}
-    <a href="/admin/audit">Audit log</a>
+    {% if operator.role == "admin" %}
+    <details><summary>Overview</summary><div class="nav-menu"><a href="/admin/metrics">Overview and metrics</a><a href="/admin/jobs">Jobs and activity</a><a href="/admin/costs">Costs</a></div></details>
+    <details><summary>Intelligence</summary><div class="nav-menu"><a href="/admin/assessments">Assessments</a><a href="/admin/insights">Editorial drafts</a><a href="/admin/feedback">Feedback and corrections</a><a href="/admin/policies">Policies</a><a href="/admin/range-checks">Range checks</a></div></details>
+    <details><summary>Sources &amp; Listening</summary><div class="nav-menu"><a href="/admin/sources">Sources</a><a href="/admin/domains">Domains</a><a href="/admin/nbs-upload">NBS upload</a><a href="/admin/social-listening">X social listening</a><a href="/admin/agent-reach">Agent Reach</a><a href="/admin/agents">External agents</a></div></details>
+    <details><summary>Distribution</summary><div class="nav-menu"><a href="/admin/channel-posts">Channel posts</a><a href="/admin/alerts">Alerts</a><a href="/admin/publication">Publication</a></div></details>
+    <details><summary>Controls</summary><div class="nav-menu"><a href="/admin/automation">AI and automation</a><a href="/admin/settings">Settings</a><a href="/admin/configuration-coverage">Configuration coverage</a><a href="/admin/audit">Audit log</a></div></details>
+    {% else %}
+    <a href="/admin/sources">Sources</a><a href="/admin/feedback">Feedback</a><a href="/admin/metrics">Metrics</a><a href="/admin/audit">Audit log</a>
+    {% endif %}
   </nav>
   <span class="muted">{{ operator.email }} ({{ operator.role }})</span>
   <form method="post" action="/admin/logout"><button class="link" type="submit">Sign out</button></form>

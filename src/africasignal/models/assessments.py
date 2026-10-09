@@ -96,7 +96,15 @@ class AssessmentVersion(CreatedMixin, Base):
 
 class AssessmentInput(CreatedMixin, Base):
     __tablename__ = "assessment_input"
-    __table_args__ = (Index("ix_assessment_input_kind_id", "input_kind", "input_id"),)
+    __table_args__ = (
+        Index("ix_assessment_input_kind_id", "input_kind", "input_id"),
+        Index(
+            "ix_assessment_input_version_kind_id",
+            "assessment_version_id",
+            "input_kind",
+            "input_id",
+        ),
+    )
 
     assessment_version_id: Mapped[int] = mapped_column(
         ForeignKey("assessment_version.id"), nullable=False

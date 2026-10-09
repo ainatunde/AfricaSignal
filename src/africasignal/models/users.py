@@ -28,6 +28,10 @@ class AppUser(CreatedMixin, Base):
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     digest_opt_in: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     digest_opt_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    insight_email_opt_in: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    insight_email_opt_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 

@@ -19,9 +19,12 @@ from sqlalchemy.orm import Session
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from africasignal import settings_store
+from africasignal.assess.explain import PROMPT_VERSION
 from africasignal.config import get_settings
 from africasignal.models import Place
 from africasignal.net.netutil import USER_AGENT
+from africasignal.publish.social_creative import parse_asset_token
+from africasignal.storage import store_for_session
 from africasignal.web import queries
 from africasignal.web.cache import TTLCache
 from africasignal.web.chart import line_chart_svg
@@ -301,10 +304,11 @@ def situation_page(request: Request, slug: str, db: Db) -> Response:
     suspended = queries.publication_suspended(db)
     status = current.effective_status
     base_url = public_base_url(db)
-    key = (current.version.id, status, suspended, base_url)
+    version = current.version
+    explanation_current = version.prompt_version == PROMPT_VERSION
+    key = (version.id, status, suspended, base_url, explanation_current)
     page = _page_cache.get(key)
     if page is None:
-        version = current.version
         points = queries.chart_points(db, current.situation)
         unit = next((str(f["unit"]) for f in version.facts if f.get("unit") not in (None, "%")), "")
         context = {
@@ -312,6 +316,7 @@ def situation_page(request: Request, slug: str, db: Db) -> Response:
             "suspended": suspended,
             "situation": current.situation,
             "version": version,
+            "explanation_current": explanation_current,
             "place": current.place,
             "status": status,
             "b": badge(version),
@@ -377,6 +382,28 @@ def place_page(request: Request, code: str, db: Db) -> Response:
 def coverage_page(request: Request, db: Db) -> Response:
     return render(
         request, "coverage.html", _ctx(db, "coverage", data=queries.coverage(db)), cache_seconds=60
+    )
+
+
+@router.get("/social-media")
+def social_media_asset(
+    token: Annotated[str, Query(min_length=20, max_length=512)], db: Db
+) -> Response:
+    """Serve a short-lived, signed image URL for Meta's media fetcher."""
+    key = parse_asset_token(token, _now())
+    if key is None:
+        return Response(status_code=404, headers={"Cache-Control": "no-store"})
+    store = store_for_session(db)
+    if store is None:
+        return Response(status_code=404, headers={"Cache-Control": "no-store"})
+    try:
+        data = store.get(key)
+    except Exception:
+        return Response(status_code=404, headers={"Cache-Control": "no-store"})
+    return Response(
+        data,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=300", "X-Robots-Tag": "noindex"},
     )
 
 

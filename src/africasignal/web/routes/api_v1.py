@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from africasignal.assess.explain import PROMPT_VERSION
 from africasignal.models import AssessmentVersion, Place
 from africasignal.web import queries
 from africasignal.web.client_address import client_address
@@ -244,7 +245,9 @@ def get_situation(slug: str, db: Db) -> dict[str, Any]:
     return {
         **summary_of(current),
         "facts": v.facts,
-        "explanation": None if insufficient else v.explanation,
+        "explanation": (
+            v.explanation if not insufficient and v.prompt_version == PROMPT_VERSION else None
+        ),
         "possible_factors": v.possible_factors,
         "unknowns": v.unknowns,
         "change_summary": v.change_summary,

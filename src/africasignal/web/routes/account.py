@@ -23,7 +23,10 @@ from starlette.responses import RedirectResponse
 from africasignal import metrics
 from africasignal.models import AssessmentVersion, Notification, Place, Preference, Situation
 from africasignal.publish import accounts, login_tokens, tokens
-from africasignal.publish.email_render import UNSUBSCRIBE_PURPOSE
+from africasignal.publish.email_render import (
+    INSIGHT_UNSUBSCRIBE_PURPOSE,
+    UNSUBSCRIBE_PURPOSE,
+)
 from africasignal.web import queries
 from africasignal.web.analytics import SESSION_COOKIE
 from africasignal.web.client_address import client_address
@@ -54,6 +57,8 @@ NOTICES = {
     "saved": "Saved.",
     "digest_on": "You will get the weekly email.",
     "digest_off": "You will not get the weekly email.",
+    "insight_email_on": "You will get reviewed insight emails for situations you follow.",
+    "insight_email_off": "You will not get immediate insight emails.",
     "read": "Marked as read.",
 }
 KIND_WORDS = {
@@ -333,6 +338,20 @@ def account_digest(user: CurrentUser, db: Db, digest: Annotated[str, Form()] = "
     return RedirectResponse(f"/account?notice={'digest_on' if on else 'digest_off'}", 303)
 
 
+@router.post("/account/insight-email")
+def account_insight_email(
+    user: CurrentUser, db: Db, choice: Annotated[str, Form()] = ""
+) -> Response:
+    if user is None:
+        return sign_in_redirect("/account")
+    on = choice == "on"
+    accounts.set_insight_email_opt_in(db, user.id, on, now())
+    db.commit()
+    return RedirectResponse(
+        f"/account?notice={'insight_email_on' if on else 'insight_email_off'}", 303
+    )
+
+
 @router.post("/account/preferences")
 async def account_preferences(request: Request, user: CurrentUser, db: Db) -> Response:
     if user is None:
@@ -393,20 +412,38 @@ def account_delete(
 # --- unsubscribe --------------------------------------------------------------------------------
 
 
-def _unsubscribe_value(token: str) -> bool:
-    value = tokens.verify(UNSUBSCRIBE_PURPOSE, token)
+def _unsubscribe_value(token: str, list_name: str) -> bool:
+    if list_name not in {"digest", "insights"}:
+        return False
+    purpose = INSIGHT_UNSUBSCRIBE_PURPOSE if list_name == "insights" else UNSUBSCRIBE_PURPOSE
+    value = tokens.verify(purpose, token)
     return value is not None and value.isdigit()
 
 
 @router.get("/unsubscribe", response_class=HTMLResponse)
 def unsubscribe_confirm(
-    request: Request, db: Db, t: Annotated[str, Query(max_length=200)] = ""
+    request: Request,
+    db: Db,
+    t: Annotated[str, Query(max_length=200)] = "",
+    list_name: Annotated[str, Query(alias="list", max_length=20)] = "digest",
 ) -> Response:
     """Shows a button; a mail scanner opening the link must not unsubscribe anyone."""
-    if not _unsubscribe_value(t):
-        return _page(request, db, "unsubscribe.html", {"token": None, "done": False}, 400)
+    if not _unsubscribe_value(t, list_name):
+        return _page(
+            request,
+            db,
+            "unsubscribe.html",
+            {"token": None, "done": False, "list_name": list_name},
+            400,
+        )
     return private_headers(
-        _page(request, db, "unsubscribe.html", {"token": t, "done": False}), sensitive=True
+        _page(
+            request,
+            db,
+            "unsubscribe.html",
+            {"token": t, "done": False, "list_name": list_name},
+        ),
+        sensitive=True,
     )
 
 
@@ -416,13 +453,28 @@ def unsubscribe(
     db: Db,
     t: Annotated[str, Query(max_length=200)] = "",
     form_t: Annotated[str, Form(alias="t", max_length=200)] = "",
+    list_name: Annotated[str, Query(alias="list", max_length=20)] = "digest",
+    form_list: Annotated[str, Form(alias="list", max_length=20)] = "digest",
 ) -> Response:
     """The button on the page, and a mail client's one-click unsubscribe (the token is in the
     query string of the link it posts to)."""
     token = t or form_t
-    if not accounts.unsubscribe(db, token):
-        return _page(request, db, "unsubscribe.html", {"token": None, "done": False}, 400)
+    chosen_list = list_name if t else form_list
+    if not accounts.unsubscribe(db, token, list_name=chosen_list):
+        return _page(
+            request,
+            db,
+            "unsubscribe.html",
+            {"token": None, "done": False, "list_name": chosen_list},
+            400,
+        )
     db.commit()
     return private_headers(
-        _page(request, db, "unsubscribe.html", {"token": None, "done": True}), sensitive=True
+        _page(
+            request,
+            db,
+            "unsubscribe.html",
+            {"token": None, "done": True, "list_name": chosen_list},
+        ),
+        sensitive=True,
     )

@@ -39,8 +39,9 @@
     <textarea id="windows-{{ w.name }}" name="windows" rows="4" maxlength="1500" required>{{ w.windows_text }}</textarea>
     <p class="muted">Days are ISO weekdays: 0 Monday through 6 Sunday. Use * for every day.
       Example: 0,1,2,3,4 01:00-04:00. Windows end at the listed time; 24:00 means midnight.</p>
-    <label for="concurrency-{{ w.name }}">{{ "Maximum concurrent remote tasks (1-32)" if w.name in ("agent_reach", "external_agents") else "Maximum concurrent jobs (1-32)" }}</label>
-    <input type="number" id="concurrency-{{ w.name }}" name="max_concurrency" min="1" max="32" value="{{ w.max_concurrency }}" required>
+    {% set remote_limit = w.name in ("agent_reach", "external_agents") %}
+    <label for="concurrency-{{ w.name }}">{{ "Maximum concurrent remote tasks (1-4)" if remote_limit else "Maximum concurrent jobs (1-32)" }}</label>
+    <input type="number" id="concurrency-{{ w.name }}" name="max_concurrency" min="1" max="{{ 4 if remote_limit else 32 }}" value="{{ w.max_concurrency }}" required>
     {% if w.name == "agent_reach" %}
     <label for="items-{{ w.name }}">Maximum candidate leads per discovery task (1–20)</label>
     <input type="number" id="items-{{ w.name }}" name="max_items_per_run" min="1" max="20" value="{{ w.max_items_per_run }}" required>

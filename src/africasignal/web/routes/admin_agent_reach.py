@@ -9,7 +9,8 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
-from africasignal.jobs.policy import WorkloadSchedule
+from africasignal import settings_store
+from africasignal.jobs.policy import WorkloadSchedule, schedule_from_text
 from africasignal.models import AgentReachCandidate, AgentReachTask
 from africasignal.operations import agent_reach as reach_ops
 from africasignal.operations.agent_reach import AgentReachError, TaskSubmission
@@ -21,7 +22,7 @@ from africasignal.operations.workloads import (
     configure as configure_workload,
 )
 from africasignal.web.deps import AdminOperator, Authenticated, DbSession
-from africasignal.web.routes.admin import _page, _redirect
+from africasignal.web.routes.admin import _page, _redirect, _settings_group
 
 router = APIRouter(prefix="/admin")
 
@@ -65,6 +66,10 @@ def _view(
     status_code: int = 200,
     error: str | None = None,
     submitted: dict[str, str] | None = None,
+    control_submitted: dict[str, str] | None = None,
+    control_error: str | None = None,
+    control_conflict: bool = False,
+    control_field_error: str | None = None,
 ) -> Response:
     status = reach_ops.runner_readiness(db)
     notice = {
@@ -83,6 +88,25 @@ def _view(
         task_rows = reach_ops.tasks(db)
         candidate_rows = reach_ops.candidates(db)
         source_rows = reach_ops.eligible_sources(db)
+    schedule = status.get("schedule")
+    schedule_values = None
+    if isinstance(schedule, WorkloadSchedule):
+        schedule_values = {
+            "timezone": schedule.timezone,
+            "max_concurrency": schedule.max_concurrency,
+            "max_items_per_run": schedule.max_items_per_run,
+            "windows": "\n".join(
+                f"{','.join(str(day) for day in window.days)} {window.start}-{window.end}"
+                for window in schedule.windows
+            ),
+        }
+    if control_submitted:
+        schedule_values = {
+            "timezone": control_submitted.get("timezone", ""),
+            "max_concurrency": control_submitted.get("max_concurrency", ""),
+            "max_items_per_run": control_submitted.get("max_items_per_run", ""),
+            "windows": control_submitted.get("windows", ""),
+        }
     return _page(
         request,
         "admin/agent_reach.html",
@@ -94,12 +118,114 @@ def _view(
         candidates=candidate_rows,
         sources=source_rows,
         submitted=submitted or {},
+        control_submitted=control_submitted or {},
+        control_error=control_error,
+        control_conflict=control_conflict,
+        control_field_error=control_field_error,
+        settings_group=_settings_group(db, "agent", control_submitted, control_field_error),
+        schedule_values=schedule_values,
     )
 
 
 @router.get("/agent-reach")
 def agent_reach_view(request: Request, auth: AdminOperator, db: DbSession) -> Response:
     return _view(request, db, auth)
+
+
+@router.post("/agent-reach/configure")
+async def agent_reach_configure(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    form = await request.form()
+    submitted = {key: value for key, value in form.items() if isinstance(value, str)}
+    try:
+        settings_revision = int(submitted.get("settings_revision", ""))
+        workload_revision = int(submitted.get("expected_revision", ""))
+        schedule = schedule_from_text(submitted.get("windows", ""))
+        schedule = WorkloadSchedule.model_validate(
+            {
+                **schedule.model_dump(mode="json"),
+                "timezone": submitted.get("timezone"),
+                "max_concurrency": int(submitted.get("max_concurrency", "")),
+                "max_items_per_run": int(submitted.get("max_items_per_run", "")),
+            }
+        )
+        enabled = submitted.get("enabled") == "on"
+        changes: dict[str, str | None] = {}
+        for key in settings_store.group_keys("agent"):
+            defn = settings_store.definition(key)
+            value = submitted.get(key, "").strip()
+            if submitted.get(f"clear__{key}") == "on":
+                changes[key] = None
+            elif defn.secret:
+                if value:
+                    changes[key] = value
+            elif value == "":
+                changes[key] = None
+            elif value != (settings_store.resolve(db, key).value or ""):
+                changes[key] = value
+    except (ValueError, TypeError, ValidationError) as exc:
+        return _view(request, db, auth, 400, control_error=str(exc), control_submitted=submitted)
+
+    transaction = db.begin_nested()
+    try:
+        settings_store.apply_group_changes(db, auth.operator, "agent", settings_revision, changes)
+        configure_workload(
+            db,
+            auth.operator,
+            "agent_reach",
+            WorkloadChange(
+                enabled=enabled,
+                schedule=schedule,
+                expected_revision=workload_revision,
+            ),
+        )
+        transaction.commit()
+    except settings_store.SettingsRevisionConflict as exc:
+        transaction.rollback()
+        return _view(
+            request,
+            db,
+            auth,
+            409,
+            control_error=str(exc),
+            control_submitted=submitted,
+            control_conflict=True,
+        )
+    except RevisionConflict as exc:
+        transaction.rollback()
+        return _view(
+            request,
+            db,
+            auth,
+            409,
+            control_error=str(exc),
+            control_submitted=submitted,
+            control_conflict=True,
+        )
+    except settings_store.SettingError as exc:
+        transaction.rollback()
+        return _view(
+            request,
+            db,
+            auth,
+            400,
+            control_error=str(exc),
+            control_submitted=submitted,
+            control_field_error=exc.key,
+        )
+    except (AgentReachError, ValueError, TypeError) as exc:
+        transaction.rollback()
+        return _view(
+            request,
+            db,
+            auth,
+            400,
+            control_error=str(exc),
+            control_submitted=submitted,
+        )
+    target = (
+        "/admin/agent-reach?notice=enabled" if enabled else "/admin/agent-reach?notice=disabled"
+    )
+    return _redirect(target, auth)
 
 
 @router.post("/agent-reach/enabled")

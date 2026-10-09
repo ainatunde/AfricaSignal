@@ -5,8 +5,10 @@ import pytest
 from africasignal.publish import tokens
 from africasignal.publish.accounts import unsubscribe_token
 from africasignal.publish.email_render import (
+    insight_unsubscribe_url,
     render_correction,
     render_digest,
+    render_insight,
     render_login,
     unsubscribe_url,
 )
@@ -56,3 +58,23 @@ def test_correction_email_per_kind(kind: str) -> None:
     message = render_correction("a@b.co", 3, payload, "k")
     assert ITEM["title"] in message.subject
     assert ITEM["change_summary"] in message.text
+
+
+def test_insight_email_has_separate_one_click_unsubscribe_and_reviewed_content() -> None:
+    payload = {
+        "content": {
+            "headline": "A reviewed update",
+            "summary": "The assessment recorded the change.",
+            "reported_explanations": ["NBS reported the stated figure."],
+        },
+        "item": ITEM,
+    }
+    message = render_insight("a@b.co", 7, payload, "insight:1", base="https://africasignal.example")
+    link = insight_unsubscribe_url(7, "https://africasignal.example")
+    assert message.subject == "AfricaSignal: A reviewed update"
+    assert "NBS reported the stated figure." in message.text
+    assert message.html is not None and "A reviewed update" in message.html
+    assert message.headers["List-Unsubscribe"] == f"<{link}>"
+    assert message.headers["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
+    assert "list=insights" in link
+    assert "weekly" not in message.text.lower()

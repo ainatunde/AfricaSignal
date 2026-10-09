@@ -98,7 +98,7 @@
   </section>
   {% endif %}
 
-  {% if version.explanation and version.evidence_state != "insufficient" and status != "withdrawn" %}
+  {% if version.explanation and explanation_current and version.evidence_state != "insufficient" and status != "withdrawn" %}
   <section aria-labelledby="h-why">
     <h2 id="h-why">Why this matters</h2>
     <p>{{ version.explanation }}</p>

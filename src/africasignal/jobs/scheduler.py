@@ -18,7 +18,7 @@ from africasignal.jobs import queue
 from africasignal.jobs.log import configure_logging
 from africasignal.ops_heartbeat import ProcessHeartbeat
 from africasignal.publish.recovery import require_recovery_complete
-from africasignal.settings_store import get_int
+from africasignal.settings_store import get, get_int
 
 log = logging.getLogger("africasignal.scheduler")
 
@@ -74,6 +74,8 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
         ("release_held_versions", f"release_held_versions:{_slot(now, 1)}"),
         ("explain_backfill", f"explain_backfill:{_slot(now, 60)}"),  # AS-028
         ("dispatch_outbox", f"dispatch_outbox:{_slot(now, 1)}"),
+        ("dispatch_social_publication", f"dispatch_social_publication:{_slot(now, 1)}"),
+        ("social_listen_expire", f"social_listen_expire:{_slot(now, 24 * 60)}"),
         ("prune_events", f"prune_events:{_slot(now, 24 * 60)}"),  # retention: 13 months
         ("apply_retention", f"apply_retention:{_slot(now, 24 * 60)}"),  # accounts, feedback
         (
@@ -87,6 +89,19 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
         ("check_backups", f"check_backups:{_slot(now, 60)}"),  # stale backup, failed drill alerts
         ("check_health", f"check_health:{_slot(now, 15)}"),  # failing sources, dead jobs, budget
     ]
+    if get(session, "x_listening_enabled") == "yes":
+        listen_minutes = get_int(session, "x_listening_poll_minutes") or 360
+        due_query = session.execute(
+            text(
+                "SELECT id FROM social_listening_query WHERE enabled "
+                "AND (last_polled_at IS NULL OR last_polled_at <= :cutoff) "
+                "ORDER BY last_polled_at NULLS FIRST, id LIMIT 1"
+            ),
+            {"cutoff": now - timedelta(minutes=listen_minutes)},
+        ).first()
+        if due_query is not None:
+            periodic.append(("social_listen_poll", f"social_listen_poll:{_slot(now, 1)}"))
+
     # 4. Weekly digest: the operator-configured weekday/hour in Africa/Lagos.
     lagos = now.astimezone(LAGOS)
     digest_weekday = get_int(session, "weekly_digest_weekday")

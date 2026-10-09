@@ -21,9 +21,13 @@ from africasignal.jobs.handlers import JobContext
 from africasignal.jobs.handlers.import_nbs_file import import_nbs_file
 from africasignal.jobs.queue import ClaimedJob
 from africasignal.models import (
+    AppUser,
+    AssessmentInput,
     AssessmentVersion,
     AuditLog,
     DiscoveredDomainDecision,
+    EditorialInsightDraft,
+    EvidenceDocument,
     GdeltDiscovery,
     Job,
     LlmCall,
@@ -36,11 +40,12 @@ from africasignal.models import (
     Source,
     SourcePermission,
 )
+from africasignal.publish.accounts import follow, set_insight_email_opt_in
 from africasignal.publish.situations import assess_situation, ensure_situations
 from africasignal.publish.versions import apply_policy, set_publication_suspended
 from africasignal.storage import S3Store
 from africasignal.web.routes import admin_ops
-from tests.integration.email_support import add_place, add_situation, add_version
+from tests.integration.email_support import add_place, add_situation, add_user, add_version
 from tests.integration.nbs_support import add_places, add_source, import_bytes, make_store
 from tests.integration.test_admin_console import (
     ORIGIN,
@@ -83,11 +88,98 @@ PAGES = (
     "/admin/nbs-upload",
     "/admin/domains",
     "/admin/channel-posts",
+    "/admin/insights",
     "/admin/alerts",
 )
 
 
 # --- access -------------------------------------------------------------------------------------
+
+
+def _editorial_draft_for_review(session: Session) -> tuple[EditorialInsightDraft, AppUser]:
+    place = add_place(session, "NG-LA", "Lagos", "state")
+    situation = add_situation(session, "reviewed-insight", place)
+    version = add_version(session, situation)
+    source = make_source(session, "editorial-source", approved_at=WHEN)
+    document = EvidenceDocument(
+        source_id=source.id,
+        url="https://source.example/insight",
+        canonical_url="https://source.example/insight",
+        retrieved_at=WHEN,
+        content_sha256="c" * 64,
+        storage_key="test/editorial-insight",
+        mime="text/html",
+        excerpt="An approved public passage.",
+    )
+    session.add(document)
+    session.flush()
+    session.add(
+        AssessmentInput(
+            assessment_version_id=version.id,
+            input_kind="evidence_document",
+            input_id=document.id,
+        )
+    )
+    user = add_user(session, "reader@example.test")
+    follow(session, user.id, situation.id)
+    set_insight_email_opt_in(session, user.id, True, WHEN)
+    draft = EditorialInsightDraft(
+        assessment_version_id=version.id,
+        status="pending_review",
+        model_id="claude-test",
+        prompt_version="editorial_draft_v1",
+        input_sha256="d" * 64,
+        evidence_claim_ids=[],
+        content={
+            "headline": "Reviewed update",
+            "summary": "An evidence-backed summary.",
+            "reported_explanations": [],
+        },
+    )
+    session.add(draft)
+    session.flush()
+    return draft, user
+
+
+def test_editor_can_explicitly_queue_reviewed_insight_email(
+    admin: TestClient, session: Session
+) -> None:
+    draft, user = _editorial_draft_for_review(session)
+    response = post(
+        admin,
+        f"/admin/insights/{draft.id}/review",
+        decision="email_queued",
+        reason="Reviewed against the current source record.",
+    )
+    session.refresh(draft)
+    row = session.scalars(select(Outbox)).one()
+    assert response.status_code == 303
+    assert response.headers["location"].endswith("notice=insight_email_queued")
+    assert (draft.status, row.kind, row.payload["user_id"]) == (
+        "email_queued",
+        "email_insight",
+        user.id,
+    )
+    assert "editorial_draft.approved_for_email" in actions(session)
+
+
+def test_editor_cannot_queue_insight_email_without_consented_followers(
+    admin: TestClient, session: Session
+) -> None:
+    draft, _user = _editorial_draft_for_review(session)
+    from africasignal.publish.accounts import set_insight_email_opt_in
+
+    set_insight_email_opt_in(session, _user.id, False, WHEN)
+    response = post(
+        admin,
+        f"/admin/insights/{draft.id}/review",
+        decision="email_queued",
+        reason="Reviewed against the current source record.",
+    )
+    session.refresh(draft)
+    assert response.status_code == 409
+    assert draft.status == "pending_review"
+    assert session.scalars(select(Outbox)).all() == []
 
 
 def test_every_page_needs_sign_in(client: TestClient) -> None:  # noqa: F811

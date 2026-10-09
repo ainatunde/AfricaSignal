@@ -23,9 +23,18 @@ from sqlalchemy import func, or_, select, true
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from africasignal.assess.retrieval import assessment_evidence_is_current, assessment_passages
 from africasignal.config import get_settings
 from africasignal.jobs.queue import backoff_seconds
-from africasignal.models import AppUser, AssessmentVersion, LoginToken, Outbox, Situation
+from africasignal.models import (
+    AppUser,
+    AssessmentVersion,
+    EditorialInsightDraft,
+    Follow,
+    LoginToken,
+    Outbox,
+    Situation,
+)
 from africasignal.publish import email_render
 from africasignal.publish.email import (
     EmailMessage,
@@ -47,7 +56,7 @@ SECRET_PAYLOAD_KEYS = ("link",)
 
 # Kinds that are notifications, held while publication is suspended (plan B12 kill switch).
 # Sign-in emails are not notifications and are still sent.
-HELD_WHILE_SUSPENDED = ("email_digest", "email_correction")
+HELD_WHILE_SUSPENDED = ("email_digest", "email_correction", "email_insight")
 
 
 def enqueue_email(
@@ -103,6 +112,48 @@ def _build_message(
         if valid is None:
             return None
         return email_render.render_login(user.email, row.payload, row.dedupe_key)
+    if row.kind == "email_insight":
+        if user.email_verified_at is None or not user.insight_email_opt_in:
+            return None
+        version_id = row.payload.get("assessment_version_id")
+        draft = session.get(EditorialInsightDraft, row.payload.get("editorial_draft_id"))
+        send_time = now or datetime.now(UTC)
+        if (
+            draft is None
+            or draft.status != "email_queued"
+            or draft.assessment_version_id != version_id
+            or not _current_version(session, version_id, send_time)
+            or not assessment_evidence_is_current(session, version_id, now=send_time)
+        ):
+            return None
+        available_claim_ids = {
+            item.claim_id for item in assessment_passages(session, version_id, now=send_time)
+        }
+        if not set(draft.evidence_claim_ids).issubset(available_claim_ids):
+            return None
+        situation_id = session.scalar(
+            select(Situation.id)
+            .join(AssessmentVersion, AssessmentVersion.situation_id == Situation.id)
+            .where(AssessmentVersion.id == version_id)
+        )
+        if (
+            situation_id is None
+            or session.scalar(
+                select(Follow.id).where(
+                    Follow.user_id == user.id, Follow.situation_id == situation_id
+                )
+            )
+            is None
+        ):
+            return None
+        base = email_render.resolve_base_url(session)
+        return email_render.render_insight(
+            user.email,
+            user.id,
+            {"content": draft.content, "item": row.payload["item"]},
+            row.dedupe_key,
+            base=base,
+        )
     if user.email_verified_at is None or not user.digest_opt_in:
         return None
     base = email_render.resolve_base_url(session)  # read now, so a console change applies

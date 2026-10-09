@@ -60,7 +60,7 @@ code. They are fixed in the pull request that follows it; what remains for a per
 | S4 | Email provider chosen, sender domain verified (SPF and DKIM), API key and sender saved in Settings. A sign-in email and a digest arrive and the unsubscribe link works. | Tunde | Test sign-in; Settings page shows no expected setting missing |
 | S5 | `docker compose` (or the host's equivalent) starts the web service with `--no-access-log`, and the proxy's own log policy matches the notice (G5): no client address or URL in its log, or kept for a few days at most. | Tunde | `docker compose config` shows `--no-access-log` in the web command; proxy config |
 | S6 | Backups running to the backup bucket; the privacy notice's backup period matches **Days to keep dumps**. | Tunde | Notice on `/privacy` shows the same number as Settings |
-| S7 | The site's social accounts (WhatsApp channel, X) are created and their own privacy settings reviewed; links posted there use `?ref=wa` or `?ref=x` (plan D1). | Tunde | Links checked |
+| S7 | Create and review the Facebook Page, Instagram professional account, Telegram channel/bot, YouTube channel, and X account. Configure credentials and per-platform enable switches in Settings; grant only publishing scopes. Confirm Telegram bot admin access, Meta media fetch over HTTPS, YouTube OAuth channel identity, object storage, privacy defaults, and links use the matching `?ref=` value. WhatsApp and TikTok remain copy-and-post; make TikTok videos in TikTok itself and keep links/branding out of the video and caption. | Tunde | One operator-approved staging post per configured API platform and one manually published TikTok sample, receipts/links, and rollback/revoke steps |
 
 ## 5. Language model data
 
