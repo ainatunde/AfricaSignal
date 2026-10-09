@@ -37,11 +37,13 @@ feedback_status = pg_enum(
     "resolved_insufficient",
     "closed",
 )
-outbox_kind = pg_enum("outbox_kind", "email_login", "email_digest", "email_correction")
+outbox_kind = pg_enum(
+    "outbox_kind", "email_login", "email_digest", "email_correction", "email_insight"
+)
 outbox_status = pg_enum("outbox_status", "pending", "sent", "failed", "dead")
 job_status = pg_enum("job_status", "queued", "running", "done", "failed", "dead")
 operator_role = pg_enum("operator_role", "admin", "editor")
-channel_post_channel = pg_enum("channel_post_channel", "wa", "x")
+channel_post_channel = pg_enum("channel_post_channel", "wa", "x", "tiktok")
 
 
 class Feedback(CreatedMixin, Base):
@@ -197,8 +199,8 @@ class LlmCall(CreatedMixin, Base):
 
 
 class ChannelPost(CreatedMixin, Base):
-    """An operator's record that they posted a draft by hand on WhatsApp or X (AS-033, demand
-    test D1). The app sends nothing: this row only remembers that a person did, which version, when
+    """An operator's record that they posted a draft by hand on WhatsApp, X, or TikTok. The app
+    sends nothing for these manual channels: this row remembers which version a person posted, when,
     and by whom. One row per version and channel."""
 
     __tablename__ = "channel_post"
@@ -214,6 +216,149 @@ class ChannelPost(CreatedMixin, Base):
     )
     post_url: Mapped[str | None] = mapped_column(Text)
     note: Mapped[str | None] = mapped_column(Text)
+
+
+class SocialPublication(CreatedMixin, Base):
+    """One operator-approved social post attempt for a published assessment version."""
+
+    __tablename__ = "social_publication"
+    __table_args__ = (
+        UniqueConstraint("assessment_version_id", "channel"),
+        CheckConstraint(
+            "channel IN ('x', 'facebook', 'instagram', 'telegram', 'youtube')",
+            name="channel_valid",
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'sending', 'sent', 'failed', 'outcome_unknown', 'cancelled')",
+            name="status_valid",
+        ),
+        Index("ix_social_publication_status_created", "status", "created_at"),
+    )
+
+    assessment_version_id: Mapped[int] = mapped_column(
+        ForeignKey("assessment_version.id", ondelete="RESTRICT"), nullable=False
+    )
+    channel: Mapped[str] = mapped_column(Text, nullable=False, server_default="x")
+    requested_by_operator_id: Mapped[int] = mapped_column(
+        ForeignKey("operator.id", ondelete="RESTRICT"), nullable=False
+    )
+    approved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
+    external_post_id: Mapped[str | None] = mapped_column(Text)
+    media_storage_key: Mapped[str | None] = mapped_column(Text)
+    media_content_type: Mapped[str | None] = mapped_column(Text)
+    attempt_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class EditorialInsightDraft(CreatedMixin, Base):
+    """Private synthesis of one assessment; email distribution requires explicit approval."""
+
+    __tablename__ = "editorial_insight_draft"
+    __table_args__ = (
+        UniqueConstraint("assessment_version_id", "prompt_version"),
+        CheckConstraint(
+            "status IN ('pending_review', 'approved', 'email_queued', 'rejected', 'stale')",
+            name="status_valid",
+        ),
+        Index("ix_editorial_insight_draft_status_created", "status", "created_at"),
+    )
+
+    assessment_version_id: Mapped[int] = mapped_column(
+        ForeignKey("assessment_version.id", ondelete="RESTRICT"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending_review")
+    model_id: Mapped[str] = mapped_column(Text, nullable=False)
+    prompt_version: Mapped[str] = mapped_column(Text, nullable=False)
+    input_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_claim_ids: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
+    content: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    reviewed_by_operator_id: Mapped[int | None] = mapped_column(ForeignKey("operator.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    review_note: Mapped[str | None] = mapped_column(Text)
+
+
+class SocialListeningQuery(CreatedMixin, Base):
+    """A revisioned X Recent Search query; only post IDs are retained from results."""
+
+    __tablename__ = "social_listening_query"
+    __table_args__ = (
+        UniqueConstraint("name"),
+        CheckConstraint("max_results BETWEEN 10 AND 100", name="max_results_bounds"),
+        CheckConstraint("revision > 0", name="revision_positive"),
+        CheckConstraint(
+            "last_seen_post_id IS NULL OR last_seen_post_id ~ '^[0-9]+$'",
+            name="last_seen_post_id_numeric",
+        ),
+    )
+
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    query_text: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    max_results: Mapped[int] = mapped_column(Integer, nullable=False, server_default="20")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    last_seen_post_id: Mapped[str | None] = mapped_column(Text)
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SocialListeningPoll(CreatedMixin, Base):
+    """Metered Recent Search attempt. The reservation covers ambiguous reads."""
+
+    __tablename__ = "social_listening_poll"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'succeeded', 'failed', 'outcome_unknown', 'discarded')",
+            name="status_valid",
+        ),
+        CheckConstraint("reserved_results BETWEEN 10 AND 100", name="reserved_results_bounds"),
+        CheckConstraint("fetched_results BETWEEN 0 AND 100", name="fetched_results_bounds"),
+        Index("ix_social_listening_poll_status_created", "status", "created_at"),
+        Index("ix_social_listening_poll_query_created", "query_id", "created_at"),
+    )
+
+    query_id: Mapped[int] = mapped_column(
+        ForeignKey("social_listening_query.id", ondelete="RESTRICT"), nullable=False
+    )
+    query_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_by_operator_id: Mapped[int | None] = mapped_column(ForeignKey("operator.id"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="running")
+    reserved_results: Mapped[int] = mapped_column(Integer, nullable=False)
+    fetched_results: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    new_leads: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class SocialListeningLead(CreatedMixin, Base):
+    """A seven-day-window X post lead; its post text and user profile are never stored."""
+
+    __tablename__ = "social_listening_lead"
+    __table_args__ = (
+        UniqueConstraint("post_id"),
+        CheckConstraint(
+            "status IN ('new', 'reviewed', 'dismissed', 'unavailable')", name="status_valid"
+        ),
+        CheckConstraint("post_id ~ '^[0-9]+$'", name="post_id_numeric"),
+        Index("ix_social_listening_lead_status_expires", "status", "expires_at"),
+    )
+
+    query_id: Mapped[int] = mapped_column(
+        ForeignKey("social_listening_query.id", ondelete="RESTRICT"), nullable=False
+    )
+    poll_id: Mapped[int] = mapped_column(
+        ForeignKey("social_listening_poll.id", ondelete="RESTRICT"), nullable=False
+    )
+    post_id: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="new")
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class WorkloadControl(Base):

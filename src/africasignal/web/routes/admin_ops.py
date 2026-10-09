@@ -1,10 +1,9 @@
 """Console pages for operations (spec B11.5): Jobs, Assessments with the R7 hold queue, range
 checks, Costs, NBS upload, discovered domains, Channel posts and backup alerts.
 
-All of them are admin-only. Every change goes through ``africasignal.operations``, which records
-the audit row in the same transaction as the change. Nothing here sends anything to an outside
-service: channel posts are drafts to copy, and the NBS upload only stores a file and queues the
-existing import job.
+All of them are admin-only. Every change goes through an audited service. WhatsApp remains a
+copy-and-post workflow; X, Facebook, Instagram, Telegram, and YouTube require explicit operator
+approval and are delivered by a worker. The NBS upload only stores a file and queues the import job.
 """
 
 from __future__ import annotations
@@ -14,22 +13,27 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import Response
+from pydantic import ValidationError
 from starlette.datastructures import UploadFile
 
-from africasignal import backup_alerts
+from africasignal import audit, backup_alerts, settings_store
+from africasignal.jobs import queue
 from africasignal.operations import alerts as alerts_ops
 from africasignal.operations import assessments as assessment_ops
 from africasignal.operations import channel_posts as channel_ops
 from africasignal.operations import costs as cost_ops
 from africasignal.operations import domains as domain_ops
+from africasignal.operations import editorial as editorial_ops
 from africasignal.operations import jobs as job_ops
 from africasignal.operations import nbs_upload, range_review
 from africasignal.operations import policies as policy_ops
+from africasignal.operations import social_listening as listening_ops
+from africasignal.publish import social as social_ops
 from africasignal.publish import versions
 from africasignal.publish.whatsapp_text import PostError
 from africasignal.storage import store_for_session
 from africasignal.web.deps import AdminOperator, DbSession
-from africasignal.web.routes.admin import _page, _redirect
+from africasignal.web.routes.admin import _page, _redirect, _settings_group
 
 router = APIRouter(prefix="/admin")
 
@@ -49,6 +53,18 @@ NOTICES = {
     "the places it covers are not loaded. They are created when the places list is loaded and "
     "the next claim for the series arrives.",
     "post_marked": "Recorded as posted. Nothing was sent by the app.",
+    "x_post_queued": "X post approved and queued. Check its delivery status below.",
+    "publication_queued": "Social post approved and queued. Check its delivery status below.",
+    "social_query_created": "Watch query saved. It will run only while X listening is enabled.",
+    "social_query_updated": "Watch query updated.",
+    "social_poll_queued": ("A bounded X search was queued. Results are stored as post IDs only."),
+    "social_settings_saved": "Social controls saved. The listener uses them on its next run.",
+    "social_settings_unchanged": "Social controls are unchanged.",
+    "social_lead_updated": "Lead status updated. This does not make a post verified evidence.",
+    "insight_reviewed": "Editorial review recorded. No reader email or social post was sent.",
+    "insight_email_queued": (
+        "Reviewed insight email queued for opted-in followers. Check delivery status in Jobs."
+    ),
     "post_unmarked": "Record removed.",
     "policy_retired": "Policy series retired. Published situations stay until you withdraw them.",
     "policy_activated": "Policy series active again.",
@@ -486,6 +502,58 @@ def policies_toggle(
     )
 
 
+# --- private, draft-only editorial insights ---------------------------------------------------
+
+
+def _editorial_drafts_page(
+    request: Request,
+    db: DbSession,
+    auth: AdminOperator,
+    status_code: int = 200,
+    error: str | None = None,
+) -> Response:
+    rows = editorial_ops.recent(db)
+    evidence = {draft.id: editorial_ops.evidence_for(db, draft) for draft, _, _ in rows}
+    return _page(
+        request,
+        "admin/editorial_drafts.html",
+        auth,
+        status_code,
+        error=error,
+        drafts=rows,
+        evidence=evidence,
+        now=datetime.now(UTC),
+        notice=_notice(request),
+    )
+
+
+@router.get("/insights")
+def editorial_drafts_view(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    return _editorial_drafts_page(request, db, auth)
+
+
+@router.post("/insights/{draft_id}/review")
+async def editorial_draft_review(
+    draft_id: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    form = await request.form()
+    decision = form.get("decision", "")
+    reason = form.get("reason", "")
+    if not isinstance(decision, str) or not isinstance(reason, str):
+        return _editorial_drafts_page(
+            request, db, auth, 400, "Review decision and reason are required."
+        )
+    try:
+        editorial_ops.review(db, auth.operator, draft_id, decision, reason, now=datetime.now(UTC))
+    except editorial_ops.EditorialReviewError as exc:
+        return _editorial_drafts_page(request, db, auth, 409, str(exc))
+    return _back(
+        "/admin/insights",
+        "insight_email_queued" if decision == "email_queued" else "insight_reviewed",
+        auth,
+    )
+
+
 # --- channel posts ------------------------------------------------------------------------------
 
 
@@ -504,6 +572,9 @@ def _channel_page(
         )
     except PostError as exc:
         error = str(exc)  # a setting to fill in, not a bad request: the page still answers 200
+    publications = social_ops.publications_for_versions(
+        db, [item.version_id for item in found.posts]
+    )
     return _page(
         request,
         "admin/channel_posts.html",
@@ -514,6 +585,56 @@ def _channel_page(
         problems=found.problems,
         suspended=found.suspended,
         recorded=channel_ops.recent_records(db),
+        publications=publications,
+        recent_publications=social_ops.recent_publications(db),
+        x_token_configured=settings_store.get(db, "x_user_access_token") is not None,
+        x_publishing_enabled=settings_store.get(db, "x_publishing_enabled") == "yes",
+        social_enabled={
+            channel: settings_store.get(db, key) == "yes"
+            for channel, key in {
+                "facebook": "facebook_publishing_enabled",
+                "instagram": "instagram_publishing_enabled",
+                "telegram": "telegram_publishing_enabled",
+                "youtube": "youtube_publishing_enabled",
+            }.items()
+        },
+        social_ready={
+            "x": settings_store.get(db, "x_publishing_enabled") == "yes"
+            and bool(settings_store.get(db, "x_user_access_token")),
+            "facebook": settings_store.get(db, "facebook_publishing_enabled") == "yes"
+            and all(
+                settings_store.get(db, key)
+                for key in (
+                    "facebook_page_id",
+                    "facebook_page_access_token",
+                    "meta_graph_api_version",
+                )
+            ),
+            "instagram": settings_store.get(db, "instagram_publishing_enabled") == "yes"
+            and all(
+                settings_store.get(db, key)
+                for key in (
+                    "instagram_professional_account_id",
+                    "instagram_access_token",
+                    "meta_graph_api_version",
+                )
+            ) and store_for_session(db) is not None,
+            "telegram": settings_store.get(db, "telegram_publishing_enabled") == "yes"
+            and all(
+                settings_store.get(db, key)
+                for key in ("telegram_channel_id", "telegram_bot_token")
+            ),
+            "youtube": settings_store.get(db, "youtube_publishing_enabled") == "yes"
+            and all(
+                settings_store.get(db, key)
+                for key in (
+                    "youtube_channel_id",
+                    "youtube_oauth_client_id",
+                    "youtube_oauth_client_secret",
+                    "youtube_refresh_token",
+                )
+            ) and store_for_session(db) is not None,
+        },
         channels=channel_ops.CHANNEL_NAMES,
         days=days,
         notice=_notice(request),
@@ -530,9 +651,60 @@ def _int(value: str | None, default: int) -> int:
 
 @router.get("/channel-posts")
 def channel_posts_view(request: Request, auth: AdminOperator, db: DbSession) -> Response:
-    """Drafts of the WhatsApp and X posts for material changes. Nothing is sent: an operator
-    copies the text and posts it by hand, then marks it as posted."""
+    """Show current WhatsApp and X drafts; X requires explicit approval before dispatch."""
     return _channel_page(request, db, auth)
+
+
+@router.post("/channel-posts/versions/{version_id}/x/approve")
+def channel_posts_approve_x(
+    version_id: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    try:
+        social_ops.queue_current_x_post(db, auth.operator, version_id, datetime.now(UTC))
+    except social_ops.SocialPublicationError as exc:
+        return _channel_page(request, db, auth, 400, str(exc))
+    return _back("/admin/channel-posts", "x_post_queued", auth)
+
+
+@router.post("/channel-posts/versions/{version_id}/{channel}/approve")
+async def channel_posts_approve_social(
+    version_id: int, channel: str, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    video = None
+    if channel == "youtube":
+        declared = request.headers.get("content-length", "")
+        if not (declared.isdigit() and declared.isascii()):
+            return _channel_page(
+                request, db, auth, 411, "The upload must state its size (a Content-Length header)."
+            )
+        if int(declared) > 51 * 1024 * 1024:
+            return _channel_page(request, db, auth, 413, "YouTube video must be 50 MiB or smaller.")
+        form = await request.form(max_files=1, max_fields=2)
+        upload = form.get("video")
+        if not isinstance(upload, UploadFile) or not upload.filename:
+            return _channel_page(request, db, auth, 400, "Choose an MP4 video before approval.")
+        video = await upload.read(50 * 1024 * 1024 + 1)
+        await upload.close()
+        if len(video) > 50 * 1024 * 1024:
+            return _channel_page(request, db, auth, 400, "YouTube video must be 50 MiB or smaller.")
+    try:
+        social_ops.queue_current_social_post(
+            db, auth.operator, version_id, channel, datetime.now(UTC), video=video
+        )
+    except social_ops.SocialPublicationError as exc:
+        return _channel_page(request, db, auth, 400, str(exc))
+    return _back("/admin/channel-posts", "publication_queued", auth)
+
+
+@router.post("/channel-posts/publications/{publication_id}/retry")
+def channel_posts_retry_social(
+    publication_id: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    try:
+        social_ops.retry_rejected_post(db, auth.operator, publication_id, datetime.now(UTC))
+    except social_ops.SocialPublicationError as exc:
+        return _channel_page(request, db, auth, 400, str(exc))
+    return _back("/admin/channel-posts", "publication_queued", auth)
 
 
 @router.post("/channel-posts/versions/{version_id}/{channel}/posted")
@@ -563,6 +735,192 @@ def channel_posts_unmark(
     except channel_ops.ChannelPostError as exc:
         return _channel_page(request, db, auth, 400, str(exc))
     return _back("/admin/channel-posts", "post_unmarked", auth)
+
+
+# --- X social listening ------------------------------------------------------------------------
+
+
+def _social_listening_page(
+    request: Request,
+    db: DbSession,
+    auth: AdminOperator,
+    status_code: int = 200,
+    error: str | None = None,
+    *,
+    submitted: dict[str, str] | None = None,
+    conflict: bool = False,
+    field_error: str | None = None,
+    create_values: dict[str, str] | None = None,
+    query_values: dict[int, dict[str, str]] | None = None,
+) -> Response:
+    return _page(
+        request,
+        "admin/social_listening.html",
+        auth,
+        status_code,
+        error=error,
+        conflict=conflict,
+        control_error=error,
+        field_error=field_error,
+        group=_settings_group(db, "social_listening", submitted, field_error),
+        queries=listening_ops.query_rows(db),
+        leads=listening_ops.lead_rows(db),
+        polls=listening_ops.poll_rows(db),
+        listening=listening_ops.status(db, datetime.now(UTC)),
+        create_values=create_values or {},
+        query_values=query_values or {},
+        notice=_notice(request),
+    )
+
+
+@router.get("/social-listening")
+def social_listening_view(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    return _social_listening_page(request, db, auth)
+
+
+@router.post("/social-listening/settings")
+async def social_listening_settings_save(
+    request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    form = await request.form()
+    submitted = {key: value for key, value in form.items() if isinstance(value, str)}
+    try:
+        expected = int(submitted.get("expected_revision", ""))
+    except ValueError:
+        return _social_listening_page(
+            request, db, auth, 400, "Reload the listening page before saving.", submitted=submitted
+        )
+    changes: dict[str, str | None] = {}
+    for key in settings_store.group_keys("social_listening"):
+        if key not in submitted and f"clear__{key}" not in submitted:
+            continue
+        defn = settings_store.definition(key)
+        value = submitted.get(key, "").strip()
+        if submitted.get(f"clear__{key}") == "on":
+            changes[key] = None
+        elif defn.secret:
+            if value:
+                changes[key] = value
+        elif value == "":
+            changes[key] = None
+        elif value != (settings_store.resolve(db, key).value or ""):
+            changes[key] = value
+    try:
+        changed, _revision = settings_store.apply_group_changes(
+            db, auth.operator, "social_listening", expected, changes
+        )
+    except settings_store.SettingsRevisionConflict as exc:
+        return _social_listening_page(
+            request, db, auth, 409, str(exc), submitted=submitted, conflict=True
+        )
+    except settings_store.SettingError as exc:
+        return _social_listening_page(
+            request, db, auth, 400, str(exc), submitted=submitted, field_error=exc.key
+        )
+    return _back(
+        "/admin/social-listening",
+        "social_settings_saved" if changed else "social_settings_unchanged",
+        auth,
+    )
+
+
+@router.post("/social-listening/queries")
+def social_listening_query_create(
+    request: Request,
+    auth: AdminOperator,
+    db: DbSession,
+    name: Annotated[str, Form()],
+    query_text: Annotated[str, Form()],
+    max_results: Annotated[str, Form()] = "20",
+) -> Response:
+    values = {"name": name, "query_text": query_text, "max_results": max_results}
+    try:
+        draft = listening_ops.QueryDraft.model_validate(values)
+        listening_ops.create_query(db, auth.operator, draft, datetime.now(UTC))
+    except ValidationError as exc:
+        message = exc.errors()[0]["msg"] if exc.errors() else "Check the query fields."
+        return _social_listening_page(request, db, auth, 400, message, create_values=values)
+    except listening_ops.SocialListeningError as exc:
+        return _social_listening_page(request, db, auth, 400, str(exc), create_values=values)
+    return _back("/admin/social-listening", "social_query_created", auth)
+
+
+@router.post("/social-listening/queries/{query_id}")
+async def social_listening_query_update(
+    query_id: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    form = await request.form()
+    values = {key: value for key, value in form.items() if isinstance(value, str)}
+    try:
+        expected = int(values.get("expected_revision", ""))
+        draft = listening_ops.QueryDraft.model_validate(
+            {key: values[key] for key in ("name", "query_text", "max_results")}
+        )
+        listening_ops.update_query(
+            db, auth.operator, query_id, expected, draft, values.get("enabled") == "yes"
+        )
+    except ValidationError as exc:
+        message = exc.errors()[0]["msg"] if exc.errors() else "Check the query fields."
+        return _social_listening_page(
+            request, db, auth, 400, message, query_values={query_id: values}
+        )
+    except listening_ops.SocialListeningConflict as exc:
+        return _social_listening_page(
+            request, db, auth, 409, str(exc), conflict=True, query_values={query_id: values}
+        )
+    except listening_ops.SocialListeningError as exc:
+        return _social_listening_page(
+            request, db, auth, 400, str(exc), query_values={query_id: values}
+        )
+    except ValueError as exc:
+        return _social_listening_page(
+            request, db, auth, 400, str(exc), query_values={query_id: values}
+        )
+    return _back("/admin/social-listening", "social_query_updated", auth)
+
+
+@router.post("/social-listening/poll")
+def social_listening_run_now(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    if settings_store.get(db, "x_listening_enabled") != "yes":
+        return _social_listening_page(
+            request, db, auth, 400, "Enable X listening before running a search."
+        )
+    if not settings_store.get(db, "x_app_bearer_token"):
+        return _social_listening_page(
+            request, db, auth, 400, "Configure the encrypted X app bearer token first."
+        )
+    if not any(row.enabled for row in listening_ops.query_rows(db)):
+        return _social_listening_page(
+            request, db, auth, 400, "Add and enable at least one watch query first."
+        )
+    now = datetime.now(UTC)
+    job_id = queue.enqueue(
+        db,
+        "social_listen_poll",
+        {"force": True, "operator_id": auth.operator.id},
+        dedupe_key=f"social-listen:manual:{int(now.timestamp()) // 60}",
+    )
+    if job_id is not None:
+        audit.record(
+            db,
+            auth.operator,
+            "social_listening.poll_queued",
+            "job",
+            job_id,
+            after={"job_id": job_id, "force": True},
+        )
+    return _back("/admin/social-listening", "social_poll_queued", auth)
+
+
+@router.post("/social-listening/leads/{lead_id}/{status}")
+def social_listening_lead_status(
+    lead_id: int, status: str, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    try:
+        listening_ops.set_lead_status(db, auth.operator, lead_id, status)
+    except listening_ops.SocialListeningError as exc:
+        return _social_listening_page(request, db, auth, 400, str(exc))
+    return _back("/admin/social-listening", "social_lead_updated", auth)
 
 
 # --- alerts -------------------------------------------------------------------------------------

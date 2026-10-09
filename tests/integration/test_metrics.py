@@ -50,6 +50,11 @@ def operator(session: Session) -> Operator:
     ]
 
 
+@pytest.mark.parametrize("channel", ("facebook", "instagram", "telegram", "youtube", "tiktok"))
+def test_social_channel_referrals_are_retained(channel: str) -> None:
+    assert metrics.clean_ref(channel) == channel
+
+
 def test_iso_weeks_are_counted_in_lagos_time() -> None:
     # 23:30 UTC on Sunday 11 October is 00:30 Monday 12 October in Lagos: the next week.
     assert metrics.iso_week_label(datetime(2026, 10, 11, 23, 30, tzinfo=UTC)) == "2026-W42"

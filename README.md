@@ -77,7 +77,7 @@ The rest of the operator console is admin only and every change on it is audited
 | **Costs** | Model spend by day and purpose, today's budget, and outbox email counts. |
 | **NBS upload** | Manual upload of an NBS Excel file (or ZIP) with the address it came from; stored under a server-chosen name and imported by the `import_nbs_file` job. |
 | **Domains** | News domains GDELT linked to that no approved outlet covers: reject, or add as an inactive source with a named owner. |
-| **Channel posts** | Draft WhatsApp and X text for recent material changes. Drafts only: nothing is sent. |
+| **Channel posts** | Copy WhatsApp and TikTok text manually; approve posts for X, Facebook, Instagram, Telegram, and YouTube. TikTok captions are link-free, with a separate tracked profile-bio link. Each approved delivery is independently queued and metered. |
 | **Alerts** | The `ops.alert.*` alerts: stale backup, failed restore drill, failing sources, dead jobs, model budget at 80 percent. |
 
 A news outlet cannot be approved until its owner is set (Sources page, security finding S-08).

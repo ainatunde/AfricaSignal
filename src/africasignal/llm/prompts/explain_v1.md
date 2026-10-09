@@ -25,5 +25,5 @@ Answer with one JSON object that matches the schema you were given: `{"explanati
 ## Causes
 
 - `possible_factors` lists things that might explain the change. A factor with status `not_checked` has no evidence behind it: you may say that these are possible factors nobody has checked yet, but never that they caused, drove, led to or explain the change.
-- Only a factor with status `supported` may be described as linked to the change, and then only as "reported". Do not use these words or phrases unless a factor is `supported`: {{BANNED_WORDS}}.
-- Never use the word "will" or predict what happens next.
+- A `supported` factor means a vetted claim mentions that factor; it does not prove causation. If you describe a causal link, name the exact supported factor in the same sentence and explicitly attribute the link to a source (for example, "Reports say..."). The code checks both conditions.
+- Never state certainty or make a prediction. Never use certainty or forecast terms from this list: "confirmed", "definitely", "certainly", "will". Causal terms in the validator list ({{BANNED_WORDS}}) may be used only when the previous rule's same-sentence factor and source attribution conditions are met.

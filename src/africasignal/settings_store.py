@@ -27,7 +27,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from cryptography.fernet import Fernet, InvalidToken
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -49,6 +49,21 @@ EMAIL_PROVIDERS = ("postmark", "resend")
 
 class SettingError(ValueError):
     """A value the operator should fix; the message is safe to show."""
+
+    def __init__(self, message: str, *, key: str | None = None) -> None:
+        super().__init__(message)
+        self.key = key
+
+
+class SettingsRevisionConflict(ValueError):
+    """The settings group changed after the operator loaded it."""
+
+    def __init__(self, expected: int, actual: int) -> None:
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            "Settings changed since this page loaded. Review the current values and save again."
+        )
 
 
 @dataclass(frozen=True)
@@ -80,6 +95,8 @@ GROUPS: tuple[tuple[str, str], ...] = (
     ("sources", "Sources and discovery"),
     ("site", "Website"),
     ("email", "Email"),
+    ("social_listening", "Social listening"),
+    ("social_publishing", "Social publishing"),
     ("storage", "Evidence storage"),
     ("backup", "Backup storage"),
     ("privacy", "Privacy and retention"),
@@ -87,6 +104,16 @@ GROUPS: tuple[tuple[str, str], ...] = (
 
 _DEFS = (
     SettingDef("anthropic_api_key", "Anthropic API key", "llm", "secret", expected=True),
+    SettingDef(
+        "llm_evidence_context_enabled",
+        "Evidence-grounded explanation context",
+        "llm",
+        "choice",
+        "Default off. Give the explanation model only current, permission-checked claim passages "
+        "already linked to that assessment. No new sources are searched or retained.",
+        default="no",
+        choices=("no", "yes"),
+    ),
     SettingDef("openai_api_key", "OpenAI API key", "llm", "secret"),
     SettingDef(
         "agent_reach_endpoint",
@@ -156,6 +183,23 @@ _DEFS = (
         "llm",
         "model_route",
         "Choose a reviewed provider/model and price from config/llm.yaml.",
+    ),
+    SettingDef(
+        "llm_route_editorial_draft",
+        "Editorial draft model route",
+        "llm",
+        "model_route",
+        "Separate route for private editorial drafts; calls use the same budget and token limits.",
+    ),
+    SettingDef(
+        "editorial_drafting_enabled",
+        "Draft-only editorial synthesis",
+        "llm",
+        "choice",
+        "Default off. New qualified assessments may queue private synthesis drafts for operator "
+        "review. Approval never publishes, emails, or posts.",
+        default="no",
+        choices=("no", "yes"),
     ),
     SettingDef(
         "llm_daily_budget_usd",
@@ -243,6 +287,216 @@ _DEFS = (
         "email",
         "Must belong to a domain the provider has verified (SPF and DKIM).",
         expected=True,
+    ),
+    SettingDef(
+        "x_user_access_token",
+        "X user access token",
+        "social_publishing",
+        "secret",
+        "OAuth 2.0 user-context token with tweet.write permission for the AfricaSignal X account. "
+        "Stored encrypted and never shown.",
+        expected=True,
+    ),
+    SettingDef(
+        "x_publishing_enabled",
+        "X publishing",
+        "social_publishing",
+        "choice",
+        "The per-post operator approval remains required.",
+        default="yes",
+        choices=("no", "yes"),
+    ),
+    SettingDef(
+        "facebook_publishing_enabled",
+        "Facebook publishing",
+        "social_publishing",
+        "choice",
+        "Off by default; enable after the Page credentials and permissions are verified.",
+        default="no",
+        choices=("no", "yes"),
+    ),
+    SettingDef(
+        "instagram_publishing_enabled",
+        "Instagram publishing",
+        "social_publishing",
+        "Off by default; enable after professional-account media publishing is verified.",
+        default="no",
+        choices=("no", "yes"),
+    ),
+    SettingDef(
+        "telegram_publishing_enabled",
+        "Telegram publishing",
+        "social_publishing",
+        "choice",
+        "Off by default; enable after the bot's channel permissions are verified.",
+        default="no",
+        choices=("no", "yes"),
+    ),
+    SettingDef(
+        "youtube_publishing_enabled",
+        "YouTube publishing",
+        "social_publishing",
+        "choice",
+        "Off by default; enable after OAuth channel identity and API project review.",
+        default="no",
+        choices=("no", "yes"),
+    ),
+    SettingDef(
+        "social_media_retention_days",
+        "Unresolved social media retention (days)",
+        "social_publishing",
+        "int",
+        "Successful uploads are deleted immediately; unresolved media expires after the configured period.",
+        default="30",
+        minimum=1,
+        maximum=90,
+    ),
+    SettingDef(
+        "x_daily_post_limit",
+        "X posts per Lagos day",
+        "social_publishing",
+        "int",
+        "Hard cap across operator-approved posts. No scheduled or automatic posts are sent.",
+        default="5",
+        minimum=1,
+        maximum=50,
+    ),
+    SettingDef("facebook_page_id", "Facebook Page ID", "social_publishing", "text"),
+    SettingDef(
+        "facebook_page_access_token",
+        "Facebook Page access token",
+        "social_publishing",
+        "secret",
+        "Encrypted Page token with the approved Page publishing permission.",
+    ),
+    SettingDef(
+        "instagram_professional_account_id",
+        "Instagram professional account ID",
+        "social_publishing",
+        "text",
+    ),
+    SettingDef(
+        "instagram_access_token",
+        "Instagram access token",
+        "social_publishing",
+        "secret",
+        "Encrypted token for an eligible Instagram professional account with content "
+        "publishing access.",
+    ),
+    SettingDef(
+        "meta_graph_api_version",
+        "Meta Graph API version",
+        "social_publishing",
+        "text",
+        "Version segment used by Facebook and Instagram Graph calls, for example v26.0.",
+    ),
+    SettingDef(
+        "telegram_channel_id", "Telegram channel username or ID", "social_publishing", "text"
+    ),
+    SettingDef(
+        "telegram_bot_token",
+        "Telegram bot token",
+        "social_publishing",
+        "secret",
+        "Encrypted bot token. Add the bot as an administrator of the destination channel.",
+    ),
+    SettingDef("youtube_channel_id", "Expected YouTube channel ID", "social_publishing", "text"),
+    SettingDef("youtube_oauth_client_id", "YouTube OAuth client ID", "social_publishing", "text"),
+    SettingDef(
+        "youtube_oauth_client_secret", "YouTube OAuth client secret", "social_publishing", "secret"
+    ),
+    SettingDef(
+        "youtube_refresh_token", "YouTube OAuth refresh token", "social_publishing", "secret"
+    ),
+    SettingDef(
+        "youtube_video_privacy",
+        "YouTube upload visibility",
+        "social_publishing",
+        "choice",
+        "Initial visibility for operator-approved video uploads. Unlisted is the safe default.",
+        default="unlisted",
+        choices=("private", "unlisted", "public"),
+    ),
+    SettingDef(
+        "youtube_category_id",
+        "YouTube video category ID",
+        "social_publishing",
+        "text",
+        "YouTube Data API category identifier used for video metadata.",
+        default="25",
+    ),
+    SettingDef(
+        "facebook_daily_post_limit",
+        "Facebook posts per Lagos day",
+        "social_publishing",
+        "int",
+        default="5",
+        minimum=1,
+        maximum=50,
+    ),
+    SettingDef(
+        "instagram_daily_post_limit",
+        "Instagram posts per Lagos day",
+        "social_publishing",
+        "int",
+        default="3",
+        minimum=1,
+        maximum=25,
+    ),
+    SettingDef(
+        "telegram_daily_post_limit",
+        "Telegram posts per Lagos day",
+        "social_publishing",
+        "int",
+        default="10",
+        minimum=1,
+        maximum=100,
+    ),
+    SettingDef(
+        "youtube_daily_post_limit",
+        "YouTube uploads per Lagos day",
+        "social_publishing",
+        "int",
+        default="2",
+        minimum=1,
+        maximum=10,
+    ),
+    SettingDef(
+        "x_app_bearer_token",
+        "X app bearer token",
+        "social_listening",
+        "secret",
+        "Read-only app credential for X Recent Search. Stored encrypted and never shown.",
+    ),
+    SettingDef(
+        "x_listening_enabled",
+        "X listening",
+        "social_listening",
+        "choice",
+        "Off by default. Enabling performs billable recent-search reads for active watch queries.",
+        default="no",
+        choices=("no", "yes"),
+    ),
+    SettingDef(
+        "x_listening_poll_minutes",
+        "X listening interval (minutes)",
+        "social_listening",
+        "int",
+        "Minimum interval between scheduled searches per active watch query.",
+        default="360",
+        minimum=60,
+        maximum=1440,
+    ),
+    SettingDef(
+        "x_listening_daily_read_cap",
+        "X posts reserved per Lagos day",
+        "social_listening",
+        "int",
+        "Maximum result resources reserved across searches per Lagos day. "
+        "Unknown outcomes keep the full reservation.",
+        default="100",
+        minimum=10,
+        maximum=5000,
     ),
     SettingDef(
         "weekly_digest_weekday",
@@ -342,6 +596,64 @@ def options(key: str) -> list[tuple[str, str]]:
 
 def group_keys(group: str) -> list[str]:
     return [d.key for d in _DEFS if d.group == group]
+
+
+def group_revision(session: Session, group: str) -> int:
+    """Return the revision for a console settings group (1 before its first edit)."""
+    if group not in dict(GROUPS):
+        raise SettingError("unknown settings group")
+    value = session.scalar(
+        select(Setting.value).where(Setting.key == f"control_revision.settings.{group}")
+    )
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 1
+
+
+def _lock_group_revision(session: Session, group: str) -> Setting:
+    """Serialize edits to one group, including its first update before a row exists."""
+    revision_key = f"control_revision.settings.{group}"
+    session.execute(
+        select(func.pg_advisory_xact_lock(func.hashtext(f"africasignal.settings.{group}")))
+    )
+    session.execute(
+        insert(Setting)
+        .values(key=revision_key, value=1)
+        .on_conflict_do_nothing(index_elements=[Setting.key])
+    )
+    row = session.scalar(select(Setting).where(Setting.key == revision_key).with_for_update())
+    if row is None:
+        raise RuntimeError("settings revision row could not be locked")
+    return row
+
+
+def apply_group_changes(
+    session: Session,
+    operator: Operator,
+    group: str,
+    expected_revision: int,
+    changes: dict[str, str | None],
+) -> tuple[int, int]:
+    """Apply one validated settings group using optimistic concurrency control.
+
+    Returns (number of changed settings, resulting group revision). Revision and setting rows
+    commit or roll back together with their audit records in the request transaction.
+    """
+    allowed = set(group_keys(group))
+    if not allowed:
+        raise SettingError("unknown settings group")
+    if any(key not in allowed for key in changes):
+        raise SettingError("a setting does not belong to this group")
+    if expected_revision < 1:
+        raise SettingError("reload the settings page before saving")
+
+    revision_row = _lock_group_revision(session, group)
+    actual_revision = revision_row.value if isinstance(revision_row.value, int) else 1
+    if actual_revision != expected_revision:
+        raise SettingsRevisionConflict(expected_revision, actual_revision)
+    changed = apply_changes(session, operator, changes, bump_group_revisions=False)
+    if changed:
+        revision_row.value = actual_revision + 1
+        session.flush()
+    return changed, revision_row.value
 
 
 # --- storage ------------------------------------------------------------------------------------
@@ -518,6 +830,22 @@ def normalise(defn: SettingDef, raw: str) -> str:
             raise SettingError(f"{defn.label}: must be at most {defn.maximum:g}")
         return raw
     # text
+    if defn.key == "meta_graph_api_version" and not re.fullmatch(r"v[0-9]{1,2}\.[0-9]", raw):
+        raise SettingError("Meta Graph API version must look like v26.0")
+    if (
+        defn.key in {"facebook_page_id", "instagram_professional_account_id"}
+        and not re.fullmatch(r"[0-9]{5,30}", raw)
+    ):
+        raise SettingError(f"{defn.label}: enter the numeric account ID")
+    if defn.key == "youtube_channel_id" and not re.fullmatch(r"UC[A-Za-z0-9_-]{22}", raw):
+        raise SettingError("YouTube channel ID must be the standard UC-prefixed channel ID")
+    if defn.key == "youtube_category_id" and not re.fullmatch(r"[0-9]{1,4}", raw):
+        raise SettingError("YouTube category ID must contain 1 to 4 digits")
+    if (
+        defn.key == "telegram_channel_id"
+        and not re.fullmatch(r"@[A-Za-z0-9_]{5,32}|-?[0-9]{5,20}", raw)
+    ):
+        raise SettingError("Telegram destination must be a channel @username or numeric chat ID")
     if len(raw) > 500:
         raise SettingError(f"{defn.label}: at most 500 characters")
     if defn.key.endswith("_bucket") and not _BUCKET.fullmatch(raw):
@@ -546,14 +874,29 @@ def clear_value(session: Session, operator: Operator, key: str) -> None:
     apply_changes(session, operator, {key: None})
 
 
-def apply_changes(session: Session, operator: Operator, changes: dict[str, str | None]) -> int:
+def apply_changes(
+    session: Session,
+    operator: Operator,
+    changes: dict[str, str | None],
+    *,
+    bump_group_revisions: bool = True,
+) -> int:
     """Apply ``key -> new value`` (``None`` clears). All values are validated before any is
     written, so one bad field changes nothing. Returns how many settings actually changed."""
     prepared: list[tuple[SettingDef, str | None]] = []
     for key, raw in changes.items():
         defn = definition(key)
-        prepared.append((defn, None if raw is None else normalise(defn, raw.strip())))
+        try:
+            value = None if raw is None else normalise(defn, raw.strip())
+        except SettingError as exc:
+            raise SettingError(str(exc), key=key) from exc
+        prepared.append((defn, value))
+    revision_rows = {}
+    if bump_group_revisions:
+        groups = sorted({defn.group for defn, _value in prepared})
+        revision_rows = {group: _lock_group_revision(session, group) for group in groups}
     changed = 0
+    changed_groups: set[str] = set()
     for defn, value in prepared:
         before_value, had_row, _ = _read_row(session, defn.key)
         if value is None:
@@ -570,6 +913,7 @@ def apply_changes(session: Session, operator: Operator, changes: dict[str, str |
                 after=_audit_state(defn, None, False),
             )
             changed += 1
+            changed_groups.add(defn.group)
             continue
         if had_row and before_value == value:
             continue
@@ -584,6 +928,11 @@ def apply_changes(session: Session, operator: Operator, changes: dict[str, str |
             after=_audit_state(defn, value, True),
         )
         changed += 1
+        changed_groups.add(defn.group)
+    for group in changed_groups:
+        if bump_group_revisions:
+            row = revision_rows[group]
+            row.value = (row.value if isinstance(row.value, int) else 1) + 1
     session.flush()
     return changed
 

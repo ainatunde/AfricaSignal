@@ -3,8 +3,8 @@
 For each successful HTML page a person opens, this records a ``page_view`` (and a
 ``situation_view`` for a situation page) against the visitor's ``anon_id`` cookie, and gives a new
 visitor their cookie. Nothing else about the request is kept: no address, no user agent, no URL.
-Only the page kind, the situation, and ``?ref=`` when it is one of ``wa``, ``x``, ``email`` or
-``share``. Crawlers and link previews (a WhatsApp preview fetches the page when a link is shared)
+Only the page kind, the situation, and ``?ref=`` when it is one of ``wa``, ``x``,
+``facebook``, ``instagram``, ``telegram``, ``youtube``, ``email`` or ``share``. Crawlers and link previews (a WhatsApp preview fetches the page when a link is shared)
 are not counted. A failure to record never affects the page.
 
 Pages that carry a secret in the URL (``/signin/verify``, ``/unsubscribe``) are never recorded.

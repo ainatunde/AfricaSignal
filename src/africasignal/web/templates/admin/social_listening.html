@@ -1,0 +1,79 @@
+{% extends "admin/base.html" %}
+{% block title %}X social listening{% endblock %}
+{% block content %}
+<h1>Social listening · X</h1>
+<p>Search public X posts for potential leads about Nigerian household prices and policies. Results are unverified leads, never evidence or claims. AfricaSignal stores post IDs and links only; it does not retain post text or account profiles. Open the post on X to review its current content.</p>
+<p class="muted">This uses X Recent Search, which covers the last 7 days and allows up to 100 results per request. Reads can consume X account credits. The daily cap below is a resource cap; X billing and credit limits remain authoritative. Search calls use the configured application bearer token, not the publishing account token.</p>
+{% if error %}<div class="error" role="alert" tabindex="-1">{{ error }}{% if conflict %} The proposed values are preserved where safe; review current values before saving again.{% endif %}</div>{% endif %}
+<section aria-labelledby="x-listening-controls">
+<h2 id="x-listening-controls">Connection and operating controls</h2>
+<p><strong>Effective state:</strong> {% if listening.enabled and listening.token_configured %}Enabled{% elif listening.enabled %}Blocked · app token not configured{% else %}Off{% endif %}.
+  Daily reserved: {{ listening.daily_reserved }} / {{ listening.daily_cap }} post reads.
+  Poll interval: every {{ listening.interval_minutes }} minutes.
+  {% if listening.next_poll %}Next due after {{ listening.next_poll|when }}.{% else %}No next poll scheduled.{% endif %}
+</p>
+<form method="post" action="/admin/social-listening/settings" autocomplete="off">
+  <input type="hidden" name="expected_revision" value="{{ group.revision }}">
+  {% include "admin/_settings_group_fields.html" %}
+  <p><button type="submit">Save X listening controls</button></p>
+</form>
+{% if listening.enabled and listening.token_configured and queries|selectattr('enabled')|list %}
+<form method="post" action="/admin/social-listening/poll"><button type="submit">Run bounded search now</button></form>
+{% else %}<p class="muted">Run-now stays unavailable until listening is enabled, the app token is configured, and at least one watch query is enabled.</p>{% endif %}
+</section>
+
+<section aria-labelledby="watch-queries">
+<h2 id="watch-queries">Watch queries</h2>
+<p>Use X search operators in the query, for example <code>(rice OR maize) lang:en -is:retweet</code>. The expression is limited to 512 characters. Add Nigeria/local-language terms when relevant; a keyword match does not establish where a post applies or whether it is accurate.</p>
+<form method="post" action="/admin/social-listening/queries">
+  <label for="new-name">Name</label><input id="new-name" name="name" type="text" maxlength="64" required value="{{ create_values.get('name', '') }}">
+  <label for="new-query">X search query</label><textarea id="new-query" name="query_text" rows="3" maxlength="512" required>{{ create_values.get('query_text', '') }}</textarea>
+  <label for="new-limit">Maximum results per search (10–100)</label><input id="new-limit" name="max_results" type="number" min="10" max="100" value="{{ create_values.get('max_results', '20') }}" required>
+  <button type="submit">Add watch query</button>
+</form>
+{% for q in queries %}
+{% set v = query_values.get(q.id, {}) %}
+<details {% if v %}open{% endif %}>
+  <summary>{{ q.name }} · {{ 'Enabled' if q.enabled else 'Paused' }} · revision {{ q.revision }}</summary>
+  <form method="post" action="/admin/social-listening/queries/{{ q.id }}">
+    <input type="hidden" name="expected_revision" value="{{ v.get('expected_revision', q.revision) }}">
+    <label for="q-name-{{ q.id }}">Name</label><input id="q-name-{{ q.id }}" name="name" type="text" maxlength="64" required value="{{ v.get('name', q.name) }}">
+    <label for="q-text-{{ q.id }}">Query</label><textarea id="q-text-{{ q.id }}" name="query_text" rows="3" maxlength="512" required>{{ v.get('query_text', q.query_text) }}</textarea>
+    <label for="q-limit-{{ q.id }}">Maximum results per search (10–100)</label><input id="q-limit-{{ q.id }}" name="max_results" type="number" min="10" max="100" required value="{{ v.get('max_results', q.max_results) }}">
+    <label class="inline"><input type="checkbox" name="enabled" value="yes" {% if v.get('enabled', 'yes' if q.enabled else '') == 'yes' %}checked{% endif %}> Include in scheduled listening</label>
+    <p class="muted">Since ID: {{ q.last_seen_post_id or 'not polled' }} · Last poll: {{ q.last_polled_at|when if q.last_polled_at else 'not polled' }}</p>
+    <button type="submit">Save query</button>
+  </form>
+</details>
+{% else %}<p>No watch queries yet.</p>{% endfor %}
+</section>
+
+<section aria-labelledby="leads">
+<h2 id="leads">Unverified X leads</h2>
+<p class="muted">A lead is a pointer to a public post, not a source approval. It expires after 30 days. Do not cite it as evidence; use the normal permissioned source and capture workflow for corroboration.</p>
+<div class="scroll"><table>
+<thead><tr><th scope="col">First seen</th><th scope="col">Query</th><th scope="col">X post</th><th scope="col">Status</th><th scope="col">Review</th></tr></thead>
+<tbody>
+{% for lead, query_name in leads %}
+<tr><td>{{ lead.first_seen_at|when }}</td><td>{{ query_name }}</td><td><a href="https://x.com/i/web/status/{{ lead.post_id }}" rel="noopener noreferrer">Open on X</a></td><td>{{ lead.status|title }}</td><td>
+  {% if lead.status == 'new' %}
+  <form method="post" action="/admin/social-listening/leads/{{ lead.id }}/reviewed" class="inline"><button type="submit">Mark reviewed</button></form>
+  <form method="post" action="/admin/social-listening/leads/{{ lead.id }}/dismissed" class="inline"><button type="submit">Dismiss</button></form>
+  {% endif %}
+  <form method="post" action="/admin/social-listening/leads/{{ lead.id }}/unavailable" class="inline"><button type="submit">Mark unavailable</button></form>
+</td></tr>
+{% else %}<tr><td colspan="5">No recent leads. Enable listening and configure a query to begin.</td></tr>{% endfor %}
+</tbody></table></div>
+</section>
+
+<section aria-labelledby="poll-history">
+<h2 id="poll-history">Search and usage history</h2>
+<div class="scroll"><table>
+<thead><tr><th scope="col">Started</th><th scope="col">Query</th><th scope="col">Status</th><th scope="col">Read / reserved</th><th scope="col">New leads</th><th scope="col">Details</th></tr></thead>
+<tbody>
+{% for p in polls %}
+<tr><td>{{ p.started_at|when }}</td><td>{{ p.query_id }}</td><td>{{ p.status|replace('_', ' ')|title }}</td><td>{{ p.fetched_results }} / {{ p.reserved_results }}</td><td>{{ p.new_leads }}</td><td>{{ p.last_error or '' }}</td></tr>
+{% else %}<tr><td colspan="6">No searches have run.</td></tr>{% endfor %}
+</tbody></table></div>
+</section>
+{% endblock %}

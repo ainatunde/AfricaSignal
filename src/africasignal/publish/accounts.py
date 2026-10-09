@@ -86,17 +86,52 @@ def set_digest_opt_in(session: Session, user_id: int, opted_in: bool, now: datet
     user.digest_opt_in = opted_in
 
 
+def set_insight_email_opt_in(session: Session, user_id: int, opted_in: bool, now: datetime) -> None:
+    """Manage consent for immediate, reviewed insight emails, separately from the digest."""
+    user = session.get(AppUser, user_id)
+    if user is None or user.deleted_at is not None:
+        return
+    if opted_in and user.email_verified_at is None:
+        raise ValueError("the email address is not verified")
+    if opted_in and not user.insight_email_opt_in:
+        user.insight_email_opt_in_at = now
+    user.insight_email_opt_in = opted_in
+    if not opted_in:
+        session.execute(
+            update(Outbox)
+            .where(
+                Outbox.kind == "email_insight",
+                Outbox.payload["user_id"].as_integer() == user_id,
+                Outbox.status.in_(("pending", "failed")),
+            )
+            .values(status="dead", last_error="insight email consent withdrawn")
+        )
+
+
 def unsubscribe_token(user_id: int) -> str:
     return tokens.sign(UNSUBSCRIBE_PURPOSE, str(user_id))
 
 
-def unsubscribe(session: Session, token: str) -> bool:
-    """One-click unsubscribe. Returns False for a token that does not verify. Works for a user
-    who is not signed in; repeating it is harmless."""
-    value = tokens.verify(UNSUBSCRIBE_PURPOSE, token)
+def unsubscribe(session: Session, token: str, *, list_name: str = "digest") -> bool:
+    """One-click unsubscribe from one mail stream. Repeating a valid link is harmless."""
+    purpose = "unsubscribe-insight" if list_name == "insights" else UNSUBSCRIBE_PURPOSE
+    if list_name not in {"digest", "insights"}:
+        return False
+    value = tokens.verify(purpose, token)
     if value is None or not value.isdigit():
         return False
-    session.execute(update(AppUser).where(AppUser.id == int(value)).values(digest_opt_in=False))
+    column = AppUser.insight_email_opt_in if list_name == "insights" else AppUser.digest_opt_in
+    session.execute(update(AppUser).where(AppUser.id == int(value)).values({column.key: False}))
+    if list_name == "insights":
+        session.execute(
+            update(Outbox)
+            .where(
+                Outbox.kind == "email_insight",
+                Outbox.payload["user_id"].as_integer() == int(value),
+                Outbox.status.in_(("pending", "failed")),
+            )
+            .values(status="dead", last_error="insight email consent withdrawn")
+        )
     return True
 
 
@@ -175,6 +210,8 @@ def export_account(session: Session, user_id: int) -> dict[str, Any] | None:
         "email_verified_at": iso(user.email_verified_at),
         "digest_opt_in": user.digest_opt_in,
         "digest_opt_in_at": iso(user.digest_opt_in_at),
+        "insight_email_opt_in": user.insight_email_opt_in,
+        "insight_email_opt_in_at": iso(user.insight_email_opt_in_at),
         "preferences": {
             "place_ids": list(preference.place_ids) if preference else [],
             "topics": list(preference.topics) if preference else [],

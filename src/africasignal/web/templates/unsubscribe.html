@@ -4,14 +4,15 @@
 {% block content %}
 {% if done %}
 <h1>You are unsubscribed</h1>
-<p class="lead">We will not send you the weekly email. You can turn it on again any time in your account.</p>
+<p class="lead">{% if list_name == "insights" %}We will not send you reviewed insight emails. You can turn them on again any time in your account.{% else %}We will not send you the weekly email. You can turn it on again any time in your account.{% endif %}</p>
 {% elif token %}
-<h1>Stop the weekly email?</h1>
-<form method="post" action="/unsubscribe?t={{ token|urlencode }}" class="form">
+<h1>{% if list_name == "insights" %}Stop reviewed insight emails?{% else %}Stop the weekly email?{% endif %}</h1>
+<form method="post" action="/unsubscribe?t={{ token|urlencode }}&amp;list={{ list_name|urlencode }}" class="form">
+  <input type="hidden" name="list" value="{{ list_name }}">
   <button type="submit">Unsubscribe</button>
 </form>
 {% else %}
 <h1>This link is not valid</h1>
-<p class="lead">Use the unsubscribe link in the latest email, or turn the weekly email off in <a href="/account">your account</a>.</p>
+<p class="lead">Use the unsubscribe link in the latest email, or manage your email choices in <a href="/account">your account</a>.</p>
 {% endif %}
 {% endblock %}

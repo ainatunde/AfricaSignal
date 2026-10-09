@@ -27,6 +27,7 @@ from africasignal.models import (
 )
 from africasignal.publish import accounts
 from africasignal.publish.email import FakeProvider
+from africasignal.publish.email_render import insight_unsubscribe_url
 from africasignal.publish.hooks import (
     clear_publication_hooks,
     notify_published,
@@ -289,6 +290,23 @@ def test_digest_choice_and_preferences(
     assert 'value="NG-LA" checked' in page and 'value="energy" checked' in page
 
 
+def test_insight_email_choice_is_separate_from_weekly_digest(
+    client: TestClient, session: Session, situation: Situation
+) -> None:
+    sign_in(client, session)
+    user = session.scalars(select(AppUser)).one()
+    client.post("/account/digest", data={"digest": "on"}, headers=ORIGIN)
+    client.post("/account/insight-email", data={"choice": "on"}, headers=ORIGIN)
+    session.refresh(user)
+    assert user.digest_opt_in and user.insight_email_opt_in
+    assert user.insight_email_opt_in_at is not None
+    page = client.get("/account").text
+    assert "Reviewed insight emails are <strong>on</strong>" in page
+    client.post("/account/insight-email", data={"choice": "off"}, headers=ORIGIN)
+    session.refresh(user)
+    assert user.digest_opt_in and not user.insight_email_opt_in
+
+
 def test_export_returns_the_readers_data(
     client: TestClient, session: Session, situation: Situation
 ) -> None:
@@ -354,6 +372,23 @@ def test_one_click_unsubscribe_from_a_mail_client(client: TestClient, session: S
     session.refresh(user)
     assert not user.digest_opt_in
     assert client.post(unsubscribe_link(user)).status_code == 200  # repeating it is harmless
+
+
+def test_insight_one_click_unsubscribe_does_not_change_digest_consent(
+    client: TestClient, session: Session
+) -> None:
+    user = add_user(session, "ada@example.com", digest=True)
+    user.insight_email_opt_in = True
+    link = insight_unsubscribe_url(user.id)
+    parsed = urlparse(link)
+    response = client.post(
+        f"{parsed.path}?{parsed.query}",
+        content="List-Unsubscribe=One-Click",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert response.status_code == 200
+    session.refresh(user)
+    assert user.digest_opt_in and not user.insight_email_opt_in
 
 
 def test_a_forged_unsubscribe_token_does_nothing(client: TestClient, session: Session) -> None:

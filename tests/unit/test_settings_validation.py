@@ -33,6 +33,21 @@ def test_registry_is_consistent() -> None:
         ss.definition("secret_key")
 
 
+def test_social_destination_ids_are_validated_before_provider_requests() -> None:
+    assert n("facebook_page_id", "123456789") == "123456789"
+    assert n("instagram_professional_account_id", "123456789") == "123456789"
+    assert n("youtube_channel_id", "UC" + "a" * 22) == "UC" + "a" * 22
+    assert n("telegram_channel_id", "@africa_signal") == "@africa_signal"
+    for key, value in (
+        ("facebook_page_id", "123/page"),
+        ("instagram_professional_account_id", "account"),
+        ("youtube_channel_id", "not-a-channel"),
+        ("telegram_channel_id", "@bad/name"),
+    ):
+        with pytest.raises(SettingError):
+            n(key, value)
+
+
 def test_secret_rules() -> None:
     assert n("anthropic_api_key", "sk-ant-abcdefgh") == "sk-ant-abcdefgh"
     for bad in ("short", "has a space in it", "x" * 501, "line\nbreak-key"):

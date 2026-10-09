@@ -23,6 +23,7 @@ LOGIN_PATH = "/signin/verify"
 UNSUBSCRIBE_PATH = "/unsubscribe"
 SITUATION_PATH = "/s/"
 UNSUBSCRIBE_PURPOSE = "unsubscribe"
+INSIGHT_UNSUBSCRIBE_PURPOSE = "unsubscribe-insight"
 DIGEST_OPEN_PATH = "/e/o/"
 DIGEST_OPEN_PURPOSE = "digest-open"
 
@@ -119,6 +120,29 @@ _DIGEST_HTML = """\
 <img src="{{ open_url }}" width="1" height="1" alt="">
 """
 
+_INSIGHT_TEXT = """\
+{{ content.headline }}
+{{ item.scope_label }}
+
+{{ content.summary }}
+{% for explanation in content.reported_explanations %}
+{{ explanation }}
+{% endfor %}
+
+Read the evidence and current update: {{ item.url }}
+
+Stop these insight emails: {{ unsubscribe_url }}
+"""
+
+_INSIGHT_HTML = """\
+<h1>{{ content.headline }}</h1>
+<p>{{ item.scope_label }}</p>
+<p>{{ content.summary }}</p>
+{% for explanation in content.reported_explanations %}<p>{{ explanation }}</p>{% endfor %}
+<p><a href="{{ item.url }}">Read the evidence and current update</a></p>
+<p><a href="{{ unsubscribe_url }}">Stop these insight emails</a></p>
+"""
+
 _TEMPLATES = {
     "login_text": _text_env.from_string(_LOGIN_TEXT),
     "login_html": _html_env.from_string(_LOGIN_HTML),
@@ -126,6 +150,8 @@ _TEMPLATES = {
     "correction_html": _html_env.from_string(_CORRECTION_HTML),
     "digest_text": _text_env.from_string(_DIGEST_TEXT),
     "digest_html": _html_env.from_string(_DIGEST_HTML),
+    "insight_text": _text_env.from_string(_INSIGHT_TEXT),
+    "insight_html": _html_env.from_string(_INSIGHT_HTML),
 }
 
 CORRECTION_HEADINGS = {
@@ -168,6 +194,11 @@ def login_url(raw_token: str, base: str | None = None) -> str:
 def unsubscribe_url(user_id: int, base: str | None = None) -> str:
     token = tokens.sign(UNSUBSCRIBE_PURPOSE, str(user_id))
     return f"{base_url(base)}{UNSUBSCRIBE_PATH}?{urlencode({'t': token})}"
+
+
+def insight_unsubscribe_url(user_id: int, base: str | None = None) -> str:
+    token = tokens.sign(INSIGHT_UNSUBSCRIBE_PURPOSE, str(user_id))
+    return f"{base_url(base)}{UNSUBSCRIBE_PATH}?{urlencode({'t': token, 'list': 'insights'})}"
 
 
 def digest_open_url(user_id: int, week: str, base: str | None = None) -> str:
@@ -234,6 +265,23 @@ def render_digest(
         subject=f"Your AfricaSignal week: {payload['week']}",
         text=_TEMPLATES["digest_text"].render(**data),
         html=_TEMPLATES["digest_html"].render(**data),
+        headers=_unsubscribe_headers(unsub),
+        idempotency_key=key,
+    )
+
+
+def render_insight(
+    to: str, user_id: int, payload: dict[str, Any], key: str, *, base: str | None = None
+) -> EmailMessage:
+    unsub = insight_unsubscribe_url(user_id, base)
+    content = payload["content"]
+    item = _with_url(payload["item"], base)
+    data = {"content": content, "item": item, "unsubscribe_url": unsub}
+    return EmailMessage(
+        to=to,
+        subject=f"AfricaSignal: {content['headline']}",
+        text=_TEMPLATES["insight_text"].render(**data),
+        html=_TEMPLATES["insight_html"].render(**data),
         headers=_unsubscribe_headers(unsub),
         idempotency_key=key,
     )

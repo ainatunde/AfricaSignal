@@ -20,6 +20,9 @@ from africasignal.operations import workloads
 SETTING_CONSUMERS = {
     "anthropic_api_key": "africasignal.llm.adapter.RoutedProvider",
     "openai_api_key": "africasignal.llm.adapter.RoutedProvider",
+    "llm_evidence_context_enabled": "africasignal.assess.explain.build_input",
+    "editorial_drafting_enabled": "africasignal.jobs.handlers.editorial_draft",
+    "llm_route_editorial_draft": "africasignal.llm.adapter.LlmAdapter.route_for",
     "agent_reach_endpoint": "africasignal.agent_reach.client.AgentReachClient",
     "agent_reach_api_key": "africasignal.agent_reach.client.AgentReachClient",
     "agent_reach_max_tasks_per_day": "africasignal.operations.agent_reach.submit",
@@ -38,6 +41,35 @@ SETTING_CONSUMERS = {
     "email_provider": "africasignal.publish.email",
     "email_api_key": "africasignal.publish.email",
     "email_from": "africasignal.publish.email",
+    "x_user_access_token": "africasignal.publish.x_api.publish_post",
+    "x_publishing_enabled": "africasignal.publish.social.approve and dispatch",
+    "facebook_publishing_enabled": "africasignal.publish.social.approve and dispatch",
+    "instagram_publishing_enabled": "africasignal.publish.social.approve and dispatch",
+    "telegram_publishing_enabled": "africasignal.publish.social.approve and dispatch",
+    "youtube_publishing_enabled": "africasignal.publish.social.approve and dispatch",
+    "social_media_retention_days": "africasignal.publish.social.dispatch cleanup",
+    "x_daily_post_limit": "africasignal.publish.social.approve and dispatch",
+    "facebook_page_id": "africasignal.publish.social.dispatch",
+    "facebook_page_access_token": "africasignal.publish.social.dispatch",
+    "instagram_professional_account_id": "africasignal.publish.social.dispatch",
+    "instagram_access_token": "africasignal.publish.social.dispatch",
+    "meta_graph_api_version": "africasignal.publish.social.dispatch",
+    "telegram_channel_id": "africasignal.publish.social.dispatch",
+    "telegram_bot_token": "africasignal.publish.social.dispatch",
+    "youtube_channel_id": "africasignal.publish.social.dispatch",
+    "youtube_oauth_client_id": "africasignal.publish.social.dispatch",
+    "youtube_oauth_client_secret": "africasignal.publish.social.dispatch",
+    "youtube_refresh_token": "africasignal.publish.social.dispatch",
+    "youtube_video_privacy": "africasignal.publish.social.dispatch",
+    "youtube_category_id": "africasignal.publish.social.dispatch",
+    "facebook_daily_post_limit": "africasignal.publish.social.approve and dispatch",
+    "instagram_daily_post_limit": "africasignal.publish.social.approve and dispatch",
+    "telegram_daily_post_limit": "africasignal.publish.social.approve and dispatch",
+    "youtube_daily_post_limit": "africasignal.publish.social.approve and dispatch",
+    "x_app_bearer_token": "africasignal.publish.x_search.search_recent",
+    "x_listening_enabled": "africasignal.jobs.scheduler.tick and social_listening.poll_queries",
+    "x_listening_poll_minutes": "africasignal.operations.social_listening.poll_queries",
+    "x_listening_daily_read_cap": "africasignal.operations.social_listening.poll_queries",
     "weekly_digest_weekday": "africasignal.jobs.scheduler.tick",
     "weekly_digest_hour": "africasignal.jobs.scheduler.tick",
     "s3_endpoint_url": "africasignal.storage",
@@ -58,6 +90,10 @@ SETTING_CONSUMERS = {
 JOB_OWNERS = {
     "extract_claims": ("AI workload", "AI switch, schedule and provider route"),
     "explain_version": ("AI workload", "AI switch, schedule and provider route"),
+    "compose_editorial_draft": (
+        "Draft-only editorial queue",
+        "Default-off switch; LlmAdapter budget and token limit; operator review; never publishes",
+    ),
     "explain_backfill": ("AI workload", "AI switch, schedule and provider route"),
     "agent_reach_search": (
         "Agent Reach workload",
@@ -108,7 +144,21 @@ JOB_OWNERS = {
     "weekly_digest": ("Email settings", "Configured weekday/hour in Africa/Lagos"),
     "dispatch_outbox": (
         "Code-owned delivery service",
-        "One-minute dispatch; urgent auth/correction delivery stays prompt",
+        "One-minute dispatch; sign-in stays prompt, while correction, digest and reviewed-insight "
+        "mail follow publication gates",
+    ),
+    "dispatch_social_publication": (
+        "Operator-approved social publishing",
+        "One-minute dispatch; per-platform caps, publication suspension, outcome reconciliation, "
+        "and media retention",
+    ),
+    "social_listen_poll": (
+        "X social listening",
+        "Default-off switch, per-query cadence, daily read reservation and ID-only retention",
+    ),
+    "social_listen_expire": (
+        "X social listening privacy cleanup",
+        "Daily deletion of expired post IDs and poll ledger retention",
     ),
     "mirror_deletions": (
         "Code-owned privacy service",
@@ -194,6 +244,30 @@ BUSINESS_CONTROLS = [
         "control": "/admin/agent-reach and /admin/automation",
         "apply_timing": "New task admission; candidates flow through approved RSS capture",
         "scope": "Default-off, scheduled, bounded search with cancellation, review and retention",
+    },
+    {
+        "name": "Draft-only editorial synthesis",
+        "owner": "Accounted LLM adapter and editorial review queue",
+        "control": "/admin/insights and /admin/settings#llm",
+        "apply_timing": "New published/held assessments; approval only records review",
+        "scope": (
+            "Private version-linked drafts, source freshness checks, audited decisions; "
+            "no direct publication, email, or social authority"
+        ),
+    },
+    {
+        "name": "X listening and operator-approved social publishing",
+        "owner": "X Recent Search lead inbox and durable social publication queue",
+        "control": (
+            "/admin/social-listening, /admin/channel-posts and /admin/settings#social_publishing"
+        ),
+        "apply_timing": (
+            "Listening settings apply next poll; publishing requires approval and dispatch"
+        ),
+        "scope": (
+            "Listening is default-off, metered, and retains only expiring post IDs; leads are "
+            "unverified and never evidence. X publishing has a daily cap and never auto-publishes."
+        ),
     },
     {
         "name": "Publication suspend, release, withdraw and withhold",

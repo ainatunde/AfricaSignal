@@ -1,22 +1,30 @@
-"""Channel posts page: drafts of the WhatsApp and X posts for recent material changes (AS-033), and
-a record of which ones an operator has posted by hand. Nothing is sent: the app only writes the
-text, and "marked as posted" is a note that a person did it (the demand test D1 counts these).
+"""Manual WhatsApp/TikTok records and source-checked draft generation for recent changes.
+
+WhatsApp and TikTok remain copy-and-post; X and other supported networks use separate operator-approved
+social publication records. A manual "posted" entry records only that a person posted by hand.
 
 A situation whose post breaks a rule (a number the facts do not state, a headline too long for the
-channel) is listed as a problem and does not hide the others. While publication is suspended (the
-kill switch) there are no drafts and nothing can be marked."""
+channel) is listed as a problem and does not hide the others. Publication suspension hides drafts
+and prevents manual records.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from africasignal import audit, settings_store
-from africasignal.models import AssessmentVersion, ChannelPost, Operator, Situation
+from africasignal.models import (
+    AssessmentVersion,
+    ChannelPost,
+    Operator,
+    Situation,
+    SocialPublication,
+)
 from africasignal.operations.paging import Page, page_of
 from africasignal.publish import versions
 from africasignal.publish.whatsapp_text import (
@@ -28,9 +36,9 @@ from africasignal.publish.whatsapp_text import (
 )
 from africasignal.textclean import one_line
 
-CHANNELS = tuple(MAX_CHARS)  # ("wa", "x")
-CHANNEL_NAMES = {"wa": "WhatsApp", "x": "X"}
-DRAFTS_PER_PAGE = 20  # situations per page: each has a WhatsApp and an X draft
+CHANNELS = (*MAX_CHARS, "tiktok")
+CHANNEL_NAMES = {"wa": "WhatsApp", "x": "X", "tiktok": "TikTok"}
+DRAFTS_PER_PAGE = 20  # situations per page
 MAX_URL = 300
 MAX_NOTE = 200
 
@@ -43,6 +51,8 @@ class ChannelPostError(ValueError):
 class Draft:
     posts: ChannelPosts
     version_id: int
+    tiktok_caption: str
+    tiktok_link: str
     posted: dict[str, ChannelPost] = field(default_factory=dict)  # channel -> its record
 
 
@@ -85,7 +95,13 @@ def drafts(session: Session, since: datetime, page: str | None = None) -> Drafts
         except PostError as exc:
             result.problems.append(str(exc))
             continue
-        result.posts.append(Draft(posts, version.id, records.get(version.id, {})))
+        tiktok_link = f"{base_url.rstrip('/')}/s/{quote(posts.situation_slug)}?ref=tiktok"
+        # Keep the caption free of links and branding; TikTok's sharing guidance forbids
+        # promotional links or watermarks in content sent to TikTok.
+        tiktok_caption = posts.x.text.replace(posts.x.link, "").rstrip()
+        result.posts.append(
+            Draft(posts, version.id, tiktok_caption, tiktok_link, records.get(version.id, {}))
+        )
     return result
 
 
@@ -128,7 +144,7 @@ def mark_posted(
 ) -> ChannelPost:
     """Record that ``operator`` posted this version's draft on ``channel`` by hand."""
     if channel not in CHANNELS:
-        raise ChannelPostError("choose WhatsApp or X")
+        raise ChannelPostError("choose WhatsApp, X, or TikTok")
     if versions.publication_suspended(session):
         raise ChannelPostError("publication is suspended, so nothing is posted")
     note = one_line(note)
@@ -149,6 +165,18 @@ def mark_posted(
         raise ChannelPostError(
             "that version is no longer the published one, so its draft is out of date"
         )
+    if (
+        channel == "x"
+        and session.scalar(
+            select(SocialPublication.id).where(
+                SocialPublication.assessment_version_id == version_id,
+                SocialPublication.channel == "x",
+                SocialPublication.status.in_(("queued", "sending", "sent", "outcome_unknown")),
+            )
+        )
+        is not None
+    ):
+        raise ChannelPostError("this version already has an X publication in progress or delivered")
     existing = session.scalars(
         select(ChannelPost.id).where(
             ChannelPost.assessment_version_id == version_id, ChannelPost.channel == channel

@@ -57,7 +57,10 @@
   <thead><tr>
     <th scope="col">Week</th><th scope="col">Situation views</th><th scope="col">Follows</th><th scope="col">Unfollows</th>
     <th scope="col">Feedback</th><th scope="col">Share clicks</th><th scope="col">Digest opens</th>
-    <th scope="col">Visits from WhatsApp</th><th scope="col">from X</th><th scope="col">from email</th><th scope="col">from a shared link</th>
+    <th scope="col">Visits from WhatsApp</th><th scope="col">from X</th>
+    <th scope="col">from Facebook</th><th scope="col">from Instagram</th>
+    <th scope="col">from Telegram</th><th scope="col">from YouTube</th>
+    <th scope="col">from TikTok</th><th scope="col">from email</th><th scope="col">from a shared link</th>
   </tr></thead>
   <tbody>
   {% for w in rows %}
@@ -66,6 +69,11 @@
     <td>{{ w.situation_views }}</td><td>{{ w.follows }}</td><td>{{ w.unfollows }}</td>
     <td>{{ w.feedback }}</td><td>{{ w.share_clicks }}</td><td>{{ w.digest_opens }}</td>
     <td>{{ w.visits_by_ref.get("wa", 0) }}</td><td>{{ w.visits_by_ref.get("x", 0) }}</td>
+    <td>{{ w.visits_by_ref.get("facebook", 0) }}</td>
+    <td>{{ w.visits_by_ref.get("instagram", 0) }}</td>
+    <td>{{ w.visits_by_ref.get("telegram", 0) }}</td>
+    <td>{{ w.visits_by_ref.get("youtube", 0) }}</td>
+    <td>{{ w.visits_by_ref.get("tiktok", 0) }}</td>
     <td>{{ w.visits_by_ref.get("email", 0) }}</td><td>{{ w.visits_by_ref.get("share", 0) }}</td>
   </tr>
   {% endfor %}

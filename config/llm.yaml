@@ -11,6 +11,7 @@ default_model: claude-sonnet-5-5
 purposes:
   claim_extract: {provider: anthropic, model: claude-sonnet-5-5, effort: low}
   explain: {provider: anthropic, model: claude-sonnet-5-5, effort: low}
+  editorial_draft: {provider: anthropic, model: claude-sonnet-5-5, effort: low}
 
 prices:
   claude-sonnet-5-5: {input: 2.00, output: 10.00}
