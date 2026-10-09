@@ -79,7 +79,7 @@ def test_marking_a_draft_as_posted_records_it_and_sends_nothing(
     assert session.scalars(select(Outbox)).all() == []  # nothing was queued to send
 
     page = admin.get("/admin/channel-posts").text
-    assert "Posted on WhatsApp" in page and "Mark as posted on X" in page
+    assert "Posted on WhatsApp" in page and "Approve and queue X post" in page
     assert "Mark as posted on WhatsApp" not in page
     assert "https://wa.example/c/123" in page  # also in the recently-marked table
 
