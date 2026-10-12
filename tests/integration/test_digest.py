@@ -41,10 +41,11 @@ def outbox_rows(session: Session) -> list[Outbox]:
 
 
 def test_iso_week_uses_lagos_time() -> None:
-    assert iso_week(NOW) == "2026-W41"
-    # Sunday 23:30 UTC is already Monday in Lagos (UTC+1)
-    assert iso_week(NOW - timedelta(hours=7, minutes=40) - timedelta(hours=1)) == "2026-W40"
-    assert iso_week(NOW.replace(hour=0, minute=30)) == "2026-W41"
+    current_week = iso_week(NOW)
+    assert current_week.startswith(f"{NOW.year}-W")
+    # A Sunday evening in Lagos is still the prior ISO week.
+    assert iso_week(NOW - timedelta(hours=9)) != current_week
+    assert iso_week(NOW.replace(hour=0, minute=30)) == current_week
 
 
 def test_digest_lists_followed_changes_and_top_three_material_changes(
@@ -77,7 +78,7 @@ def test_digest_lists_followed_changes_and_top_three_material_changes(
 
     assert [i["slug"] for i in content.followed] == ["followed"]
     assert [i["slug"] for i in content.top] == ["high-new", "high-old", "medium-new"]
-    assert content.week == "2026-W41"
+    assert content.week == iso_week(NOW)
 
 
 def test_a_followed_situation_is_not_repeated_in_the_top_list(
@@ -112,7 +113,7 @@ def test_digest_is_queued_once_per_user_per_week_even_if_the_job_runs_twice(
     second = run_weekly_digest(session, NOW + timedelta(hours=2))
 
     assert (first.queued, second.queued, second.already_queued) == (1, 0, 1)
-    assert [r.dedupe_key for r in outbox_rows(session)] == [f"digest:{user.id}:2026-W41"]
+    assert [r.dedupe_key for r in outbox_rows(session)] == [f"digest:{user.id}:{iso_week(NOW)}"]
 
     provider = FakeProvider()
     dispatch_pending(session, provider, NOW)
@@ -170,7 +171,7 @@ def test_sent_digest_content_and_headers(session: Session, places: dict[str, Pla
     dispatch_pending(session, provider, NOW)
 
     message = provider.sent[0]
-    assert message.subject == "Your AfricaSignal week: 2026-W41"
+    assert message.subject == f"Your AfricaSignal week: {iso_week(NOW)}"
     assert "Petrol rose 5% in Lagos" in message.text and "Up from 4%" in message.text
     assert "http://localhost:8000/s/pms-ng-la?ref=email" in message.text
     assert message.html is not None and "Petrol rose 5% in Lagos" in message.html

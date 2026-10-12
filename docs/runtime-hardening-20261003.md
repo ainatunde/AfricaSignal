@@ -14,13 +14,13 @@ Baseline: `795975d` on `codex/africasignal-growth` (growth source `b84c707`, cur
 
 - Staging/production API limits use atomic PostgreSQL sliding windows, with distinct scopes for each route. Only secret-keyed HMAC client keys and bounded timestamps are stored. Crawler budgets use shared token buckets and the strictest active domain policy; changing configuration does not refill a bucket. Development retains local limiters. Backend failure refuses work, and the dedicated limiter pool has bounded connection, lock and statement waits.
 
-- Migration `0047` adds shared limit state, permanent job deduplication keys, daily archival totals, and the completed-job retention index. It backfills existing dedupe keys and retains monetary call records when completed job rows are removed.
+- Migration `0064` (numbered `0047` before the branch was rebased onto main) adds shared limit state, permanent job deduplication keys, daily archival totals, and the completed-job retention index. It backfills existing dedupe keys and retains monetary call records when completed job rows are removed.
 
 - The scheduler runs bounded operational cleanup every minute (maximum 1,000 completed jobs and 1,000 expired limit states per run). Completed job payloads remain for 90 days. Dead jobs remain available for diagnosis/manual retry; jobs with unresolved spend reservations remain until reconciliation. Financial records and audit history are retained; no legal/financial retention period is invented. Dedupe tombstones are retained indefinitely to prevent replay. Overdue cleanup raises `retention_backlog` in existing console alerts.
 
 ## Rollout and limitations
 
-Apply migration `0047` before starting the updated application or workers. Quiesce the old application, scheduler and workers for the upgrade: old workers cannot participate in the new effect fences, and old queue writers do not honor archived dedupe keys. Rollback cannot restore already archived payloads; use a tested backup/recovery procedure if those payloads are needed. Downgrading removes the compact dedupe registry, so do not downgrade after archival without preserving/replaying tombstones.
+Apply migration `0064` before starting the updated application or workers. Quiesce the old application, scheduler and workers for the upgrade: old workers cannot participate in the new effect fences, and old queue writers do not honor archived dedupe keys. Rollback cannot restore already archived payloads; use a tested backup/recovery procedure if those payloads are needed. Downgrading removes the compact dedupe registry, so do not downgrade after archival without preserving/replaying tombstones.
 
 Shared limits require the same application secret across replicas, as existing encrypted settings already do. An intentional secret rotation changes limiter keys and needs an edge policy during rotation. Validate the real proxy topology, provider timeouts and publisher-specific rates before launch. The stricter active crawler policy relaxes only after its idle state expires.
 

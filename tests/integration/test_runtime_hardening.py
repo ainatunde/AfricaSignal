@@ -226,7 +226,7 @@ def test_upgrade_backfills_existing_deduplication_keys(engine):
     from alembic import command
     from tests.integration.conftest import alembic_config
 
-    command.downgrade(alembic_config(), "0046")
+    command.downgrade(alembic_config(), "0063")
     key = uuid4().hex
     with engine.begin() as conn:
         conn.execute(

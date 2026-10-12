@@ -4,24 +4,40 @@
 <h1>Agent Reach discovery</h1>
 <p>Agent Reach is an optional research capability. Search results are untrusted leads, not evidence. AfricaSignal does not fetch a candidate page until an administrator maps it to an active, permitted source.</p>
 
-<h2>Agent Reach switch</h2>
-<p>State: <strong>{{ "On" if status.enabled else "Off" }}</strong></p>
-<form method="post" action="/admin/agent-reach/enabled">
-  <input type="hidden" name="expected_revision" value="{{ status.revision }}">
-  <label class="inline"><input type="checkbox" name="enabled" value="on" {{ "checked" if status.enabled }}>
-    Enable Agent Reach discovery</label>
-  <p class="muted">Off blocks new remote tasks and requests cancellation for active searches. Source permissions and publication remain separate controls.</p>
-  <p><button type="submit">Save Agent Reach switch</button></p>
-</form>
-
-<h2>Runner status</h2>
+<h2>Connection and operation</h2>
 <p role="status"><strong>{{ status.state }}</strong> · {{ status.reason }}</p>
 <p class="muted">This build supports only public YouTube metadata search through the official YouTube Data API v3. It does not install the upstream Agent-Reach CLI or enable browser/social capabilities.{% if status.backend %} Reported backend: {{ status.backend }}.{% endif %}</p>
 <p class="muted">The API key, backend deployment flag, runner image, TLS, and egress limits are deployment-owned. The dashboard switch cannot override a deployment-disabled capability.</p>
 {% if status.connection_checked_at %}<p class="muted">Last authenticated bridge check: {{ status.connection_checked_at|when }}.</p>{% endif %}
 {% if status.configured %}<form method="post" action="/admin/agent-reach/health"><button type="submit">Test runner connection</button></form>{% endif %}
-<p class="muted">{{ status.active_tasks }}/{{ status.max_concurrency }} concurrent tasks · {{ status.recent_tasks_24h }}/{{ status.daily_task_limit }} starts in 24h · revision {{ status.revision }} · next scheduled window {{ status.next_open|when }}.</p>
-<p><a href="/admin/automation">Change the Agent Reach switch and schedule</a> · <a href="/admin/settings#agent">Configure the isolated runner</a></p>
+<p class="muted">{{ status.active_tasks }}/{{ status.max_concurrency }} concurrent tasks · {{ status.recent_tasks_24h }}/{{ status.daily_task_limit }} starts in 24h · next scheduled window {{ status.next_open|when }}.</p>
+{% if control_error %}<div class="error" role="alert" tabindex="-1"><strong>Changes not saved.</strong> {{ control_error }}{% if control_conflict %} Your proposed values remain below. Review the current values and submit again to apply them.{% endif %}</div>{% endif %}
+{% if status.schedule and schedule_values %}
+<form method="post" action="/admin/agent-reach/configure" autocomplete="off">
+  <input type="hidden" name="settings_revision" value="{{ settings_group.revision }}">
+  <input type="hidden" name="expected_revision" value="{{ status.revision }}">
+  <label class="inline"><input type="checkbox" name="enabled" value="on" {{ "checked" if status.enabled }}{% if control_field_error %} aria-invalid="true"{% endif %}>
+    Enable Agent Reach discovery</label>
+  <p class="muted">Off blocks new remote tasks and requests cancellation for active searches. Source permissions and publication remain separate controls.</p>
+  <label for="agent-timezone">Timezone (IANA name)</label>
+  <input type="text" id="agent-timezone" name="timezone" value="{{ schedule_values.timezone }}" maxlength="80" required>
+  <label for="agent-windows">Operating windows, one per line</label>
+  <textarea id="agent-windows" name="windows" rows="4" maxlength="1500" required>{{ schedule_values.windows }}</textarea>
+  <p class="muted">Days are ISO weekdays: 0 Monday through 6 Sunday. Use * for every day. Example: 0,1,2,3,4 01:00-04:00. Windows end at the listed time; 24:00 means midnight.</p>
+  <label for="agent-concurrency">Maximum concurrent remote tasks (1–4)</label>
+  <input type="number" id="agent-concurrency" name="max_concurrency" min="1" max="4" value="{{ schedule_values.max_concurrency }}" required>
+  <label for="agent-items">Maximum candidate leads per discovery task (1–20)</label>
+  <input type="number" id="agent-items" name="max_items_per_run" min="1" max="20" value="{{ schedule_values.max_items_per_run }}" required>
+  <h3>Runner settings</h3>
+  {% set group = settings_group %}
+  {% set conflict = control_conflict %}
+  {% set error = control_error %}
+  {% include "admin/_settings_group_fields.html" %}
+  <p><button type="submit">Save connection and workload settings</button></p>
+</form>
+{% else %}
+<p class="notice" role="status">Apply the required database migrations before changing Agent Reach workload controls.</p>
+{% endif %}
 
 <p class="muted">The rolling task-start cap bounds request volume, not monetary spend. The runner has no verified cost meter yet.</p>
 

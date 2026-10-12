@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
@@ -477,6 +478,54 @@ SOURCE_LABELS = {
 }
 
 
+def _settings_group(
+    db: Session,
+    group_id: str,
+    submitted: dict[str, str] | None = None,
+    field_error: str | None = None,
+    query: str = "",
+) -> dict[str, Any]:
+    title = dict(settings_store.GROUPS).get(group_id)
+    if title is None:
+        raise ValueError("unknown settings group")
+    fields = []
+    for key in settings_store.group_keys(group_id):
+        defn = settings_store.definition(key)
+        resolved = settings_store.resolve(db, key)
+        value = "" if defn.secret else (resolved.value or "")
+        if submitted is not None and key in submitted and not defn.secret:
+            value = submitted[key]
+        searchable = " ".join((defn.key, defn.label, defn.group, defn.help)).casefold()
+        if (
+            query
+            and query.casefold() not in searchable
+            and query.casefold() not in title.casefold()
+        ):
+            continue
+        fields.append(
+            {
+                "defn": defn,
+                "value": value,
+                "options": settings_store.options(key),
+                "source": SOURCE_LABELS[resolved.source],
+                "source_id": resolved.source,
+                "configured": resolved.value is not None,
+                "has_console_value": resolved.source == "console",
+                "current_value": "" if defn.secret else (resolved.value or ""),
+                "submitted_secret": (
+                    bool(submitted and submitted.get(key)) if defn.secret else False
+                ),
+                "field_error": field_error == key,
+            }
+        )
+    return {
+        "id": group_id,
+        "title": title,
+        "fields": fields,
+        "revision": settings_store.group_revision(db, group_id),
+    }
+
+
 def _settings_page(
     request: Request,
     db: Session,
@@ -484,28 +533,15 @@ def _settings_page(
     status_code: int = 200,
     error: str | None = None,
     submitted: dict[str, str] | None = None,
+    conflict: bool = False,
+    field_error: str | None = None,
+    query: str = "",
 ) -> Response:
-    groups = []
-    for group_id, title in settings_store.GROUPS:
-        fields = []
-        for key in settings_store.group_keys(group_id):
-            defn = settings_store.definition(key)
-            resolved = settings_store.resolve(db, key)
-            value = "" if defn.secret else (resolved.value or "")
-            if submitted is not None and key in submitted and not defn.secret:
-                value = submitted[key]
-            fields.append(
-                {
-                    "defn": defn,
-                    "value": value,
-                    "options": settings_store.options(key),
-                    "source": SOURCE_LABELS[resolved.source],
-                    "source_id": resolved.source,
-                    "configured": resolved.value is not None,
-                    "has_console_value": resolved.source == "console",
-                }
-            )
-        groups.append({"id": group_id, "title": title, "fields": fields})
+    groups = [
+        _settings_group(db, group_id, submitted, field_error, query)
+        for group_id, _title in settings_store.GROUPS
+    ]
+    groups = [group for group in groups if group["fields"]]
     return _page(
         request,
         "admin/settings.html",
@@ -514,12 +550,14 @@ def _settings_page(
         groups=groups,
         missing=settings_store.missing_expected(db),
         error=error,
+        conflict=conflict,
+        query=query,
     )
 
 
 @router.get("/settings")
 def settings_view(request: Request, auth: AdminOperator, db: DbSession) -> Response:
-    return _settings_page(request, db, auth)
+    return _settings_page(request, db, auth, query=request.query_params.get("q", "").strip())
 
 
 @router.post("/settings/{group}")
@@ -530,8 +568,21 @@ async def settings_save(
         raise HTTPException(status_code=404, detail="No such settings group")
     form = await request.form()
     submitted = {k: v for k, v in form.items() if isinstance(v, str)}
+    query = submitted.get("query", "").strip()
+    try:
+        expected_revision = (
+            int(submitted["expected_revision"])
+            if "expected_revision" in submitted
+            else settings_store.group_revision(db, group)
+        )
+    except ValueError:
+        return _settings_page(
+            request, db, auth, 400, error="Reload this settings page before saving.", query=query
+        )
     changes: dict[str, str | None] = {}
     for key in settings_store.group_keys(group):
+        if key not in submitted and f"clear__{key}" not in submitted:
+            continue
         defn = settings_store.definition(key)
         value = submitted.get(key, "").strip()
         if submitted.get(f"clear__{key}") == "on":
@@ -544,10 +595,38 @@ async def settings_save(
         elif value != (settings_store.resolve(db, key).value or ""):
             changes[key] = value  # the field is pre-filled, so only a real edit counts
     try:
-        changed = settings_store.apply_changes(db, auth.operator, changes)
+        changed, _revision = settings_store.apply_group_changes(
+            db, auth.operator, group, expected_revision, changes
+        )
+    except settings_store.SettingsRevisionConflict as exc:
+        return _settings_page(
+            request,
+            db,
+            auth,
+            409,
+            error=str(exc),
+            submitted=submitted,
+            conflict=True,
+            query=query,
+        )
     except settings_store.SettingError as exc:
-        return _settings_page(request, db, auth, 400, error=str(exc), submitted=submitted)
-    return _redirect(f"/admin/settings?notice={'saved' if changed else 'unchanged'}", auth)
+        return _settings_page(
+            request,
+            db,
+            auth,
+            400,
+            error=str(exc),
+            submitted=submitted,
+            field_error=exc.key,
+            query=query,
+        )
+    target = "/admin/settings"
+    if query:
+        target += "?q=" + quote(query, safe="") + "&notice="
+        target += "saved" if changed else "unchanged"
+    else:
+        target += "?notice=" + ("saved" if changed else "unchanged")
+    return _redirect(target, auth)
 
 
 # --- publication kill switch --------------------------------------------------------------------

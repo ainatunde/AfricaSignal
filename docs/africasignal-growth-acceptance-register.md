@@ -5,6 +5,8 @@ Base: dfa16550904b36a6990be6d4cd644b4fa7a7af4c
 Implementation checkout: isolated codex/africasignal-growth worktree
 Status: source implementation and local qualification complete; runtime and external acceptance remain open. Growth source committed as `b84c707`; CI Node runtime updated as `795975d`. No deployment, production migration, provider call, advertiser outreach, or commercial activation.
 
+Note (12 October 2026): after merging main (`ca74a51`), the growth migrations were renumbered `0040`-`0047` -> `0057`-`0064` so they follow main's `0050`-`0056` in one chain. Results below refer to the original numbers and were recorded before that merge; the local qualification has not been re-run against the merged schema.
+
 ## Task disposition
 
 | Packet | State | Evidence / remaining gate |

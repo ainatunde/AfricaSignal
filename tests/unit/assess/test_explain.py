@@ -16,6 +16,7 @@ from africasignal.assess.explain import (
     system_prompt,
     validate_explanation,
 )
+from africasignal.assess.retrieval import RetrievedPassage
 
 
 def fact(label: str, value: Any, unit: str, period: str, source: str = "NBS") -> dict[str, Any]:
@@ -186,11 +187,18 @@ def test_banned_words_are_matched_whole_and_ignoring_case() -> None:
     )
 
 
-def test_banned_words_are_allowed_when_a_possible_factor_is_supported() -> None:
-    supported = [{"factor": "Exchange rate", "status": "supported", "evidence_ids": [3]}]
-    text = "Reports say the rise was caused by the exchange rate."
-    assert problems(text, possible_factors=supported) == []
-    assert problems(text) != []
+def test_banned_words_are_allowed_only_with_exact_attributed_source_passage() -> None:
+    supported = [{"factor": "Exchange rate", "status": "supported", "claim_ids": [3]}]
+    text = "According to NBS, the rise was caused by the exchange rate."
+    passage = RetrievedPassage(
+        claim_id=3,
+        source="NBS",
+        published="2024-10-01",
+        passage="NBS reports that the rise was caused by the exchange rate.",
+    )
+    assert problems(text, possible_factors=supported, retrieved_evidence=[passage]) == []
+    assert problems(text, possible_factors=supported) != []
+    assert problems(text, possible_factors=supported, retrieved_evidence=[]) != []
 
 
 def test_every_banned_word_is_in_the_prompt() -> None:

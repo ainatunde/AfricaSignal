@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from africasignal.assess.explain import PROMPT_VERSION
 from africasignal.models import (
     AssessmentVersion,
     EvidenceDocument,
@@ -121,6 +122,7 @@ def test_an_explanation_is_shown_when_there_is_one(
 ) -> None:
     (_, version) = seed_petrol(session, store, source)["NG-LA"]
     version.explanation = "Fuel costs move with the exchange rate."
+    version.prompt_version = PROMPT_VERSION
     session.flush()
     plain = text_of(client.get("/s/price-pms_litre-ng-la").text)
     assert "Why this matters Fuel costs move with the exchange rate." in plain

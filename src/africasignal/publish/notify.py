@@ -26,6 +26,7 @@ from africasignal.jobs import queue
 from africasignal.models import (
     AppUser,
     AssessmentVersion,
+    EditorialInsightDraft,
     Follow,
     Notification,
     Outbox,
@@ -134,6 +135,49 @@ def notify_followers(
     if version.supersedes_id is not None:
         result.cancelled = cancel_superseded(session, version.supersedes_id, now)
     return result
+
+
+def queue_reviewed_insight_email(
+    session: Session, draft: EditorialInsightDraft, now: datetime
+) -> int:
+    """Queue a reviewed insight only for verified followers with separate email consent."""
+    version = session.get(AssessmentVersion, draft.assessment_version_id)
+    situation = session.get(Situation, version.situation_id) if version is not None else None
+    if (
+        draft.status != "email_queued"
+        or version is None
+        or situation is None
+        or version.status != "published"
+        or situation.current_version_id != version.id
+        or (version.valid_until is not None and version.valid_until <= now)
+    ):
+        raise ValueError("only a current, valid published insight can be emailed")
+    recipients = session.scalars(
+        select(AppUser.id)
+        .join(Follow, Follow.user_id == AppUser.id)
+        .where(
+            Follow.situation_id == situation.id,
+            AppUser.insight_email_opt_in.is_(True),
+            AppUser.email_verified_at.is_not(None),
+            AppUser.deleted_at.is_(None),
+        )
+        .order_by(AppUser.id)
+    )
+    count = 0
+    for user_id in recipients:
+        queued = enqueue_email(
+            session,
+            "email_insight",
+            {
+                "user_id": user_id,
+                "editorial_draft_id": draft.id,
+                "assessment_version_id": version.id,
+                "item": item_snapshot(situation, version),
+            },
+            dedupe_key=f"email_insight:{draft.id}:{user_id}",
+        )
+        count += queued is not None
+    return count
 
 
 def cancel_superseded(session: Session, version_id: int, now: datetime) -> int:

@@ -3,15 +3,11 @@
 {% block title %}Channel posts{% endblock %}
 {% block content %}
 <h1>Channel posts</h1>
-<p><strong>Drafts only.</strong> The app never posts anything. Copy the text and post it yourself from the WhatsApp channel or X account, then mark it as posted so the demand test knows what went out. These are material changes published in the last {{ days }} days:
+<p>Drafts only until an operator approves publication. WhatsApp and TikTok stay copy-and-post; X, Facebook, Instagram, Telegram, and YouTube each require separate operator approval before the worker publishes. TikTok requires the operator to create and upload a video in TikTok; YouTube requires an operator-supplied MP4. Material changes published in the last {{ days }} days:
   {% for n in (7, 14, 30) %}{% if n == days %}<strong>{{ n }}</strong>{% else %}<a href="/admin/channel-posts?days={{ n }}">{{ n }}</a>{% endif %}{% if not loop.last %} · {% endif %}{% endfor %}.
-The links end in <code>?ref=wa</code> or <code>?ref=x</code> so the Metrics page can count visits from each channel.</p>
-{% if suspended %}
-<p class="error" role="alert">Publication is suspended, so there are no drafts and nothing can be marked as posted. Resume it on the <a href="/admin/publication">Publication</a> page.</p>
-{% endif %}
-{% for problem in problems %}
-<p class="error" role="alert">No draft for this one: {{ problem }}</p>
-{% endfor %}
+</p>
+{% if suspended %}<p class="error" role="alert">Publication is suspended. Nothing can be queued. Resume it on the <a href="/admin/publication">Publication</a> page.</p>{% endif %}
+{% for problem in problems %}<p class="error" role="alert">No draft for this one: {{ problem }}</p>{% endfor %}
 {{ pager(page, "/admin/channel-posts?days=" ~ days ~ "&") }}
 {% for item in posts %}
 <section>
@@ -21,16 +17,58 @@ The links end in <code>?ref=wa</code> or <code>?ref=x</code> so the Metrics page
   <h3>{{ label }} ({{ post.text|length }} characters)</h3>
   <textarea readonly rows="{{ 6 if ch == 'wa' else 4 }}" aria-label="{{ label }} post for {{ item.posts.situation_slug }}">{{ post.text }}</textarea>
   {% set done = item.posted.get(ch) %}
+  {% set publication = publications.get((item.version_id, ch)) if ch == "x" else none %}
   {% if done %}
   <p>Posted on {{ label }} {{ done.posted_at|when }}{% if done.post_url %} (<a href="{{ done.post_url }}" rel="noopener noreferrer">the post</a>){% endif %}{% if done.note %}: {{ done.note }}{% endif %}.
     <form method="post" action="/admin/channel-posts/records/{{ done.id }}/undo" class="inline"><button type="submit">Undo</button></form></p>
+  {% elif ch == "x" and publication %}
+  <p><strong>X delivery:</strong> {{ publication.status|replace('_', ' ')|title }}.
+    {% if publication.external_post_id %}<a href="https://x.com/i/web/status/{{ publication.external_post_id }}" rel="noopener noreferrer">Open post</a>.{% endif %}
+    {% if publication.last_error %}<span class="muted">{{ publication.last_error }}</span>{% endif %}
+    {% if publication.status == "failed" and x_token_configured and x_publishing_enabled and not suspended %}<form method="post" action="/admin/channel-posts/publications/{{ publication.id }}/retry" class="inline"><button type="submit">Retry rejected post</button></form>{% endif %}
+    {% if publication.status == "outcome_unknown" %}<span class="error">Confirm this post in the X account before taking any further action. It will not be retried automatically.</span>{% endif %}
+  </p>
   {% else %}
+  {% if ch == "x" %}
+  <form method="post" action="/admin/channel-posts/versions/{{ item.version_id }}/x/approve">
+    {% if not x_publishing_enabled %}<p class="muted">Enable X publishing in <a href="/admin/settings?q=x_publishing_enabled">Settings</a> before approval.{% elif not x_token_configured %}<p class="muted">Configure the encrypted X user access token in <a href="/admin/settings?q=x">Settings</a> before approval.</p>{% endif %}
+    <button type="submit" {% if not x_token_configured or suspended %}disabled{% endif %}>Approve and queue X post</button>
+  </form>
+  {% endif %}
+  {% if ch == "wa" %}
   <form method="post" action="/admin/channel-posts/versions/{{ item.version_id }}/{{ ch }}/posted">
-    <label for="u-{{ item.version_id }}-{{ ch }}">Link to your post (optional, https)</label>
-    <input type="url" id="u-{{ item.version_id }}-{{ ch }}" name="post_url" maxlength="300">
-    <label for="n-{{ item.version_id }}-{{ ch }}">Note (optional)</label>
-    <input type="text" id="n-{{ item.version_id }}-{{ ch }}" name="note" maxlength="200">
-    <button type="submit">Mark as posted on {{ label }}</button>
+    <label for="u-{{ item.version_id }}-{{ ch }}">Link to your manually posted item (optional, https)</label><input type="url" id="u-{{ item.version_id }}-{{ ch }}" name="post_url" maxlength="300">
+    <label for="n-{{ item.version_id }}-{{ ch }}">Note (optional)</label><input type="text" id="n-{{ item.version_id }}-{{ ch }}" name="note" maxlength="200">
+    <button type="submit">Mark as posted on WhatsApp by hand</button>
+  </form>
+  {% endif %}
+  {% endif %}
+  {% endfor %}
+  <h3>TikTok caption for your video</h3>
+  <p class="muted">Copy this link-free caption into TikTok when you upload your own video. Keep AfricaSignal links and branding out of the video and caption. AfricaSignal does not connect to or publish directly on TikTok.</p>
+  <textarea readonly rows="4" aria-label="TikTok caption for {{ item.posts.situation_slug }}">{{ item.tiktok_caption }}</textarea>
+  <p>Tracked situation link for your TikTok profile bio: <a href="{{ item.tiktok_link }}" rel="noopener noreferrer">{{ item.tiktok_link }}</a></p>
+  {% set done = item.posted.get("tiktok") %}
+  {% if done %}
+  <p>Posted on TikTok {{ done.posted_at|when }}{% if done.post_url %} (<a href="{{ done.post_url }}" rel="noopener noreferrer">the post</a>){% endif %}{% if done.note %}: {{ done.note }}{% endif %}.
+    <form method="post" action="/admin/channel-posts/records/{{ done.id }}/undo" class="inline"><button type="submit">Undo</button></form></p>
+  {% else %}
+  <form method="post" action="/admin/channel-posts/versions/{{ item.version_id }}/tiktok/posted">
+    <label for="u-{{ item.version_id }}-tiktok">Link to your manually posted video (optional, https)</label><input type="url" id="u-{{ item.version_id }}-tiktok" name="post_url" maxlength="300">
+    <label for="n-{{ item.version_id }}-tiktok">Note (optional)</label><input type="text" id="n-{{ item.version_id }}-tiktok" name="note" maxlength="200">
+    <button type="submit">Mark as posted on TikTok by hand</button>
+  </form>
+  {% endif %}
+  {% for ch, label in (("facebook", "Facebook Page"), ("instagram", "Instagram Professional"), ("telegram", "Telegram channel"), ("youtube", "YouTube")) %}
+  {% set publication = publications.get((item.version_id, ch)) %}
+  <h3>{{ label }} publication</h3>
+  {% if publication %}
+  <p><strong>{{ publication.status|replace('_', ' ')|title }}</strong>{% if publication.external_post_id %} · Provider ID {{ publication.external_post_id }}{% endif %}{% if publication.last_error %} · {{ publication.last_error }}{% endif %}{% if publication.status == "outcome_unknown" %}<span class="error"> Confirm the account before any retry; this item will not be resent automatically.</span>{% endif %}</p>
+  {% else %}
+  <form method="post" action="/admin/channel-posts/versions/{{ item.version_id }}/{{ ch }}/approve" {% if ch == "youtube" %}enctype="multipart/form-data"{% endif %}>
+    {% if ch == "instagram" %}<p class="muted">A 4:5 image card is generated from this published assessment. Object storage and a public HTTPS base URL are required.</p>{% elif ch == "youtube" %}<p class="muted">Attach an MP4 up to 50 MiB. The configured visibility defaults to unlisted.</p><label for="yt-{{ item.version_id }}">MP4 video</label><input id="yt-{{ item.version_id }}" type="file" name="video" accept="video/mp4,.mp4" required>{% endif %}
+    {% if not social_enabled[ch] %}<p class="muted">Enable {{ label }} publishing in <a href="/admin/settings?q={{ ch }}_publishing_enabled">Settings</a> before approval.{% elif not social_ready[ch] %}<p class="muted">Configure the encrypted {{ label }} credentials in <a href="/admin/settings?q={{ ch }}">Settings</a>{% if ch in ("instagram", "youtube") %} and object storage{% endif %} before approval.</p>{% endif %}
+    <button type="submit" {% if not social_ready[ch] or suspended %}disabled{% endif %}>Approve and queue {{ label }}</button>
   </form>
   {% endif %}
   {% endfor %}
@@ -39,16 +77,11 @@ The links end in <code>?ref=wa</code> or <code>?ref=x</code> so the Metrics page
 {% if not error and not problems and not suspended %}<p>No material change was published in this period.</p>{% endif %}
 {% endfor %}
 {{ pager(page, "/admin/channel-posts?days=" ~ days ~ "&") }}
-
+<h2>Recent social delivery attempts</h2>
+<p class="muted">An uncertain response is held for manual reconciliation. The sender never automatically retries it.</p>
+<div class="scroll"><table><thead><tr><th scope="col">When</th><th scope="col">Version</th><th scope="col">Channel</th><th scope="col">Status</th><th scope="col">Provider ID</th><th scope="col">Details</th></tr></thead>
+<tbody>{% for r in recent_publications %}<tr><td>{{ r.created_at|when }}</td><td>{{ r.assessment_version_id }}</td><td>{{ r.channel|title }}</td><td>{{ r.status|replace('_', ' ')|title }}</td><td>{{ r.external_post_id or '' }}</td><td>{{ r.last_error or '' }}</td></tr>{% else %}<tr><td colspan="6">No social posts have been queued.</td></tr>{% endfor %}</tbody></table></div>
 <h2>Recently marked as posted</h2>
-<div class="scroll"><table>
-  <thead><tr><th scope="col">When</th><th scope="col">Channel</th><th scope="col">Situation</th><th scope="col">Link</th><th scope="col">Note</th></tr></thead>
-  <tbody>
-  {% for r, slug, number in recorded %}
-  <tr><td>{{ r.posted_at|when }}</td><td>{{ channels[r.channel] }}</td><td>{{ slug }} v{{ number }}</td><td>{% if r.post_url %}<a href="{{ r.post_url }}" rel="noopener noreferrer">post</a>{% endif %}</td><td>{{ r.note or '' }}</td></tr>
-  {% else %}
-  <tr><td colspan="5">Nothing marked yet.</td></tr>
-  {% endfor %}
-  </tbody>
-</table></div>
+<div class="scroll"><table><thead><tr><th scope="col">When</th><th scope="col">Channel</th><th scope="col">Situation</th><th scope="col">Link</th><th scope="col">Note</th></tr></thead>
+<tbody>{% for r, slug, number in recorded %}<tr><td>{{ r.posted_at|when }}</td><td>{{ channels[r.channel] }}</td><td>{{ slug }} v{{ number }}</td><td>{% if r.post_url %}<a href="{{ r.post_url }}" rel="noopener noreferrer">post</a>{% endif %}</td><td>{{ r.note or '' }}</td></tr>{% else %}<tr><td colspan="5">Nothing marked yet.</td></tr>{% endfor %}</tbody></table></div>
 {% endblock %}

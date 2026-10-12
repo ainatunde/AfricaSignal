@@ -18,6 +18,17 @@
   <p class="help">If you turn it on, the email contains a tiny image that tells us it was opened. That is the only tracking in it.</p>
 </section>
 
+
+<section aria-labelledby="h-insight-email">
+  <h2 id="h-insight-email">Reviewed insight emails</h2>
+  <p>When an editor approves an insight for email, we send it only for situations you follow and only if you turn this on. This choice is separate from the weekly email. Each message has its own unsubscribe link.</p>
+  <form method="post" action="/account/insight-email" class="form">
+    <input type="hidden" name="choice" value="{% if user.insight_email_opt_in %}off{% else %}on{% endif %}">
+    <p>Reviewed insight emails are <strong>{% if user.insight_email_opt_in %}on{% else %}off{% endif %}</strong>.</p>
+    <button type="submit">{% if user.insight_email_opt_in %}Turn them off{% else %}Email me reviewed insights{% endif %}</button>
+  </form>
+</section>
+
 <section aria-labelledby="h-places">
   <h2 id="h-places">Your places and topics</h2>
   <form method="post" action="/account/preferences" class="form">

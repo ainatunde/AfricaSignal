@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
 from africasignal.models import AppUser, AssessmentVersion, Follow, Place, Situation
 
-NOW = datetime.fromisoformat("2026-10-05T07:10:00+01:00")  # a Monday, 07:10 in Lagos
+LAGOS = timezone(timedelta(hours=1))
+_today = datetime.now(LAGOS).date()
+_days_until_monday = (7 - _today.weekday()) % 7 or 7
+NOW = datetime.combine(
+    _today + timedelta(days=_days_until_monday), time(7, 10), tzinfo=LAGOS
+)  # next Monday, 07:10 in Lagos keeps database-default queue times due in tests.
 
 
 def add_place(

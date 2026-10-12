@@ -42,7 +42,17 @@ EVENT_NAMES = (
     "share_click",
 )
 # Where a visit came from (``?ref=``). Anything else is dropped rather than stored.
-ALLOWED_REFS = ("wa", "x", "email", "share")
+ALLOWED_REFS = (
+    "wa",
+    "x",
+    "facebook",
+    "instagram",
+    "telegram",
+    "youtube",
+    "tiktok",
+    "email",
+    "share",
+)
 RETENTION = timedelta(days=13 * 31)  # 13 months, a little generous
 
 _ANON_RE = re.compile(r"[A-Za-z0-9_-]{16,40}")
@@ -61,8 +71,10 @@ def valid_anon_id(value: str | None) -> bool:
 
 
 def looks_like_a_bot(user_agent: str | None) -> bool:
-    """Link previews (WhatsApp, Facebook) and crawlers fetch pages without a person; they are not
-    counted as visitors. A missing user agent counts as a bot."""
+    """Link previews and crawlers fetch pages without a person; they are not counted as visitors.
+
+    A missing user agent counts as a bot.
+    """
     return not user_agent or _BOT_RE.search(user_agent) is not None
 
 

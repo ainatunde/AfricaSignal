@@ -47,7 +47,10 @@ def _b64(data: bytes) -> str:
 
 
 def _unb64(text: str) -> bytes:
-    return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    raw = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    if _b64(raw) != text:
+        raise ValueError("non-canonical base64")
+    return raw
 
 
 def _sign(body: str) -> str:

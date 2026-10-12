@@ -1,14 +1,15 @@
 """Explanation text for an assessment version (spec B8.4, AS-028).
 
-The language model is given only what code already computed (the facts, the possible factors, the
-unknowns, the scope and the period) and writes a "Why this matters" paragraph of at most 90 words.
+The language model receives code-computed facts and, when the operator enables it, exact
+permission-checked claim passages already linked to the assessment. It writes a "Why this matters"
+paragraph of at most 90 words.
 Nothing it writes is used until ``validate_explanation`` has checked it in code:
 
 * every number in the text must be one the facts state, at the same rounding (``₦1,005.47``,
   ``3.2%``, ``N1,005``), and spelled-out numbers ("two", "half") are refused;
 * no place name outside the scope, its parents and the places named in the facts;
-* none of the words in ``BANNED_WORDS`` ("confirmed", "will", "caused by", ...) unless some
-  possible factor is ``supported``;
+* certainty and prediction wording is refused; causal language must match an explicit, exact
+  source passage linked to the factor and name that source in the same sentence;
 * at most ``MAX_WORDS`` words, no links and no markup.
 
 A rejected answer is retried once with the validator's complaints appended. After a second failure
@@ -31,9 +32,11 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from africasignal import settings_store
+from africasignal.assess.retrieval import RetrievedPassage, assessment_passages
 from africasignal.llm.adapter import LlmAdapter
 from africasignal.llm.errors import (
     JobTokenLimitExceeded,
@@ -47,26 +50,50 @@ from africasignal.publish.factfmt import allowed_numbers
 log = logging.getLogger("africasignal.assess.explain")
 
 PURPOSE = "explain"
-PROMPT_NAME = "explain_v1"
+PROMPT_NAME = "explain_v3"
 PROMPT_VERSION = PROMPT_NAME
 MAX_WORDS = 90
 MAX_OUTPUT_TOKENS = 1_500  # the paragraph is about 130 tokens; the rest is thinking headroom
 MAX_ATTEMPTS = 2  # the first answer, then one retry with the validator's complaints
 
-# Claims of certainty or cause. Allowed only when a possible factor is ``supported`` (B8.4). The
-# first four are the plan's list; the rest are other ways of stating a cause or a forecast.
+# Claims of certainty, predictions and causal links. Certainty and prediction wording is refused.
+# Causal wording needs a named supported factor and explicit attribution to a source.
 BANNED_WORDS: tuple[str, ...] = (
     "confirmed",
     "will",
     "definitely",
     "caused by",
     "certainly",
-    "because of",
+    "because",
+    "cause",
+    "causes",
+    "caused",
+    "causing",
+    "contributed to",
+    "contributes to",
+    "contribute to",
+    "explains",
+    "explained",
+    "explaining",
+    "accounts for",
+    "accounted for",
     "due to",
     "as a result of",
     "driven by",
     "led to",
     "resulted in",
+    "linked to",
+    "associated with",
+    "triggered by",
+    "tied to",
+    "stemming from",
+    "rose after",
+    "fell after",
+    "increased after",
+    "decreased after",
+    "changed after",
+    "surged after",
+    "dropped after",
 )
 
 # Numbers written as words. "one" is left out on purpose: it is ordinary English ("no one", "one
@@ -99,6 +126,7 @@ class ExplainInput:
     unknowns: list[str]
     parent_places: tuple[str, ...] = ()  # names of the scope's ancestors, for example Nigeria
     known_places: frozenset[str] = frozenset()  # every place name the validator looks for
+    retrieved_evidence: list[RetrievedPassage] = field(default_factory=list)
 
     def payload(self) -> dict[str, Any]:
         """The JSON the model receives. Evidence ids are dropped: they are numbers that mean
@@ -126,6 +154,7 @@ class ExplainInput:
                 for f in self.possible_factors
             ],
             "unknowns": list(self.unknowns),
+            "retrieved_evidence": [item.prompt_value() for item in self.retrieved_evidence],
         }
 
     def payload_text(self) -> str:
@@ -180,8 +209,10 @@ def _mentions(text: str, names: Iterable[str]) -> set[str]:
 
 
 def permitted_places(data: ExplainInput) -> set[str]:
-    """The scope's ancestors and every known place named anywhere in the input."""
-    in_input = _mentions(" ".join(_strings(data.payload())), data.known_places)
+    """The scope's ancestors and places in assessment facts, excluding retrieved source text."""
+    payload = data.payload()
+    payload.pop("retrieved_evidence", None)
+    in_input = _mentions(" ".join(_strings(payload)), data.known_places)
     return in_input | set(data.parent_places)
 
 
@@ -210,6 +241,55 @@ def _phrase_pattern(phrase: str) -> re.Pattern[str]:
 
 
 _BANNED_PATTERNS = {phrase: _phrase_pattern(phrase) for phrase in BANNED_WORDS}
+_ALWAYS_BANNED = frozenset({"confirmed", "definitely", "certainly", "will"})
+_ATTRIBUTION = re.compile(
+    r"\b(?:reported|reports?\s+(?:say|state|attribute)|according\s+to|"
+    r"sources?\s+(?:say|state|attribute)|officials?\s+(?:say|state)|"
+    r"documents?\s+(?:say|state)|data\s+(?:from|shows?))\b",
+    re.IGNORECASE,
+)
+
+
+def _sentence_containing(text: str, position: int) -> str:
+    start, end = 0, len(text)
+    for match in re.finditer(r"[.!?;]\s+", text):
+        if match.end() <= position:
+            start = match.end()
+        elif match.start() >= position:
+            end = match.start()
+            break
+    return text[start:end]
+
+
+def _factor_named(text: str, factors: list[dict[str, Any]]) -> bool:
+    for factor in factors:
+        name = factor.get("factor")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        if re.search(rf"(?<!\w){re.escape(name.strip())}(?!\w)", text, re.IGNORECASE):
+            return True
+    return False
+
+
+def _causal_sentence_has_evidence(
+    sentence: str, phrase: str, factor: dict[str, Any], data: ExplainInput
+) -> bool:
+    """Require the named source passage itself to state this factor relationship."""
+    claim_ids = factor.get("claim_ids")
+    if not isinstance(claim_ids, list) or not claim_ids:
+        return False
+    phrase_pattern = _BANNED_PATTERNS[phrase]
+    for evidence in data.retrieved_evidence:
+        if evidence.claim_id not in claim_ids:
+            continue
+        if not phrase_pattern.search(evidence.passage):
+            continue
+        if not _factor_named(evidence.passage, [factor]):
+            continue
+        source_pattern = re.compile(rf"(?<!\w){re.escape(evidence.source)}(?!\w)", re.IGNORECASE)
+        if source_pattern.search(sentence) and _ATTRIBUTION.search(sentence):
+            return True
+    return False
 
 
 def validate_explanation(text: str, data: ExplainInput) -> list[str]:
@@ -253,12 +333,40 @@ def validate_explanation(text: str, data: ExplainInput) -> list[str]:
     for name in outside:
         problems.append(f"The place {name} is outside this situation's scope; do not mention it.")
 
-    if not data.has_supported_factor:
-        for phrase, pattern in _BANNED_PATTERNS.items():
-            if pattern.search(flat.casefold()):
+    supported_factors = [
+        factor
+        for factor in data.possible_factors
+        if factor.get("status") == "supported" and isinstance(factor.get("factor"), str)
+    ]
+    for phrase, pattern in _BANNED_PATTERNS.items():
+        matches = list(pattern.finditer(flat))
+        if not matches:
+            continue
+        if phrase in _ALWAYS_BANNED:
+            problems.append(
+                f'The wording "{phrase}" states certainty or a prediction and is not allowed.'
+            )
+            continue
+        for match in matches:
+            sentence = _sentence_containing(flat, match.start())
+            if not supported_factors:
                 problems.append(
                     f'The wording "{phrase}" states certainty or a cause, and no possible factor '
                     "is supported."
+                )
+            elif not _factor_named(sentence, supported_factors):
+                problems.append(
+                    f'The wording "{phrase}" must name the specific supported factor '
+                    "in the same sentence."
+                )
+            elif not any(
+                _causal_sentence_has_evidence(sentence, phrase, factor, data)
+                for factor in supported_factors
+                if _factor_named(sentence, [factor])
+            ):
+                problems.append(
+                    f'The wording "{phrase}" needs a named source passage that explicitly '
+                    "links the stated factor to this change."
                 )
     return problems
 
@@ -372,6 +480,11 @@ def build_input(session: Session, version: AssessmentVersion) -> ExplainInput:
     assert situation is not None
     place = session.get(Place, situation.place_id)
     assert place is not None
+    retrieved = (
+        assessment_passages(session, version.id)
+        if settings_store.get(session, "llm_evidence_context_enabled") == "yes"
+        else []
+    )
     return ExplainInput(
         situation_title=situation.title,
         template=version.template,
@@ -385,17 +498,18 @@ def build_input(session: Session, version: AssessmentVersion) -> ExplainInput:
         unknowns=[str(u) for u in version.unknowns],
         parent_places=tuple(_ancestors(session, place)),
         known_places=known_place_names(session),
+        retrieved_evidence=retrieved,
     )
 
 
 def needs_explanation(version: AssessmentVersion) -> bool:
-    """A version is explained once per prompt: R3 cards (insufficient evidence) never are, and a
-    version that was tried and failed keeps its ``prompt_version`` so it is not tried forever."""
+    """Explain eligible versions once per current prompt, including published versions when the
+    validator/prompt changes. Failed attempts stay marked with the current version and are not
+    retried forever."""
     return (
         version.evidence_state != "insufficient"
         and version.status in ("draft", "published")
-        and version.explanation is None
-        and version.prompt_version is None
+        and version.prompt_version != PROMPT_VERSION
     )
 
 
@@ -425,14 +539,16 @@ def explain_version(
 
 
 def versions_missing_explanation(session: Session, limit: int) -> list[int]:
-    """Current published versions, and drafts held for review, that have not been explained or
-    tried yet: the work to do when a key is added or the budget ran out. Newest first."""
+    """Current published versions, and drafts held for review, that have not been explained with
+    the current prompt: the work to do when a key is added, budget returns, or policy changes."""
     rows = session.scalars(
         select(AssessmentVersion)
         .outerjoin(Situation, Situation.current_version_id == AssessmentVersion.id)
         .where(
-            AssessmentVersion.explanation.is_(None),
-            AssessmentVersion.prompt_version.is_(None),
+            or_(
+                AssessmentVersion.prompt_version.is_(None),
+                AssessmentVersion.prompt_version != PROMPT_VERSION,
+            ),
             AssessmentVersion.evidence_state != "insufficient",
             (Situation.id.is_not(None))
             | ((AssessmentVersion.status == "draft") & AssessmentVersion.hold_until.is_not(None)),

@@ -1,0 +1,21 @@
+{% for f in group.fields %}
+  {% set d = f.defn %}
+  <label for="f-{{ d.key }}">{{ d.label }}
+    <span class="muted">· {% if d.secret and f.configured %}configured{% else %}{{ f.source }}{% endif %}{% if d.secret and f.configured and f.source_id != 'console' %} ({{ f.source|lower }}){% endif %}</span></label>
+  {% if conflict and d.secret and f.submitted_secret %}<p class="muted">A credential was entered but not saved. Re-enter it after reviewing this group's changes.</p>{% elif conflict and not d.secret and f.value != f.current_value %}<p class="muted">Current saved value: <code>{{ f.current_value if f.current_value else 'unset; falls back to environment or default' }}</code></p>{% endif %}
+  {% if d.kind in ("choice", "model_route") %}
+  <select id="f-{{ d.key }}" name="{{ d.key }}" {% if f.field_error %}aria-invalid="true" aria-describedby="error-{{ d.key }}"{% endif %}>
+    <option value="" {{ 'selected' if not f.value }}>Use configured default</option>
+    {% for value, label in f.options %}<option value="{{ value }}" {{ 'selected' if f.value == value }}>{{ label }}</option>{% endfor %}
+  </select>
+  {% elif d.secret %}
+  <input id="f-{{ d.key }}" name="{{ d.key }}" type="password" autocomplete="new-password" placeholder="{{ 'Leave empty to keep the saved key' if f.configured else 'Paste the key' }}" maxlength="500" {% if f.field_error %}aria-invalid="true" aria-describedby="error-{{ d.key }}"{% endif %}>
+  {% elif d.kind in ("int", "float") %}
+  <input type="number" id="f-{{ d.key }}" name="{{ d.key }}" step="{{ '1' if d.kind == 'int' else 'any' }}" value="{{ f.value }}" {% if d.minimum is not none %}min="{{ d.minimum }}"{% endif %} {% if d.maximum is not none %}max="{{ d.maximum }}"{% endif %} {% if d.default %}placeholder="{{ d.default }}"{% endif %} {% if f.field_error %}aria-invalid="true" aria-describedby="error-{{ d.key }}"{% endif %} required>
+  {% else %}
+  <input id="f-{{ d.key }}" name="{{ d.key }}" type="text" value="{{ f.value }}" maxlength="500" {% if d.default %}placeholder="{{ d.default }}"{% endif %} {% if f.field_error %}aria-invalid="true" aria-describedby="error-{{ d.key }}"{% endif %}>
+  {% endif %}
+  {% if f.field_error %}<p class="bad" id="error-{{ d.key }}" role="alert">{{ error or control_error }}</p>{% endif %}
+  {% if d.help %}<span class="muted">{{ d.help }}</span><br>{% endif %}
+  {% if f.has_console_value %}<label class="inline"><input type="checkbox" name="clear__{{ d.key }}" value="on"> Clear the saved value {% if d.secret %}(removes the key){% else %}(falls back to the environment variable or default){% endif %}</label>{% endif %}
+{% endfor %}

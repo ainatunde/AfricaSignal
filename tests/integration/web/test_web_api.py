@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from africasignal.assess.explain import PROMPT_VERSION
 from africasignal.models import EvidenceDocument, Place, Source, SourcePermission
 from africasignal.storage import S3Store
 from africasignal.web.routes import api_v1
@@ -120,6 +121,7 @@ def test_insufficient_evidence_has_no_explanation_in_the_api(
 ) -> None:
     (_, version) = seed_petrol(session, store, source)["NG-LA"]
     version.explanation = "Explains things."
+    version.prompt_version = PROMPT_VERSION
     session.flush()
     assert client.get("/v1/situations/price-pms_litre-ng-la").json()["explanation"] == (
         "Explains things."

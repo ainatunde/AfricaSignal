@@ -15,7 +15,7 @@ table and the numbers on the privacy page are built from the constants the code 
 | Data | Where | Who it concerns | Linked to a person? | Kept |
 |------|-------|-----------------|---------------------|------|
 | Visitor code (random, 16+ characters) | Cookie `anon_id`; `event.anon_id`, `feedback.anon_id` | Every visitor whose browser is not a bot | Only by whoever holds the cookie; when signed in, `event.user_id` sits beside it | Cookie 1 year; events 13 months |
-| Page view and related events: time, page kind, situation, `ref` (`wa`, `x`, `email`, `share`) | `event` | Visitors | As above | 13 months, deleted daily by `prune_events` |
+| Page view and related events: time, page kind, situation, `ref` (`wa`, `x`, `facebook`, `instagram`, `telegram`, `youtube`, `tiktok`, `email`, `share`) | `event` | Visitors | As above | 13 months, deleted daily by `prune_events` |
 | Place choice and last-visit times | Cookies `place`, `visit_prev`, `visit_cur` | Visitors who pick a place | Browser only; read per request, not stored | 1 year |
 | Position from "Use my location" | One request to `POST /places/locate` | Visitors who press the button | No. Resolved to an area and dropped | Not stored or logged (access log off) |
 | Email address, created time, verified time | `app_user` | Anyone who enters an address at `/signin` | Yes | Until the holder deletes the account; an address never verified is deleted after 30 days by `apply_retention` |
@@ -50,6 +50,7 @@ from other sites. The pages load nothing from other hosts.
 |---------|---------------|
 | Account and follows | What the user asked for (contract or request) |
 | Weekly and correction emails | Consent, recorded with a timestamp, withdrawable by one click |
+| Reviewed insight emails | Separate consent, recorded with a timestamp; only editor-approved insights for followed situations; withdrawable by one click |
 | Visitor metrics | Legitimate interest, with minimisation: no IP, no user agent, 13 months |
 | Error reports and usefulness votes | Legitimate interest; a typed email is voluntary |
 | Abuse limits and security | Legitimate interest |

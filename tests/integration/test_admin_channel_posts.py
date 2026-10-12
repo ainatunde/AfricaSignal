@@ -65,7 +65,10 @@ def audit_actions(session: Session) -> list[str]:
 def test_marking_a_draft_as_posted_records_it_and_sends_nothing(
     admin: TestClient, session: Session, version: AssessmentVersion
 ) -> None:
-    assert "Mark as posted on WhatsApp" in admin.get("/admin/channel-posts").text
+    page = admin.get("/admin/channel-posts").text
+    assert "Mark as posted on WhatsApp" in page
+    assert "Mark as posted on TikTok by hand" in page
+    assert "?ref=tiktok" in page
     response = mark(admin, version.id, "wa", post_url="https://wa.example/c/123", note="  sent  ")
     assert response.status_code == 303
     assert response.headers["location"] == "/admin/channel-posts?notice=post_marked"
@@ -76,7 +79,7 @@ def test_marking_a_draft_as_posted_records_it_and_sends_nothing(
     assert session.scalars(select(Outbox)).all() == []  # nothing was queued to send
 
     page = admin.get("/admin/channel-posts").text
-    assert "Posted on WhatsApp" in page and "Mark as posted on X" in page
+    assert "Posted on WhatsApp" in page and "Approve and queue X post" in page
     assert "Mark as posted on WhatsApp" not in page
     assert "https://wa.example/c/123" in page  # also in the recently-marked table
 
@@ -88,13 +91,14 @@ def test_each_channel_is_marked_separately_and_only_once(
     again = mark(admin, version.id, "wa")
     assert again.status_code == 400 and "already marked as posted on WhatsApp" in again.text
     assert mark(admin, version.id, "x").status_code == 303
-    assert sorted(session.scalars(select(ChannelPost.channel))) == ["wa", "x"]
+    assert mark(admin, version.id, "tiktok").status_code == 303
+    assert sorted(session.scalars(select(ChannelPost.channel))) == ["tiktok", "wa", "x"]
 
 
 @pytest.mark.parametrize(
     ("channel", "form", "message"),
     [
-        ("sms", {}, "choose WhatsApp or X"),
+        ("sms", {}, "choose WhatsApp, X, or TikTok"),
         ("wa", {"post_url": "http://insecure.example/p"}, "plain https address"),
         ("wa", {"post_url": "javascript:alert(1)"}, "plain https address"),
         ("wa", {"post_url": "https://user:pw@host.example/p"}, "plain https address"),

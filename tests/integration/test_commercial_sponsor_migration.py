@@ -7,9 +7,9 @@ from sqlalchemy.engine import Engine
 from alembic import command
 
 
-def test_sponsor_migration_upgrades_from_0040(engine: Engine) -> None:
+def test_sponsor_migration_upgrades_from_0057(engine: Engine) -> None:
     cfg = Config("alembic.ini")
-    command.downgrade(cfg, "0040")
+    command.downgrade(cfg, "0057")
     assert "sponsor" not in inspect(engine).get_table_names()
 
     command.upgrade(cfg, "head")

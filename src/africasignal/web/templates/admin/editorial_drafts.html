@@ -1,0 +1,33 @@
+{% extends "admin/base.html" %}
+{% block title %}Editorial drafts{% endblock %}
+{% block content %}
+<h1>Editorial insight drafts</h1>
+<p>New assessments can prompt a private AI draft when draft-only synthesis is enabled in Language model settings. Every draft stays attached to the assessment version and its evidence. Approval records an editor's review only. A separate ‘approve and queue email’ action sends to verified followers who opted into reviewed insight emails; it does not publish or post to X.</p>
+{% if error %}<p class="error" role="alert" tabindex="-1">{{ error }}</p>{% endif %}
+{% if drafts %}
+{% for draft, version, situation in drafts %}
+{% set current = version.status == 'published' and situation.current_version_id == version.id and (version.valid_until is none or version.valid_until > now) %}
+<details {% if draft.status == 'pending_review' %}open{% endif %}>
+  <summary>{{ situation.title }} · version {{ version.version }} · {{ draft.status|replace('_', ' ')|title }} · {{ draft.created_at|when }}</summary>
+  <p><strong>Assessment:</strong> {{ version.evidence_state|title }} · {{ version.scope_label }} · {{ version.period_label }} · <a href="/admin/assessments">Review assessment</a></p>
+  {% if not current %}<p class="notice" role="status">This assessment is no longer current or within its validity window{% if version.status == 'draft' %} (it may still be in a publication hold){% endif %}. The draft cannot be approved for use.</p>{% endif %}
+  <h3>{{ draft.content.headline }}</h3>
+  <p>{{ draft.content.summary }}</p>
+  {% if draft.content.reported_explanations %}<h4>Reported explanations</h4><ul>{% for item in draft.content.reported_explanations %}<li>{{ item }}</li>{% endfor %}</ul>{% endif %}
+  {% if version.unknowns %}<h4>Unknowns recorded by the assessment</h4><ul>{% for item in version.unknowns %}<li>{{ item }}</li>{% endfor %}</ul>{% endif %}
+  {% set contexts = evidence.get(draft.id, []) %}
+  {% if contexts %}<h4>Current source context</h4><ul>{% for source in contexts %}<li><strong>{{ source.source }}</strong> · {{ source.published }}<blockquote>{{ source.passage }}</blockquote></li>{% endfor %}</ul>{% elif draft.evidence_claim_ids %}<p class="muted">The source passages used when this draft was generated are no longer available under current permission or retention checks.</p>{% else %}<p class="muted">No additional claim passage was retrieved. Review the assessment's primary facts and sources before using this draft.</p>{% endif %}
+  <p class="muted">Model: {{ draft.model_id }} · Prompt: {{ draft.prompt_version }} · Evidence claim IDs: {{ draft.evidence_claim_ids|join(', ') if draft.evidence_claim_ids else 'none' }}</p>
+  {% if draft.status in ('pending_review', 'approved') and current %}
+  <form method="post" action="/admin/insights/{{ draft.id }}/review">
+    <label for="review-reason-{{ draft.id }}">Review reason (required for audit)</label>
+    <input id="review-reason-{{ draft.id }}" type="text" name="reason" minlength="8" maxlength="200" required>
+    {% if draft.status == 'pending_review' %}<button type="submit" name="decision" value="approved">Approve for internal use</button>{% endif %}
+    <button type="submit" name="decision" value="email_queued">{% if draft.status == 'approved' %}Queue approved draft by email{% else %}Approve and queue email to opted-in followers{% endif %}</button>
+    {% if draft.status == 'pending_review' %}<button type="submit" name="decision" value="rejected">Reject draft</button>{% endif %}
+  </form>
+  {% endif %}
+</details>
+{% endfor %}
+{% else %}<p>No editorial drafts have been created. Enable draft-only synthesis in <a href="/admin/settings?q=editorial">Language model settings</a>, then new eligible assessments will enter this queue.</p>{% endif %}
+{% endblock %}
