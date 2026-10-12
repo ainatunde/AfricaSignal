@@ -104,43 +104,74 @@ Read from b14415a, whose committed tree matches fetched main dfa1655. Refresh at
 ```python
 from africasignal.llm.adapter import build_adapter, LlmAdapter
 
+
 def build_adapter(session: Session) -> LlmAdapter: ...
+
 
 # Method on LlmAdapter:
 def complete_json(
-    self, purpose: str, prompt_version: str, system: str, user: str,
-    schema: dict[str, Any], max_tokens: int, *, job_id: int | None = None,
+    self,
+    purpose: str,
+    prompt_version: str,
+    system: str,
+    user: str,
+    schema: dict[str, Any],
+    max_tokens: int,
+    *,
+    job_id: int | None = None,
 ) -> dict[str, Any]: ...
+
 
 from africasignal.jobs.queue import enqueue
 
+
 def enqueue(
-    session: Session, kind: str, payload: dict[str, Any] | None = None,
-    *, dedupe_key: str | None = None, run_at: datetime | None = None,
+    session: Session,
+    kind: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    dedupe_key: str | None = None,
+    run_at: datetime | None = None,
     max_attempts: int = 5,
 ) -> int | None: ...
 
+
 from africasignal.sources.permissions import current_permission
 
+
 def current_permission(
-    session: Session, source_id: int,
+    session: Session,
+    source_id: int,
 ) -> SourcePermission | None: ...
+
 
 from africasignal.operations.agent_reach import TaskSubmission, submit, review_candidate
 
+
 def submit(
-    session: Session, operator: Operator, request: TaskSubmission,
+    session: Session,
+    operator: Operator,
+    request: TaskSubmission,
 ) -> AgentReachTask: ...
 
+
 def review_candidate(
-    session: Session, operator: Operator, candidate_id: int, *,
-    action: Literal['accept', 'reject'], source_id: int | None = None,
+    session: Session,
+    operator: Operator,
+    candidate_id: int,
+    *,
+    action: Literal["accept", "reject"],
+    source_id: int | None = None,
 ) -> AgentReachCandidate: ...
+
 
 from africasignal.operations.workloads import WorkloadChange, configure
 
+
 def configure(
-    session: Session, operator: Operator, name: WorkloadName,
+    session: Session,
+    operator: Operator,
+    name: WorkloadName,
     change: WorkloadChange,
 ) -> WorkloadControl: ...
 ```
