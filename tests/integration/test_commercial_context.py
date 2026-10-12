@@ -17,6 +17,7 @@ from africasignal.models import (
     SourcePermission,
 )
 from africasignal.operations.commercial_context import (
+    ContextError,
     classify_content,
     content_ref_for,
     store_context_decision,
@@ -166,6 +167,23 @@ def test_stale_withdrawn_disputed_and_permission_denied_context_is_ineligible(
     )
 
 
+def test_unknown_context_cannot_be_stored_past_its_short_freshness_window(
+    session: Session,
+) -> None:
+    _, disputed, _ = _content(session, evidence_state="disputed")
+    content_ref = content_ref_for(session, disputed.id)
+    assert content_ref is not None
+    decision = classify_content(session, content_ref=content_ref, now=NOW)
+    assert decision.suitability == "unknown"
+
+    extended = decision.model_copy(update={"expires_at": NOW + timedelta(hours=1)})
+    with pytest.raises(ContextError, match="freshness window"):
+        store_context_decision(session, input_ref=content_ref, decision=extended, now=NOW)
+
+    stored = store_context_decision(session, input_ref=content_ref, decision=decision, now=NOW)
+    assert stored.expires_at == NOW + timedelta(minutes=15)
+
+
 def test_publication_suspension_and_content_hash_changes_fail_closed(session: Session) -> None:
     _, version, _ = _content(session)
     content_ref = content_ref_for(session, version.id)
@@ -183,7 +201,5 @@ def test_publication_suspension_and_content_hash_changes_fail_closed(session: Se
     version.headline = "Corrected headline"
     session.flush()
     assert content_ref_for(session, version.id) != content_ref
-    from africasignal.operations.commercial_context import ContextError
-
     with pytest.raises(ContextError, match="hash is stale"):
         classify_content(session, content_ref=content_ref, now=NOW)

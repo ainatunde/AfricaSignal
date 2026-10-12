@@ -11,6 +11,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
 from africasignal.models import DeliveryEvent, PlacementBooking
+from africasignal.operations import commercial_bookings as bookings
 from africasignal.operations.commercial_bookings import transition_booking
 from africasignal.operations.commercial_measurement import (
     DeliveryEnvelope,
@@ -142,6 +143,27 @@ def test_explore_renders_labelled_sponsor_after_content_and_is_not_cacheable(
     events = session.scalars(select(DeliveryEvent).order_by(DeliveryEvent.metric)).all()
     assert sorted(event.metric for event in events) == ["eligible_opportunity", "server_render"]
     assert re.search(r'href="/commercial/click/[A-Za-z0-9_.-]+"', response.text)
+
+
+def test_explore_scopes_sponsor_eligibility_to_selected_item(
+    session: Session,
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _active_booking(session, monkeypatch)
+    seen_item_codes: list[object] = []
+
+    def observe_context(*_args: object, **kwargs: object) -> bool:
+        seen_item_codes.append(kwargs.get("item_code"))
+        return True
+
+    monkeypatch.setattr(bookings, "_has_eligible_context", observe_context)
+
+    response = client.get("/explore?topic=energy&item=pms_litre")
+
+    assert response.status_code == 200
+    assert "Sponsored" in response.text
+    assert seen_item_codes == ["pms_litre"]
 
 
 def test_explore_keeps_editorial_page_when_observation_write_fails(

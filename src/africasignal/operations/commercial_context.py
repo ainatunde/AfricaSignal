@@ -280,7 +280,7 @@ def store_context_decision(
     if _signature(decision) != _signature(expected):
         raise ContextError("context decision does not match current deterministic inputs")
     expiry = decision.expires_at.astimezone(UTC)
-    if expiry <= moment or expiry > moment + ELIGIBLE_TTL:
+    if expiry <= moment or expiry > expected.expires_at.astimezone(UTC):
         raise ContextError("context expiry is outside the allowed freshness window")
     if context.valid_until is not None and expiry > context.valid_until:
         raise ContextError("context cannot outlive published content")

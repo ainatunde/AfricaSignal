@@ -168,8 +168,8 @@ def context_rebuild(request: Request, auth: AdminOperator, db: DbSession) -> Res
             auth,
             status_code=409,
             error=(
-                "Enable the global commercial and workload switches before queueing "
-                "a context rebuild."
+                "No context rebuild was queued. Check deployment deny, the global commercial and "
+                "workload switches and schedule; a scan for this hour may already exist."
             ),
         )
     return _redirect("/admin/commercial", auth)

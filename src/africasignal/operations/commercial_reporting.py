@@ -78,6 +78,12 @@ def _add_months(moment: datetime, months: int) -> datetime:
     return moment.replace(year=year, month=month, day=day)
 
 
+def _period_start(moment: datetime, days: int) -> datetime:
+    """Start at midnight UTC for the first of the requested calendar days, including today."""
+    today = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+    return today - timedelta(days=days - 1)
+
+
 def rebuild_recent_aggregates(
     session: Session,
     *,
@@ -92,16 +98,14 @@ def rebuild_recent_aggregates(
     moment = _aware_utc(now)
     if not 1 <= days <= MAX_REBUILD_DAYS:
         raise ReportError(f"days must be between 1 and {MAX_REBUILD_DAYS}")
-    period_start = moment - timedelta(days=days)
+    period_start = _period_start(moment, days)
     retention_floor = moment - timedelta(days=30)
     if period_start < retention_floor:
         raise ReportError("requested range extends beyond raw event retention")
     period_end = moment
-    utc_day_start = period_start.replace(hour=0, minute=0, second=0, microsecond=0)
-
     session.execute(
         delete(DeliveryAggregate).where(
-            DeliveryAggregate.period_start >= utc_day_start,
+            DeliveryAggregate.period_start >= period_start,
             DeliveryAggregate.period_start < period_end,
         )
     )
@@ -188,7 +192,7 @@ def build_report(session: Session, *, days: int, now: datetime) -> CommercialRep
     moment = _aware_utc(now)
     if not 1 <= days <= MAX_REBUILD_DAYS:
         raise ReportError(f"days must be between 1 and {MAX_REBUILD_DAYS}")
-    start = moment - timedelta(days=days)
+    start = _period_start(moment, days)
     rows = tuple(
         ReportLine(
             booking_id=row.booking_id,
@@ -204,8 +208,7 @@ def build_report(session: Session, *, days: int, now: datetime) -> CommercialRep
         for row in session.scalars(
             select(DeliveryAggregate)
             .where(
-                DeliveryAggregate.period_start
-                >= start.replace(hour=0, minute=0, second=0, microsecond=0),
+                DeliveryAggregate.period_start >= start,
                 DeliveryAggregate.period_start < moment,
                 DeliveryAggregate.retention_until > moment,
             )

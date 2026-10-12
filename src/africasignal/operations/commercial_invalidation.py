@@ -12,6 +12,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from africasignal.config import get_settings
 from africasignal.jobs import queue
+from africasignal.jobs.policy import WorkloadSchedule
 from africasignal.models import (
     AssessmentVersion,
     CommercialControl,
@@ -127,6 +128,9 @@ def enqueue_context_refresh(
 def enqueue_context_scan(session: Session, *, now: datetime) -> int | None:
     """Queue one bounded scan for the current hourly slot."""
     if not _rebuilds_enabled(session):
+        return None
+    workload = session.get(WorkloadControl, "commercial")
+    if workload is None or not WorkloadSchedule.model_validate(workload.schedule).allows(now):
         return None
     slot = int(now.timestamp() // 3600)
     return queue.enqueue(

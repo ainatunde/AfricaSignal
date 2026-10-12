@@ -74,6 +74,40 @@ def test_daily_aggregates_rebuild_from_retained_raw_events(
     assert not any(metric in {"client_viewability", "provider_billed"} for metric in metrics)
 
 
+def test_report_uses_only_the_requested_utc_calendar_days(
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    booking_id = _active(session, monkeypatch)
+    booking = session.get(PlacementBooking, booking_id)
+    assert booking is not None
+    today = NOW.replace(hour=0, minute=0, second=0, microsecond=0)
+    yesterday = today - timedelta(days=1)
+    for period_start, count in ((yesterday, 9), (today, 2)):
+        session.add(
+            DeliveryAggregate(
+                booking_id=booking.id,
+                creative_version_id=booking.creative_version_id,
+                surface=booking.surface,
+                topic=booking.topic,
+                metric="click",
+                metric_version=1,
+                period_start=period_start,
+                count=count,
+                completeness="partial",
+                retention_until=NOW + timedelta(days=30),
+            )
+        )
+    session.flush()
+
+    report = build_report(session, days=1, now=NOW)
+
+    assert report.period_start == today
+    assert report.period_end == NOW
+    assert [(line.period_start, line.count) for line in report.lines] == [(today, 2)]
+    assert next(metric for metric in report.metrics if metric.metric == "click").count == 2
+
+
 def test_empty_period_is_unavailable_not_zero_and_retention_is_enforced(
     session: Session,
     monkeypatch: pytest.MonkeyPatch,

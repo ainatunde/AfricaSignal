@@ -273,7 +273,7 @@ def explore(
             db,
             surface="explore_topic",
             topic=topic,  # type: ignore[arg-type]
-            item_code=None,
+            item_code=selected["code"] if selected is not None else None,
             at=_now(),
         )
         if decision.eligible:
