@@ -41,6 +41,7 @@ from africasignal.models import (
     LoginToken,
     UserSession,
 )
+from africasignal.operations.commercial_reporting import prune_delivery_data
 from africasignal.publish import accounts, deletions
 from africasignal.storage import S3Store, evidence_key
 
@@ -62,6 +63,8 @@ class RetentionResult:
     ledger_mirrored: int = 0
     evidence_expired: int = 0
     evidence_redacted: int = 0
+    delivery_events: int = 0
+    delivery_aggregates: int = 0
 
 
 def purge_login_records(session: Session, now: datetime) -> tuple[int, int]:
@@ -167,6 +170,7 @@ def redact_forbidden_copies(session: Session, store: S3Store | None, now: dateti
 
 def expire_evidence(session: Session, now: datetime) -> int:
     """Invalidate expired evidence now and queue idempotent object deletion after commit."""
+    from africasignal.operations.commercial_invalidation import invalidate_evidence_contexts
     from africasignal.publish.invalidation import invalidate
 
     documents = session.scalars(
@@ -184,6 +188,9 @@ def expire_evidence(session: Session, now: datetime) -> int:
             .values(text="", passage="", valid=False, invalid_reason="evidence retention expired")
         )
         invalidate(session, "evidence_document", [document.id], now)
+        invalidate_evidence_contexts(
+            session, document.id, reason="evidence_retention_expired", now=now
+        )
         queue.enqueue(
             session,
             "purge_expired_evidence",
@@ -207,6 +214,7 @@ def run(session: Session, now: datetime, store: S3Store | None) -> RetentionResu
     result.feedback_scrubbed = scrub_old_feedback(session, now, feedback_retention_months(session))
     result.ledger_mirrored = deletions.mirror_pending(session, store, now)
     result.ledger_pruned = deletions.prune(session, store, now, ledger_keep(session))
+    result.delivery_events, result.delivery_aggregates = prune_delivery_data(session, now=now)
     return result
 
 

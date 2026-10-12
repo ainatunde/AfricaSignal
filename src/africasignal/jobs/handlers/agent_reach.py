@@ -14,6 +14,7 @@ from africasignal.agent_reach.client import AgentReachClient, RunnerError, Runne
 from africasignal.config import get_settings
 from africasignal.evidence.urls import canonicalise
 from africasignal.jobs import queue
+from africasignal.jobs.execution import fenced_effect
 from africasignal.jobs.handlers import JobContext, on_dead, register
 from africasignal.jobs.policy import WorkloadSchedule
 from africasignal.jobs.queue import ClaimedJob
@@ -209,7 +210,10 @@ def agent_reach_search(ctx: JobContext) -> None:
     if task is None:
         return
     try:
-        response = AgentReachClient(session, expected_endpoint=task.runner_endpoint).submit(task)
+        with fenced_effect():
+            response = AgentReachClient(session, expected_endpoint=task.runner_endpoint).submit(
+                task
+            )
     except RunnerError as exc:
         if str(exc) == "Agent Reach runner is not configured":
             task.status = "failed"
@@ -387,9 +391,10 @@ def agent_reach_cancel(ctx: JobContext) -> None:
         return
     remote_state = "cancelled"
     if task.external_task_id:
-        remote_state = AgentReachClient(session, expected_endpoint=task.runner_endpoint).cancel(
-            task.external_task_id
-        )
+        with fenced_effect():
+            remote_state = AgentReachClient(session, expected_endpoint=task.runner_endpoint).cancel(
+                task.external_task_id
+            )
         if remote_state == "pending":
             run_at = datetime.now(UTC) + timedelta(seconds=30)
             queue.enqueue(

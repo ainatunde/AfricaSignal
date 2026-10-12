@@ -30,9 +30,7 @@ from tests.unit.sources.test_gdelt_parse import export_row
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "gdelt"
 LATEST = "20260930180000"
-TABLES = (
-    "gdelt_discovery, evidence_document, reporting_origin, source_permission, source, job, setting"
-)
+TABLES = "gdelt_discovery, evidence_document, reporting_origin, source_permission, source, job, job_deduplication, setting"
 
 
 def fixture_bytes(name: str) -> bytes:

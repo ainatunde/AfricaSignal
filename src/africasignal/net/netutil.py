@@ -13,7 +13,6 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
-import socket
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -22,6 +21,9 @@ from urllib.robotparser import RobotFileParser
 
 import httpcore
 import httpx
+
+from africasignal.net.resolver import dns_addresses as _dns_addresses
+from africasignal.net.resolver import dns_budget
 
 log = logging.getLogger("africasignal.net.netutil")
 
@@ -53,7 +55,8 @@ def _robots_for(host_url: str, timeout: float | None = None) -> RobotFileParser 
     deadline = time.monotonic() + request_budget
     failed = False
     try:
-        transport = pinned_http_transport(host_url)
+        with dns_budget(request_budget):
+            transport = pinned_http_transport(host_url)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("robots preflight deadline exceeded")
@@ -160,10 +163,10 @@ class _ApprovedRemote:
 def _resolve_public_host(host: str, port: int) -> _ApprovedRemote | None:
     """Resolve one TCP origin and fail closed unless every IP is public."""
     try:
-        infos = socket.getaddrinfo(host, port)
-    except (socket.gaierror, UnicodeError, ValueError):
-        return None
-    ips = {str(info[4][0]) for info in infos}
+        # Literal addresses need no resolver but pass through the identical public-IP guard.
+        ips = {str(ipaddress.ip_address(host))}
+    except ValueError:
+        ips = set(_dns_addresses(host, port))
     if not ips or any(_ip_is_blocked(ip) for ip in ips):
         return None
     return _ApprovedRemote(
@@ -220,17 +223,22 @@ class _PinnedNetworkBackend(httpcore.NetworkBackend):
         local_address: str | None = None,
         socket_options: Iterable[httpcore.SOCKET_OPTION] | None = None,
     ) -> httpcore.NetworkStream:
-        approved = self._approved_for(host, port)
+        started = time.monotonic()
+        with dns_budget(timeout if timeout is not None else 5.0):
+            approved = self._approved_for(host, port)
         if approved is None:
             raise httpcore.ConnectError("Pinned transport rejected an unapproved destination")
 
         last_error: httpcore.ConnectError | None = None
         for address in approved.addresses:
+            remaining = None if timeout is None else timeout - (time.monotonic() - started)
+            if remaining is not None and remaining <= 0:
+                raise httpcore.ConnectTimeout("Connection deadline exceeded")
             try:
                 return self._delegate.connect_tcp(
                     address,
                     port,
-                    timeout=timeout,
+                    timeout=remaining,
                     local_address=local_address,
                     socket_options=socket_options,
                 )

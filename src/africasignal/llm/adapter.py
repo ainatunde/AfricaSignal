@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from africasignal import settings_store
 from africasignal.db import get_engine
+from africasignal.jobs.execution import fenced_effect
 from africasignal.llm import cache
 from africasignal.llm.budget import (
     cost_usd,
@@ -289,14 +290,15 @@ class LlmAdapter:
             now=now,
         )
         try:
-            reply = self.provider.complete(
-                model=route,
-                system=system,
-                user=user,
-                schema=schema,
-                max_tokens=max_tokens,
-                effort=purpose_cfg.effort,
-            )
+            with fenced_effect():
+                reply = self.provider.complete(
+                    model=route,
+                    system=system,
+                    user=user,
+                    schema=schema,
+                    max_tokens=max_tokens,
+                    effort=purpose_cfg.effort,
+                )
         except Exception as exc:
             try:
                 mark_uncertain(self.session, reservation_id, type(exc).__name__)

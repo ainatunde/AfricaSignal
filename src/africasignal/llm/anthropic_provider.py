@@ -31,8 +31,11 @@ class AnthropicProvider:
         client: Any | None = None,
         timeout: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
-        # ``client`` lets tests pass a stub; the SDK retries 408/409/429/5xx itself (2 retries).
-        self._client: Any = client or anthropic.Anthropic(api_key=api_key, timeout=timeout)
+        # The queue owns retries. Hidden SDK retries could exceed both the lease
+        # and the single-call spend reservation after an ambiguous provider outcome.
+        self._client: Any = client or anthropic.Anthropic(
+            api_key=api_key, timeout=timeout, max_retries=0
+        )
 
     def complete(
         self,

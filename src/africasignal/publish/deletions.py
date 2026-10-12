@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 
 from africasignal.config import get_settings
 from africasignal.jobs import queue
+from africasignal.jobs.execution import fenced_effect
 from africasignal.models import AccountDeletion
 from africasignal.operators import derive_key
 from africasignal.storage import S3Store
@@ -132,5 +133,6 @@ def prune(session: Session, store: S3Store | None, now: datetime, keep: timedelt
             except ValueError:
                 continue
             if day < cutoff_day:
-                store.delete(key)
+                with fenced_effect():
+                    store.delete(key)
     return int(removed)

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from africasignal.config import get_settings
 from africasignal.db import session_scope
+from africasignal.jobs.execution import fenced_effect
 from africasignal.settings_store import StorageConfig, storage_config
 
 
@@ -71,7 +72,10 @@ class S3Store:
 
     def put(self, key: str, data: bytes, content_type: str = "application/octet-stream") -> None:
         _check_key(key)
-        self._client.put_object(Bucket=self._bucket, Key=key, Body=data, ContentType=content_type)
+        with fenced_effect():
+            self._client.put_object(
+                Bucket=self._bucket, Key=key, Body=data, ContentType=content_type
+            )
 
     def get(self, key: str) -> bytes:
         _check_key(key)
@@ -90,7 +94,8 @@ class S3Store:
 
     def delete(self, key: str) -> None:
         _check_key(key)
-        self._client.delete_object(Bucket=self._bucket, Key=key)
+        with fenced_effect():
+            self._client.delete_object(Bucket=self._bucket, Key=key)
 
     def list_keys(self, prefix: str) -> list[str]:
         """Every key that starts with ``prefix``, in key order."""

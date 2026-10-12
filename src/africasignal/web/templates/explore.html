@@ -48,4 +48,11 @@
   {% endif %}
 </section>
 {% endif %}
-{% endblock %}
+{% if sponsor %}
+<aside class="sponsor-module" aria-label="Sponsored content">
+  <p class="sponsor-label">Sponsored</p>
+  <p>{{ sponsor.body_text }}</p>
+  <p class="muted">From {{ sponsor.public_name }}</p>
+  <p><a href="{{ sponsor.click_url }}" rel="sponsored nofollow">Learn more from {{ sponsor.public_name }}</a></p>
+</aside>
+{% endif %}{% endblock %}

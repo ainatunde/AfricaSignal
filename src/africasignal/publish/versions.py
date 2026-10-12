@@ -44,6 +44,11 @@ from africasignal.models import (
     Situation,
     Source,
 )
+from africasignal.operations.commercial_invalidation import (
+    enqueue_context_refresh,
+    invalidate_all_contexts,
+    invalidate_situation_contexts,
+)
 from africasignal.publish.hooks import NotificationKind, notify_published
 
 log = logging.getLogger("africasignal.publish.versions")
@@ -62,12 +67,23 @@ def publication_suspended(session: Session) -> bool:
 def set_publication_suspended(session: Session, suspended: bool, now: datetime) -> None:
     """Operators flip the kill switch; the caller records the audit entry."""
     setting = session.get(Setting, SUSPENDED_KEY)
+    changed = setting is None or setting.value is not suspended
     if setting is None:
         session.add(Setting(key=SUSPENDED_KEY, value=suspended, updated_at=now))
     else:
         setting.value = suspended
         setting.updated_at = now
     session.flush()
+    if changed:
+        invalidate_all_contexts(
+            session,
+            reason="publication_suspended" if suspended else "publication_resumed",
+            now=now,
+        )
+        if not suspended:
+            from africasignal.operations.commercial_invalidation import enqueue_context_scan
+
+            enqueue_context_scan(session, now=now)
 
 
 def _assessed_period(
@@ -244,6 +260,8 @@ def _publish(
         previous.status = "superseded"
     situation.current_version_id = version.id
     session.flush()
+    invalidate_situation_contexts(session, situation.id, reason="content_revision_changed", now=now)
+    enqueue_context_refresh(session, version.id, now=now)
     if previous is not None and previous.id != version.id and kind != "new_version":
         cancel_pending_delivery(session, previous.id, now)
     if version.evidence_state != "insufficient":
