@@ -13,14 +13,22 @@ from sqlalchemy.orm import Session
 from africasignal.models import (
     AssessmentInput,
     AssessmentVersion,
+    DeliveryAttempt,
+    DeliveryCorrectionWork,
+    Job,
     MeasurementReview,
+    Operator,
+    Outbox,
     Place,
     Series,
     Situation,
+    SocialPublication,
     Source,
+    SourcePermission,
 )
-from africasignal.publish import hooks
+from africasignal.publish import hooks, social
 from africasignal.publish.hooks import NotificationKind
+from africasignal.publish.invalidation import invalidate_source_permission
 from africasignal.publish.situations import assess_situation, ensure_situations, slug_for
 from africasignal.publish.versions import (
     apply_policy,
@@ -91,6 +99,13 @@ def test_a_routine_version_is_published_and_becomes_current(
     session.refresh(national)
     assert (v.status, v.policy_version, v.published_at) == ("published", "pp-1", WHEN)
     assert national.current_version_id == v.id and v.withheld_reasons == []
+    assert v.publication_eligibility is not None
+    assert v.publication_eligibility["eligible"] is True
+    assert v.publication_eligibility["channel"] == "website"
+    assert all(
+        dependency["permission_version"] == 1
+        for dependency in v.publication_eligibility["dependencies"]
+    )
     assert notified == [(v.id, "new_version")]
 
 
@@ -254,6 +269,132 @@ def test_r2_a_version_whose_evidence_was_withdrawn_is_withheld(
     decision = apply_policy(session, v.id, WHEN)
     assert decision is not None and decision.reasons == ("R2",)
     assert (v.status, v.withheld_reasons) == ("withheld", ["R2"]) and notified == []
+
+
+def test_numeric_reuse_denial_withholds_a_new_assessment_with_rule_provenance(
+    session: Session, store: S3Store, source: Source, notified: list[tuple[int, NotificationKind]]
+) -> None:
+    import_bytes(session, store, source, GAS_OCT)
+    permission = session.scalars(
+        select(SourcePermission).where(SourcePermission.source_id == source.id)
+    ).one()
+    permission.may_republish_numbers = False
+    version = _draft(session, _situation(session, "lpg_12_5kg", "NG"), WHEN)
+
+    decision = apply_policy(session, version.id, WHEN)
+
+    assert decision is not None and decision.status == "withheld"
+    assert version.status == "withheld"
+    assert "numeric_republication_not_permitted" in version.withheld_reasons
+    assert version.publication_eligibility is not None
+    assert version.publication_eligibility["eligible"] is False
+    assert version.publication_eligibility["dependencies"]
+    assert notified == []
+
+
+def test_reuse_rights_revocation_cancels_approved_delivery_and_queues_reassessment(
+    session: Session,
+    store: S3Store,
+    source: Source,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import_bytes(session, store, source, GAS_OCT)
+    situation = _situation(session, "lpg_12_5kg", "NG")
+    version = _draft(session, situation, WHEN)
+    decision = apply_policy(session, version.id, WHEN)
+    assert decision is not None and decision.status == "published"
+
+    operator = Operator(
+        email="social-operator@example.org",
+        password_hash="test-only",
+        totp_secret_enc="test-only",
+        role="admin",
+    )
+    session.add(operator)
+    session.flush()
+    post = SocialPublication(
+        assessment_version_id=version.id,
+        channel="x",
+        requested_by_operator_id=operator.id,
+        approved_at=WHEN,
+        body="A reviewed post",
+        status="queued",
+    )
+    email = Outbox(
+        kind="email_digest",
+        payload={"assessment_version_id": version.id},
+        dedupe_key="permission-revoke-test",
+    )
+    already_sent = Outbox(
+        kind="email_digest",
+        payload={"assessment_version_id": version.id},
+        dedupe_key="permission-revoke-already-sent",
+        status="sent",
+    )
+    session.add_all([post, email, already_sent])
+    session.flush()
+    session.add(
+        DeliveryAttempt(
+            outbox_id=already_sent.id,
+            attempt_no=1,
+            channel="email",
+            content_sha256="a" * 64,
+            destination_sha256="b" * 64,
+            destination_account_id="hello@africasignal.example",
+            target_reference="app_user:42",
+            assessment_version_ids=[version.id],
+            authorization_snapshot={"kind": "email_digest"},
+            status="sent",
+            dedupe_key="permission-revoke-delivery-attempt",
+            provider_receipt_id="provider-message-42",
+            attempted_at=WHEN,
+            completed_at=WHEN,
+        )
+    )
+    session.flush()
+
+    session.add(
+        SourcePermission(
+            source_id=source.id,
+            version=2,
+            may_collect=False,
+            may_store_full_text=False,
+            max_quote_chars=0,
+            may_republish_numbers=False,
+            link_required=True,
+            retention_days=365,
+            approved_at=WHEN + timedelta(hours=1),
+        )
+    )
+    session.flush()
+    affected = invalidate_source_permission(session, source.id, 2, WHEN + timedelta(hours=1))
+    session.refresh(post)
+    session.refresh(email)
+    session.refresh(situation)
+
+    assert affected == [situation.id]
+    assert (
+        situation.current_version_id == version.id
+    )  # eligibility gates suppress; no false source withdrawal
+    assert version.status == "published"
+    assert post.status == "cancelled" and "numeric_republication_not_permitted" in post.last_error
+    assert email.status == "dead"
+    correction_work = session.scalars(select(DeliveryCorrectionWork)).all()
+    assert len(correction_work) == 1
+    assert correction_work[0].state == "pending_review"
+    assert correction_work[0].reason_code == "source_permission_changed"
+    reassessments = session.scalars(select(Job).where(Job.kind == "assess_situation")).all()
+    assert any(
+        job.status == "queued" and job.payload.get("situation_id") == situation.id
+        for job in reassessments
+    )
+
+    monkeypatch.setattr(
+        social,
+        "create_post",
+        lambda *_args, **_kwargs: pytest.fail("revoked content must not reach the X adapter"),
+    )
+    assert social.dispatch_pending(session, WHEN + timedelta(hours=1)).sent == 0
 
 
 def test_r4_a_value_awaiting_range_review_withholds_the_assessment(

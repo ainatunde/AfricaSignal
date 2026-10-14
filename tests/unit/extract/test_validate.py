@@ -42,8 +42,12 @@ def claim(**overrides: Any) -> dict[str, Any]:
     return base
 
 
-def check(published: datetime | None = PUBLISHED, **overrides: Any):  # type: ignore[no-untyped-def]
-    return validate_claim(claim(**overrides), DOC, published, ITEMS, SERIES)
+def check(
+    published: datetime | None = PUBLISHED,
+    document_text: str = DOC,
+    **overrides: Any,
+):  # type: ignore[no-untyped-def]
+    return validate_claim(claim(**overrides), document_text, published, ITEMS, SERIES)
 
 
 def test_a_good_claim_is_valid_and_keeps_its_offsets() -> None:
@@ -111,9 +115,87 @@ def test_the_naira_sign_and_thousands_separators_are_understood() -> None:
 
 def test_scale_words_are_understood() -> None:
     passage = "Cooking gas costs N1.2 million per tonne"
-    assert check(passage=passage, stated_value=1_200_000).valid
-    assert check(passage=passage, stated_value=1.2).valid
-    assert check(passage=passage, stated_value=12).invalid_reason == "value_not_in_passage"
+    context = {"item_code": None, "policy_series": None, "stated_unit": "NGN/tonne"}
+    assert check(passage=passage, stated_value=1_200_000, **context).valid
+    assert check(passage=passage, stated_value=1.2, **context).valid
+    assert check(passage=passage, stated_value=12, **context).invalid_reason == (
+        "value_not_in_passage"
+    )
+
+
+def test_a_price_unit_must_match_the_item_catalogue() -> None:
+    c = check(stated_unit="NGN/kg")
+    assert (c.valid, c.invalid_reason) == (False, "unit_mismatch")
+
+
+def test_the_selected_number_must_be_locally_attached_to_the_catalogue_unit() -> None:
+    passage = "Petrol costs N1,020 per kg in Lagos."
+    c = check(passage=passage, document_text=passage)
+    assert (c.valid, c.invalid_reason) == (False, "unit_not_in_passage")
+
+
+def test_a_foreign_currency_cannot_be_labelled_as_naira() -> None:
+    passage = "Petrol costs USD 1,020 per litre in Lagos."
+    c = check(passage=passage, document_text=passage)
+    assert (c.valid, c.invalid_reason) == (False, "unit_mismatch")
+
+
+def test_a_foreign_currency_spelled_out_cannot_be_labelled_as_naira() -> None:
+    passage = "Petrol costs 1,020 dollars per litre in Lagos."
+    c = check(passage=passage, document_text=passage)
+    assert (c.valid, c.invalid_reason) == (False, "unit_mismatch")
+
+
+def test_a_pack_size_number_cannot_be_used_as_its_price() -> None:
+    passage = "Cooking gas 5kg refill costs N4,500."
+    c = check(
+        passage=passage,
+        document_text=passage,
+        item_code="lpg_5kg",
+        stated_value=5,
+        stated_unit="NGN/5kg",
+        direction="unknown",
+    )
+    assert (c.valid, c.invalid_reason) == (False, "unit_mismatch")
+
+
+def test_a_direction_that_conflicts_with_the_source_is_invalid_and_neutralised() -> None:
+    passage = "Petrol prices fell from N1,200 per litre to N1,000 per litre."
+    c = check(
+        passage=passage,
+        document_text=passage,
+        stated_value=1_000,
+        direction="up",
+    )
+    assert (c.valid, c.invalid_reason, c.direction) == (
+        False,
+        "direction_mismatch",
+        "unknown",
+    )
+
+
+def test_a_signed_direction_is_neutralised_when_the_source_does_not_state_it() -> None:
+    passage = "Petrol costs N1,020 per litre in Lagos."
+    c = check(passage=passage, document_text=passage, direction="up")
+    assert c.valid and c.direction == "unknown"
+
+
+def test_negated_or_numerically_contradictory_direction_is_neutralised() -> None:
+    negated_passage = "Petrol prices did not rise; petrol costs N1,020 per litre."
+    contradictory_passage = "Petrol prices rose from N1,200 per litre to N1,000 per litre."
+    negated = check(
+        passage=negated_passage,
+        document_text=negated_passage,
+        direction="up",
+    )
+    contradictory = check(
+        passage=contradictory_passage,
+        document_text=contradictory_passage,
+        stated_value=1_000,
+        direction="up",
+    )
+    assert negated.valid and negated.direction == "unknown"
+    assert contradictory.valid and contradictory.direction == "unknown"
 
 
 def test_a_missing_value_is_fine() -> None:

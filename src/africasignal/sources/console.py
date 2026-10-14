@@ -164,8 +164,10 @@ def approve_permission(
         after={"source": source.slug, "in_force": permission_snapshot(permission)},
     )
     from africasignal.operations.commercial_invalidation import invalidate_source_contexts
+    from africasignal.publish.invalidation import invalidate_source_permission
 
     invalidate_source_contexts(session, source.id, reason="source_permission_changed", now=now)
+    invalidate_source_permission(session, source.id, permission.version, now)
     return permission
 
 
@@ -219,8 +221,10 @@ def publish_permission_version(
         after={"source": source.slug, "in_force": permission_snapshot(permission)},
     )
     from africasignal.operations.commercial_invalidation import invalidate_source_contexts
+    from africasignal.publish.invalidation import invalidate_source_permission
 
     invalidate_source_contexts(session, source.id, reason="source_permission_changed", now=now)
+    invalidate_source_permission(session, source.id, permission.version, now)
     return permission
 
 

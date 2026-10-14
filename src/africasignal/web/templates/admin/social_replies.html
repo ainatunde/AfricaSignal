@@ -1,0 +1,171 @@
+{% extends "admin/base.html" %}
+{% block title %}X reply inbox{% endblock %}
+{% block content %}
+<h1>X mentions and reviewed replies</h1>
+<p>Replies are off by default. This inbox keeps only post IDs, conversation IDs, and timestamps; open each mention on X to read it. Social content is untrusted input and is never used as evidence. An operator must classify an in-scope dated-fact request, select a current assessment, review the exact response, and explicitly queue it. Ambiguous questions, corrections, abuse, and unsupported requests should be escalated.</p>
+<p class="muted">The collector uses the account-bound user token, reserves a bounded mentions read before each API call, verifies account identity when the token changes, and discards post text. X access-plan entitlements and credit availability still need live qualification.</p>
+{% if error %}<p class="error" role="alert" tabindex="-1">{{ error }}</p>{% endif %}
+<section aria-labelledby="reply-controls">
+  <h2 id="reply-controls">Effective controls</h2>
+  <p>
+    Inbox: {% if status.enabled %}enabled{% else %}off{% endif %} ·
+    account ID: {% if status.account_configured %}configured{% else %}missing{% endif %} ·
+    user token: {% if status.token_configured %}configured{% else %}missing{% endif %} ·
+    reads today: {{ status.daily_reserved }} / {{ status.daily_cap }} ·
+    interval: {{ status.interval_minutes }} minutes.
+    {% if status.last_poll %}Latest poll: {{ status.last_poll.started_at|when }} ({{ status.last_poll.status|replace('_', ' ') }}).{% endif %}
+  </p>
+  <p>Configure “X mention inbox and replies” and “X publishing account user ID” in <a href="/admin/settings?q=social">Settings</a>. Keep the feature off until the account’s current API entitlement is qualified.</p>
+  {% if status.enabled and status.account_configured and status.token_configured %}
+  <form method="post" action="/admin/social-replies/poll"><button type="submit">Run a bounded mentions read</button></form>
+  {% else %}<p class="muted">Run now is unavailable until the inbox, numeric account ID, and user token are configured.</p>{% endif %}
+</section>
+
+<section aria-labelledby="reply-policy">
+  <h2 id="reply-policy">Bounded reply policy</h2>
+  {% if policy %}
+  <p>Revision {{ policy.revision }} · {{ policy.status|title }}{% if policy.active %} · active{% else %} · disabled{% endif %}</p>
+  <p>Scope: Nigeria, {{ policy.policy.allowed_topics|join(' and ') }} · allowed requests: dated facts and source requests · at most {{ policy.policy.max_replies_per_lagos_day }} replies per Lagos day and one per conversation.</p>
+  <p>Social content is not retained as evidence. An operator must still open the X post, classify the request, select the current assessment, and review the exact response. Other categories are escalated. {% if policy.active %}The policy adds bounds to those individually reviewed replies.{% else %}Replies remain individually reviewed; the draft policy stays disabled until conversation evaluation, editorial approval, and staging evidence are recorded.{% endif %}</p>
+  <p>Evaluation is performed outside this form. Record a link or path to the actual case report; entering counts here does not run or validate that report.</p>
+  {% if policy.evaluation_case_count is not none %}
+  <p>Latest report: {{ policy.evaluation_case_count }} cases · {{ policy.evaluation_critical_errors }} critical errors · {{ policy.evaluation_evidence_ref }}</p>
+  {% for family, result in policy.evaluation_coverage.items() %}<p>{{ family|replace('_', ' ')|title }}: {{ result.get('passed', 0) }} / {{ result.get('cases', 0) }} passed</p>{% endfor %}
+  {% endif %}
+  {% if policy.status == 'draft' %}
+  <form method="post" action="/admin/social-replies/policies/{{ policy.revision }}/evaluate">
+    <h3>Record the conversation evaluation</h3>
+    <div class="scroll"><table>
+      <thead><tr><th scope="col">Required case family</th><th scope="col">Cases run</th><th scope="col">Cases passing</th></tr></thead>
+      <tbody>{% for case in policy_case_families %}
+        <tr><th scope="row">{{ case|replace('_', ' ')|title }}</th>
+          <td><input aria-label="{{ case }} cases run" type="number" name="cases_{{ case }}" min="1" max="500" required></td>
+          <td><input aria-label="{{ case }} cases passing" type="number" name="passed_{{ case }}" min="0" max="500" required></td>
+        </tr>
+      {% endfor %}</tbody>
+    </table></div>
+    <label for="policy-critical-errors-{{ policy.revision }}">Critical errors</label>
+    <input id="policy-critical-errors-{{ policy.revision }}" type="number" name="critical_errors" min="0" required>
+    <label for="policy-evaluation-ref-{{ policy.revision }}">Evaluation report reference</label>
+    <input id="policy-evaluation-ref-{{ policy.revision }}" type="text" name="evaluation_evidence_ref" minlength="8" maxlength="300" required>
+    <button type="submit">Record evaluation results</button>
+  </form>
+  {% elif policy.status == 'evaluated' %}
+  <p>Evaluation: {{ policy.evaluation_case_count }} cases · {{ policy.evaluation_critical_errors }} critical errors · report {{ policy.evaluation_evidence_ref }}</p>
+  <form method="post" action="/admin/social-replies/policies/{{ policy.revision }}/approve">
+    <label for="policy-approval-reason-{{ policy.revision }}">Editorial sign-off reason</label>
+    <input id="policy-approval-reason-{{ policy.revision }}" type="text" name="reason" minlength="8" maxlength="200" required>
+    <button type="submit">Approve evaluated policy</button>
+  </form>
+  {% elif policy.status == 'approved' %}
+  <p>Editorial approval: {{ policy.approval_reason }}</p>
+  <form method="post" action="/admin/social-replies/policies/{{ policy.revision }}/activate">
+    <label for="policy-staging-ref-{{ policy.revision }}">Staging evidence reference</label>
+    <input id="policy-staging-ref-{{ policy.revision }}" type="text" name="staging_evidence_ref" minlength="8" maxlength="300" required>
+    <label for="policy-activation-reason-{{ policy.revision }}">Staging sign-off reason</label>
+    <input id="policy-activation-reason-{{ policy.revision }}" type="text" name="reason" minlength="8" maxlength="200" required>
+    <button type="submit">Activate in staging</button>
+  </form>
+  {% elif policy.status == 'active' %}
+  <p>Staging evidence: {{ policy.staging_evidence_ref }} · activation: {{ policy.activation_reason }}</p>
+  <form method="post" action="/admin/social-replies/policies/{{ policy.revision }}/retire">
+    <label for="policy-retire-reason-{{ policy.revision }}">Retirement reason</label>
+    <input id="policy-retire-reason-{{ policy.revision }}" type="text" name="reason" minlength="8" maxlength="200" required>
+    <button type="submit">Retire policy</button>
+  </form>
+  {% elif policy.status == 'retired' %}
+  <p>Retired revisions are immutable. A new policy draft must pass evaluation, editorial approval and staging again. The validator preserves the one-per-conversation cap, ten-per-day ceiling, topic/category boundary, individual review and ID-only retention.</p>
+  <form method="post" action="/admin/social-replies/policies/{{ policy.revision }}/revise">
+    <label for="policy-revision-reason-{{ policy.revision }}">Reason for a new revision</label>
+    <input id="policy-revision-reason-{{ policy.revision }}" type="text" name="reason" minlength="8" maxlength="200" required>
+    <label for="policy-revision-json-{{ policy.revision }}">Policy JSON</label>
+    <textarea id="policy-revision-json-{{ policy.revision }}" name="policy_json" rows="12" required>{{ policy.policy|tojson(indent=2) }}</textarea>
+    <button type="submit">Create next draft revision</button>
+  </form>
+  {% endif %}
+  {% else %}<p class="muted">No versioned reply policy is available. Replies remain individually reviewed.</p>{% endif %}
+</section>
+
+<section aria-labelledby="mention-inbox">
+  <h2 id="mention-inbox">Recent mentions</h2>
+  <div class="scroll"><table>
+    <thead><tr><th scope="col">Received</th><th scope="col">X post</th><th scope="col">Conversation</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead>
+    <tbody>
+    {% for mention in mentions %}
+      <tr>
+        <td>{{ mention.remote_created_at|when if mention.remote_created_at else mention.first_seen_at|when }}</td>
+        <td><a href="https://x.com/i/web/status/{{ mention.post_id }}" target="_blank" rel="noopener noreferrer">Open mention on X</a></td>
+        <td>{{ mention.conversation_id or 'not provided' }}</td>
+        <td>{{ mention.status|replace('_', ' ')|title }}</td>
+        <td>
+          {% if mention.status == 'new' %}
+          {% if assessments %}
+          <form method="post" action="/admin/social-replies/mentions/{{ mention.id }}/draft">
+            <label for="triage-{{ mention.id }}">Request category</label>
+            <select id="triage-{{ mention.id }}" name="triage" required>
+              <option value="dated_fact">Dated fact request</option>
+              <option value="source_request">Source request</option>
+            </select>
+            <label for="assessment-{{ mention.id }}">Current assessment that answers this request</label>
+            <select id="assessment-{{ mention.id }}" name="assessment_version_id" required>
+              {% for version, situation in assessments %}
+              <option value="{{ version.id }}">{{ situation.title }} · {{ version.scope_label }} · {{ version.period_label }} · v{{ version.version }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit">Draft a grounded response</button>
+          </form>
+          {% else %}<span class="muted">No current reply-eligible assessment.</span>{% endif %}
+          <form method="post" action="/admin/social-replies/mentions/{{ mention.id }}/escalated" class="inline">
+            <label for="escalation-category-{{ mention.id }}">Escalation category</label>
+            <select id="escalation-category-{{ mention.id }}" name="category">
+              <option value="clarification">Needs clarification</option>
+              <option value="correction_report">Correction report</option>
+              <option value="unsupported_premise">Unsupported premise</option>
+              <option value="out_of_scope">Out of scope</option>
+              <option value="abuse_or_spam">Abuse or spam</option>
+              <option value="other">Other</option>
+            </select>
+            <button type="submit">Classify and escalate</button>
+          </form>
+          <form method="post" action="/admin/social-replies/mentions/{{ mention.id }}/dismissed" class="inline"><button type="submit">Dismiss</button></form>
+          <form method="post" action="/admin/social-replies/mentions/{{ mention.id }}/unavailable" class="inline"><button type="submit">Mark unavailable</button></form>
+          {% else %}<span class="muted">No further action</span>{% endif %}
+        </td>
+      </tr>
+    {% else %}<tr><td colspan="5">No recent mentions. The inbox is ID-only and expires unlinked items after 30 days.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+
+<section aria-labelledby="reply-review">
+  <h2 id="reply-review">Reply review and delivery</h2>
+  {% for reply, mention in replies %}
+  <details {% if reply.status == 'pending_review' %}open{% endif %}>
+    <summary>Reply {{ reply.id }} · {{ reply.status|replace('_', ' ')|title }} · {{ reply.created_at|when }}</summary>
+    <p>Target: <a href="https://x.com/i/web/status/{{ reply.reply_to_post_id }}" target="_blank" rel="noopener noreferrer">original mention</a> · destination account {{ reply.destination_account_id }} · assessment version {{ reply.assessment_version_id }}{% if reply.policy_revision %} · policy revision {{ reply.policy_revision }}{% endif %}</p>
+    <blockquote>{{ reply.body }}</blockquote>
+    <p class="muted">Content SHA-256 {{ reply.content_sha256 }} · evidence dependencies {{ reply.eligibility_decision.get('dependencies', [])|length }} · {{ reply.last_error or '' }}{% if reply.external_post_id %} · X receipt <a href="https://x.com/i/web/status/{{ reply.external_post_id }}">open posted reply</a>{% endif %}</p>
+    {% if reply.status == 'pending_review' %}
+    <form method="post" action="/admin/social-replies/{{ reply.id }}/review">
+      <label for="reply-reason-{{ reply.id }}">Review reason (required for audit)</label>
+      <input id="reply-reason-{{ reply.id }}" type="text" name="reason" minlength="8" maxlength="200" required>
+      <button type="submit" name="decision" value="queue">Approve and queue this exact reply</button>
+      <button type="submit" name="decision" value="reject">Reject and escalate</button>
+    </form>
+    {% endif %}
+  </details>
+  {% else %}<p>No reply drafts have been prepared.</p>{% endfor %}
+</section>
+
+<section aria-labelledby="mention-polls">
+  <h2 id="mention-polls">Read and identity-check history</h2>
+  <div class="scroll"><table>
+    <thead><tr><th scope="col">Started</th><th scope="col">Account</th><th scope="col">Status</th><th scope="col">Posts read / reserved</th><th scope="col">New mentions</th><th scope="col">Identity read</th><th scope="col">Details</th></tr></thead>
+    <tbody>
+    {% for poll in polls %}
+      <tr><td>{{ poll.started_at|when }}</td><td>{{ poll.account_user_id }}</td><td>{{ poll.status|replace('_', ' ')|title }}</td><td>{{ poll.fetched_results }} / {{ poll.reserved_results }}</td><td>{{ poll.new_mentions }}</td><td>{{ 'yes' if poll.identity_read_performed else 'no' }}</td><td>{{ poll.last_error or '' }}</td></tr>
+    {% else %}<tr><td colspan="7">No mentions reads have run.</td></tr>{% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endblock %}

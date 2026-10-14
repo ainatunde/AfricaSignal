@@ -24,7 +24,8 @@ from africasignal.models import Claim, EvidenceDocument
 from africasignal.policy_series import all_series, series_codes
 
 PURPOSE = "claim_extract"
-PROMPT_VERSION = "claim_extract_v1"
+PROMPT_VERSION = "claim_extract_v2"
+VALIDATOR_VERSION = "claim_validate_v2"
 MAX_INPUT_CHARS = 12_000
 # Output budget for one document: the claims themselves plus the model's own thinking.
 MAX_OUTPUT_TOKENS = 8_000
@@ -34,7 +35,10 @@ _WINDOW_LEAD = 500  # characters of context before the first keyword hit in a wi
 def extractor_version(model_id: str | None = None) -> str:
     """Stored on each claim: the prompt and the model that produced it. A new prompt file or a
     new model in ``llm.yaml`` means documents are extracted again under the new version."""
-    return f"{PROMPT_VERSION}+{model_id or load_llm_config().purpose(PURPOSE).model}"
+    return (
+        f"{PROMPT_VERSION}+{VALIDATOR_VERSION}+"
+        f"{model_id or load_llm_config().purpose(PURPOSE).model}"
+    )
 
 
 # --- keywords and the window of text the model sees -------------------------------------------
@@ -191,7 +195,17 @@ def extract_claims(
         job_id=job_id,
     )
     items, series = allowed_codes(session)
-    claims = validate_claims(answer["claims"], text, document.published_at, items, series)
+    item_units = {item.code: item.unit for item in load_items().items}
+    policy_units = {item.code: item.unit for item in all_series(session)}
+    claims = validate_claims(
+        answer["claims"],
+        text,
+        document.published_at,
+        items,
+        series,
+        item_units,
+        policy_units,
+    )
     return Extraction(claims=claims, window=window)
 
 

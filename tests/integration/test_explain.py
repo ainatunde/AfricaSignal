@@ -68,11 +68,9 @@ def good_text(version: AssessmentVersion) -> str:
     """A paragraph that passes the validator, written from the version's own facts."""
     by_label = {f["label"]: f for f in version.facts}
     current = by_label["Current price"]
-    change = by_label["Month-on-month change"]
     return (
         f"NBS data shows 12.5kg cooking gas cost {format_value(current['value'], current['unit'])} "
-        f"on average across Nigeria in October 2024, a change of {change['value']}% on the month. "
-        "Only NBS reports this, so prices near you may differ."
+        "on average across Nigeria in October 2024."
     )
 
 
@@ -82,8 +80,8 @@ def adapter_for(session: Session, provider: FakeProvider, budget: float = 10.0) 
     )
 
 
-def answer(text: str) -> dict[str, str]:
-    return {"explanation": text}
+def answer(text: str) -> dict[str, Any]:
+    return {"assertions": [{"text": text, "fact_refs": ["fact_1"], "evidence_refs": []}]}
 
 
 def test_a_valid_explanation_is_stored_with_the_model_and_prompt_version(
@@ -97,10 +95,11 @@ def test_a_valid_explanation_is_stored_with_the_model_and_prompt_version(
     assert explain_version(session, adapter_for(session, provider), v.id) == "explained"
 
     assert v.explanation == text
+    assert v.explanation_assertions == [{"text": text, "fact_refs": ["fact_1"], "claim_ids": []}]
     assert (v.prompt_version, v.model_id) == (PROMPT_VERSION, "claude-sonnet-5-5")
     assert v.status == "published" and v.headline.startswith("Average cooking gas")
     (request,) = provider.calls
-    assert request.effort == "low" and request.schema["required"] == ["explanation"]
+    assert request.effort == "low" and request.schema["required"] == ["assertions"]
     assert "BEGIN INPUT" in request.user and v.headline in request.user
     assert "evidence_ids" not in request.user  # ids mean nothing to the reader
 

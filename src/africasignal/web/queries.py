@@ -31,6 +31,7 @@ from africasignal.models import (
     SourcePermission,
 )
 from africasignal.places.normalise import normalise
+from africasignal.publish.eligibility import publication_eligibility, publication_eligibility_many
 
 CURRENT_STATUSES = ("published", "stale", "withdrawn")  # what a current version can be
 HISTORY_STATUSES = ("published", "stale", "superseded", "withdrawn")
@@ -63,6 +64,7 @@ class Current:
     situation: Situation
     version: AssessmentVersion
     place: Place
+    authorization_signature: tuple[tuple[int, int, int], ...] = ()
 
     @property
     def effective_status(self) -> str:
@@ -87,7 +89,16 @@ def _current_query() -> Any:
 
 def current_situation(session: Session, slug: str) -> Current | None:
     row = session.execute(_current_query().where(Situation.slug == slug)).first()
-    return Current(*row) if row else None
+    if row is None:
+        return None
+    decision = publication_eligibility(session, row[1], channel="website")
+    if not decision.eligible:
+        return None
+    signature = tuple(
+        (dep.evidence_document_id, dep.source_id, dep.permission_version)
+        for dep in decision.dependencies
+    )
+    return Current(row[0], row[1], row[2], signature)
 
 
 def current_situations(
@@ -122,28 +133,56 @@ def current_situations(
         query = query.order_by(AssessmentVersion.published_at.desc().nulls_last(), Situation.slug)
     else:
         query = query.order_by(Place.name, Situation.slug)
-    return [Current(*row) for row in session.execute(query.limit(limit).offset(offset))]
+    # Rights can be withdrawn without rewriting an already-published assessment. Scan in bounded
+    # pages and apply the same current eligibility decision before public pagination.
+    target = offset + limit
+    visible: list[Current] = []
+    raw_offset = 0
+    batch_size = max(200, min(target or 200, 1000))
+    while len(visible) < target:
+        rows = list(session.execute(query.limit(batch_size).offset(raw_offset)))
+        if not rows:
+            break
+        decisions = publication_eligibility_many(
+            session, [row[1] for row in rows], channel="website"
+        )
+        for row in rows:
+            decision = decisions[row[1].id]
+            if decision.eligible:
+                signature = tuple(
+                    (dep.evidence_document_id, dep.source_id, dep.permission_version)
+                    for dep in decision.dependencies
+                )
+                visible.append(Current(row[0], row[1], row[2], signature))
+        raw_offset += len(rows)
+    return visible[offset:target]
 
 
 def count_current_situations(
     session: Session, *, place_ids: list[int] | None = None, topic: str | None = None
 ) -> int:
-    query = (
-        select(func.count())
-        .select_from(Situation)
-        .join(AssessmentVersion, AssessmentVersion.id == Situation.current_version_id)
-        .where(AssessmentVersion.status.in_(CURRENT_STATUSES), Situation.status != "closed")
-    )
+    query = _current_query().order_by(None)
     if place_ids is not None:
         query = query.where(Situation.place_id.in_(place_ids))
     if topic:
         query = query.where(Situation.topic == topic)
-    return int(session.scalar(query) or 0)
+    count = 0
+    raw_offset = 0
+    batch_size = 500
+    while True:
+        rows = list(session.execute(query.limit(batch_size).offset(raw_offset)))
+        if not rows:
+            return count
+        decisions = publication_eligibility_many(
+            session, [row[1] for row in rows], channel="website"
+        )
+        count += sum(decision.eligible for decision in decisions.values())
+        raw_offset += len(rows)
 
 
 def public_versions(session: Session, situation_id: int) -> list[AssessmentVersion]:
     """Every version a reader may see, newest first. Drafts and withheld versions never appear."""
-    return list(
+    versions = list(
         session.scalars(
             select(AssessmentVersion)
             .where(
@@ -153,6 +192,10 @@ def public_versions(session: Session, situation_id: int) -> list[AssessmentVersi
             .order_by(AssessmentVersion.version.desc())
         )
     )
+    decisions = publication_eligibility_many(
+        session, versions, channel="website", require_current=False
+    )
+    return [version for version in versions if decisions[version.id].eligible]
 
 
 # --- evidence ----------------------------------------------------------------------------------

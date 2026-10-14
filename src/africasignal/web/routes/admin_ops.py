@@ -8,6 +8,7 @@ approval and are delivered by a worker. The NBS upload only stores a file and qu
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
@@ -22,12 +23,16 @@ from africasignal.operations import alerts as alerts_ops
 from africasignal.operations import assessments as assessment_ops
 from africasignal.operations import channel_posts as channel_ops
 from africasignal.operations import costs as cost_ops
+from africasignal.operations import delivery_corrections as delivery_correction_ops
 from africasignal.operations import domains as domain_ops
 from africasignal.operations import editorial as editorial_ops
+from africasignal.operations import insight_candidates as insight_candidate_ops
 from africasignal.operations import jobs as job_ops
 from africasignal.operations import nbs_upload, range_review
 from africasignal.operations import policies as policy_ops
 from africasignal.operations import social_listening as listening_ops
+from africasignal.operations import social_replies as social_reply_ops
+from africasignal.operations import social_reply_policy as reply_policy_ops
 from africasignal.publish import social as social_ops
 from africasignal.publish import versions
 from africasignal.publish.whatsapp_text import PostError
@@ -61,6 +66,23 @@ NOTICES = {
     "social_settings_saved": "Social controls saved. The listener uses them on its next run.",
     "social_settings_unchanged": "Social controls are unchanged.",
     "social_lead_updated": "Lead status updated. This does not make a post verified evidence.",
+    "social_mention_poll_queued": (
+        "A bounded account mentions read was queued. Only post IDs and timestamps are retained."
+    ),
+    "social_reply_draft_created": (
+        "A private evidence-grounded reply draft was created for editorial review."
+    ),
+    "social_reply_triaged": "Mention triage recorded.",
+    "social_reply_reviewed": "Reply review recorded. A queued reply will be rechecked before X.",
+    "social_reply_policy_evaluated": "Reply-policy evaluation recorded.",
+    "social_reply_policy_evaluation_failed": (
+        "Reply-policy evaluation did not meet its gates; policy remains disabled."
+    ),
+    "social_reply_policy_approved": "Editorial reply-policy approval recorded.",
+    "social_reply_policy_activated": "Reply policy activated in staging.",
+    "social_reply_policy_retired": "Reply policy retired.",
+    "social_reply_policy_revised": "New reply-policy draft created.",
+    "delivery_correction_reviewed": "Delivery correction work review recorded.",
     "insight_reviewed": "Editorial review recorded. No reader email or social post was sent.",
     "insight_email_queued": (
         "Reviewed insight email queued for opted-in followers. Check delivery status in Jobs."
@@ -514,6 +536,7 @@ def _editorial_drafts_page(
 ) -> Response:
     rows = editorial_ops.recent(db)
     evidence = {draft.id: editorial_ops.evidence_for(db, draft) for draft, _, _ in rows}
+    candidates = insight_candidate_ops.recent(db, now=datetime.now(UTC))
     return _page(
         request,
         "admin/editorial_drafts.html",
@@ -522,6 +545,8 @@ def _editorial_drafts_page(
         error=error,
         drafts=rows,
         evidence=evidence,
+        candidates=candidates,
+        candidate_quality=insight_candidate_ops.quality_metrics(db),
         now=datetime.now(UTC),
         notice=_notice(request),
     )
@@ -552,6 +577,48 @@ async def editorial_draft_review(
         "insight_email_queued" if decision == "email_queued" else "insight_reviewed",
         auth,
     )
+
+
+@router.post("/insight-candidates/{candidate_id}/review")
+async def insight_candidate_review(
+    candidate_id: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    form = await request.form()
+    decision = form.get("decision", "")
+    reason = form.get("reason", "")
+    rating_value = form.get("usefulness_rating", "")
+    scope_value = form.get("scope_correct", "")
+    critical_value = form.get("unsupported_critical", "")
+    if (
+        not isinstance(decision, str)
+        or not isinstance(reason, str)
+        or not isinstance(rating_value, str)
+        or not rating_value.isdigit()
+        or scope_value not in {"true", "false"}
+        or critical_value not in {"true", "false"}
+    ):
+        return _editorial_drafts_page(
+            request,
+            db,
+            auth,
+            400,
+            "Record usefulness, scope, critical support, decision, and reason.",
+        )
+    try:
+        insight_candidate_ops.review(
+            db,
+            auth.operator,
+            candidate_id,
+            decision,
+            reason,
+            int(rating_value),
+            scope_value == "true",
+            critical_value == "true",
+            now=datetime.now(UTC),
+        )
+    except insight_candidate_ops.InsightCandidateError as exc:
+        return _editorial_drafts_page(request, db, auth, 409, str(exc))
+    return _back("/admin/insights", "candidate_reviewed", auth)
 
 
 # --- channel posts ------------------------------------------------------------------------------
@@ -922,6 +989,333 @@ def social_listening_lead_status(
     except listening_ops.SocialListeningError as exc:
         return _social_listening_page(request, db, auth, 400, str(exc))
     return _back("/admin/social-listening", "social_lead_updated", auth)
+
+
+def _social_replies_page(
+    request: Request,
+    db: DbSession,
+    auth: AdminOperator,
+    status_code: int = 200,
+    error: str | None = None,
+) -> Response:
+    now = datetime.now(UTC)
+    return _page(
+        request,
+        "admin/social_replies.html",
+        auth,
+        status_code,
+        error=error,
+        status=social_reply_ops.poll_status(db, now),
+        mentions=social_reply_ops.mentions(db),
+        replies=social_reply_ops.replies(db),
+        policy=social_reply_ops.reply_policy_status(db),
+        policy_case_families=sorted(reply_policy_ops.REQUIRED_EVALUATION_CASE_FAMILIES),
+        assessments=social_reply_ops.replyable_assessments(db, now),
+        polls=social_reply_ops.poll_history(db),
+        now=now,
+        notice=_notice(request),
+    )
+
+
+@router.get("/social-replies")
+def social_replies_view(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    return _social_replies_page(request, db, auth)
+
+
+@router.post("/social-replies/poll")
+def social_replies_poll(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    if settings_store.get(db, "x_replies_enabled") != "yes":
+        return _social_replies_page(request, db, auth, 400, "Enable the X mention inbox first.")
+    if not settings_store.get(db, "x_user_access_token"):
+        return _social_replies_page(
+            request, db, auth, 400, "Configure the encrypted X user token first."
+        )
+    if not (settings_store.get(db, "x_account_user_id") or "").isdigit():
+        return _social_replies_page(
+            request, db, auth, 400, "Configure the numeric X account ID first."
+        )
+    now = datetime.now(UTC)
+    job_id = queue.enqueue(
+        db,
+        "social_mention_poll",
+        {"force": True, "operator_id": auth.operator.id},
+        dedupe_key=f"social-mentions:manual:{int(now.timestamp()) // 60}",
+    )
+    if job_id is not None:
+        audit.record(
+            db,
+            auth.operator,
+            "social_mentions.poll_queued",
+            "job",
+            job_id,
+            after={"job_id": job_id, "force": True},
+        )
+    return _back("/admin/social-replies", "social_mention_poll_queued", auth)
+
+
+@router.post("/social-replies/policies/{revision}/evaluate")
+async def social_reply_policy_evaluate(
+    revision: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    form = await request.form()
+    coverage: dict[str, dict[str, int]] = {}
+    try:
+        for case in reply_policy_ops.REQUIRED_EVALUATION_CASE_FAMILIES:
+            cases_value = form.get(f"cases_{case}", "")
+            passed_value = form.get(f"passed_{case}", "")
+            if (
+                not isinstance(cases_value, str)
+                or not cases_value.isdigit()
+                or not isinstance(passed_value, str)
+                or not passed_value.isdigit()
+            ):
+                raise ValueError("record case and passing counts for every required case family")
+            coverage[case] = {"cases": int(cases_value), "passed": int(passed_value)}
+        errors_value = form.get("critical_errors", "")
+        evidence_ref = form.get("evaluation_evidence_ref", "")
+        if (
+            not isinstance(errors_value, str)
+            or not errors_value.isdigit()
+            or not isinstance(evidence_ref, str)
+        ):
+            raise ValueError("record a critical-error count and evaluation evidence reference")
+        policy_row = reply_policy_ops.record_evaluation(
+            db,
+            auth.operator,
+            revision,
+            coverage,
+            int(errors_value),
+            evidence_ref,
+            now=datetime.now(UTC),
+        )
+    except ValueError as exc:
+        return _social_replies_page(request, db, auth, 400, str(exc))
+    notice = (
+        "social_reply_policy_evaluated"
+        if policy_row.status == "evaluated"
+        else "social_reply_policy_evaluation_failed"
+    )
+    return _back("/admin/social-replies", notice, auth)
+
+
+@router.post("/social-replies/policies/{revision}/approve")
+async def social_reply_policy_approve(
+    revision: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    form = await request.form()
+    reason = form.get("reason", "")
+    if not isinstance(reason, str):
+        return _social_replies_page(
+            request, db, auth, 400, "An editorial approval reason is required."
+        )
+    try:
+        reply_policy_ops.approve(db, auth.operator, revision, reason, now=datetime.now(UTC))
+    except ValueError as exc:
+        return _social_replies_page(request, db, auth, 409, str(exc))
+    return _back("/admin/social-replies", "social_reply_policy_approved", auth)
+
+
+@router.post("/social-replies/policies/{revision}/activate")
+async def social_reply_policy_activate(
+    revision: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    form = await request.form()
+    evidence_ref = form.get("staging_evidence_ref", "")
+    reason = form.get("reason", "")
+    if not isinstance(evidence_ref, str) or not isinstance(reason, str):
+        return _social_replies_page(
+            request, db, auth, 400, "Staging evidence and activation reason are required."
+        )
+    try:
+        reply_policy_ops.activate(
+            db,
+            auth.operator,
+            revision,
+            evidence_ref,
+            reason,
+            now=datetime.now(UTC),
+        )
+    except ValueError as exc:
+        return _social_replies_page(request, db, auth, 409, str(exc))
+    return _back("/admin/social-replies", "social_reply_policy_activated", auth)
+
+
+@router.post("/social-replies/policies/{revision}/retire")
+async def social_reply_policy_retire(
+    revision: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    form = await request.form()
+    reason = form.get("reason", "")
+    if not isinstance(reason, str):
+        return _social_replies_page(request, db, auth, 400, "A retirement reason is required.")
+    try:
+        reply_policy_ops.retire(db, auth.operator, revision, reason, now=datetime.now(UTC))
+    except ValueError as exc:
+        return _social_replies_page(request, db, auth, 409, str(exc))
+    return _back("/admin/social-replies", "social_reply_policy_retired", auth)
+
+
+@router.post("/social-replies/policies/{revision}/revise")
+async def social_reply_policy_revise(
+    revision: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    form = await request.form()
+    reason = form.get("reason", "")
+    policy_value = form.get("policy_json", "")
+    if not isinstance(reason, str) or not isinstance(policy_value, str):
+        return _social_replies_page(
+            request, db, auth, 400, "A reason and policy document are required."
+        )
+    try:
+        policy_document = json.loads(policy_value)
+        if not isinstance(policy_document, dict):
+            raise ValueError("policy document must be a JSON object")
+        reply_policy_ops.revise(
+            db,
+            auth.operator,
+            revision,
+            reason,
+            policy_document,
+            now=datetime.now(UTC),
+        )
+    except ValueError as exc:
+        return _social_replies_page(request, db, auth, 409, str(exc))
+    return _back("/admin/social-replies", "social_reply_policy_revised", auth)
+
+
+@router.post("/social-replies/mentions/{mention_id}/draft")
+async def social_reply_draft(
+    mention_id: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    form = await request.form()
+    assessment_id = form.get("assessment_version_id", "")
+    triage = form.get("triage", "")
+    if (
+        not isinstance(assessment_id, str)
+        or not assessment_id.isdigit()
+        or not isinstance(triage, str)
+    ):
+        return _social_replies_page(
+            request,
+            db,
+            auth,
+            400,
+            "Choose an in-scope dated-fact request and a current assessment.",
+        )
+    try:
+        social_reply_ops.create_reply_draft(
+            db,
+            auth.operator,
+            mention_id,
+            int(assessment_id),
+            triage,
+            now=datetime.now(UTC),
+        )
+    except social_reply_ops.SocialReplyError as exc:
+        return _social_replies_page(request, db, auth, 409, str(exc))
+    return _back("/admin/social-replies", "social_reply_draft_created", auth)
+
+
+@router.post("/social-replies/mentions/{mention_id}/{status}")
+async def social_mention_triage(
+    mention_id: int,
+    status: str,
+    request: Request,
+    auth: AdminOperator,
+    db: DbSession,
+) -> Response:
+    form = await request.form()
+    category_value = form.get("category", "other")
+    category = category_value if isinstance(category_value, str) else "other"
+    try:
+        social_reply_ops.triage_mention(db, auth.operator, mention_id, status, category)
+    except social_reply_ops.SocialReplyError as exc:
+        return _social_replies_page(request, db, auth, 409, str(exc))
+    return _back("/admin/social-replies", "social_reply_triaged", auth)
+
+
+@router.post("/social-replies/{reply_id}/review")
+async def social_reply_review(
+    reply_id: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    form = await request.form()
+    decision = form.get("decision", "")
+    reason = form.get("reason", "")
+    if not isinstance(decision, str) or not isinstance(reason, str):
+        return _social_replies_page(
+            request, db, auth, 400, "A decision and review reason are required."
+        )
+    try:
+        social_reply_ops.review_reply(
+            db,
+            auth.operator,
+            reply_id,
+            decision,
+            reason,
+            now=datetime.now(UTC),
+        )
+    except social_reply_ops.SocialReplyError as exc:
+        return _social_replies_page(request, db, auth, 409, str(exc))
+    return _back("/admin/social-replies", "social_reply_reviewed", auth)
+
+
+# --- corrections to already delivered items ---------------------------------------------------
+
+
+def _delivery_corrections_page(
+    request: Request,
+    db: DbSession,
+    auth: AdminOperator,
+    status_code: int = 200,
+    error: str | None = None,
+) -> Response:
+    return _page(
+        request,
+        "admin/delivery_corrections.html",
+        auth,
+        status_code,
+        error=error,
+        rows=delivery_correction_ops.listing(db, now=datetime.now(UTC)),
+        notice=_notice(request),
+    )
+
+
+@router.get("/delivery-corrections")
+def delivery_corrections_view(request: Request, auth: AdminOperator, db: DbSession) -> Response:
+    return _delivery_corrections_page(request, db, auth)
+
+
+@router.post("/delivery-corrections/{work_id}/review")
+async def delivery_correction_review(
+    work_id: int, request: Request, auth: AdminOperator, db: DbSession
+) -> Response:
+    form = await request.form()
+    decision = form.get("decision", "")
+    reason = form.get("reason", "")
+    follow_up_value = form.get("follow_up_attempt_id", "")
+    if (
+        not isinstance(decision, str)
+        or not isinstance(reason, str)
+        or not isinstance(follow_up_value, str)
+    ):
+        return _delivery_corrections_page(
+            request, db, auth, 400, "A decision and review reason are required."
+        )
+    if follow_up_value and not follow_up_value.isdigit():
+        return _delivery_corrections_page(request, db, auth, 400, "Invalid receipt selection.")
+    try:
+        delivery_correction_ops.review(
+            db,
+            auth.operator,
+            work_id,
+            decision,
+            reason,
+            follow_up_attempt_id=int(follow_up_value) if follow_up_value else None,
+            now=datetime.now(UTC),
+        )
+    except delivery_correction_ops.DeliveryCorrectionError as exc:
+        return _delivery_corrections_page(request, db, auth, 409, str(exc))
+    return _back("/admin/delivery-corrections", "delivery_correction_reviewed", auth)
 
 
 # --- alerts -------------------------------------------------------------------------------------

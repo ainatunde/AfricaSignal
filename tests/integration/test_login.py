@@ -38,7 +38,7 @@ def test_normalise_email() -> None:
 def test_full_sign_in_flow(session: Session) -> None:
     assert request_login(session, "Ada@Example.com", NOW)
     provider = FakeProvider()
-    assert dispatch_pending(session, provider, NOW).sent == 1
+    assert dispatch_pending(session, provider, NOW).simulated == 1
     assert provider.sent[0].to == "ada@example.com"
 
     user = session.scalars(select(AppUser)).one()

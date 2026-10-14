@@ -49,6 +49,7 @@ from africasignal.operations.commercial_invalidation import (
     invalidate_all_contexts,
     invalidate_situation_contexts,
 )
+from africasignal.publish.eligibility import PublicationDecision
 from africasignal.publish.hooks import NotificationKind, notify_published
 
 log = logging.getLogger("africasignal.publish.versions")
@@ -245,7 +246,24 @@ def _publish(
     version: AssessmentVersion,
     now: datetime,
     kind: NotificationKind = "new_version",
-) -> None:
+) -> PublicationDecision:
+    from africasignal.publish.eligibility import publication_eligibility
+
+    eligibility = publication_eligibility(
+        session,
+        version,
+        channel="website",
+        now=now,
+        allow_draft=True,
+        require_current=False,
+    )
+    version.publication_eligibility = eligibility.snapshot()
+    if not eligibility.eligible:
+        version.status = "withheld"
+        version.withheld_reasons = list(eligibility.rule_ids)
+        version.hold_until = None
+        session.flush()
+        return eligibility
     previous = (
         session.get(AssessmentVersion, situation.current_version_id)
         if situation.current_version_id is not None
@@ -266,6 +284,7 @@ def _publish(
         cancel_pending_delivery(session, previous.id, now)
     if version.evidence_state != "insufficient":
         notify_published(session, version.id, kind)
+    return eligibility
 
 
 def apply_policy(
@@ -291,16 +310,31 @@ def apply_policy(
         if situation.current_version_id
         else None
     )
+    from africasignal.publish.eligibility import publication_eligibility
+
+    eligibility = publication_eligibility(
+        session,
+        version,
+        channel="website",
+        now=now,
+        allow_draft=True,
+        require_current=False,
+    )
+    version.publication_eligibility = eligibility.snapshot()
     decision = (
         Decision("withheld", ("superseded_draft",))
         if current is not None and current.version > version.version
         else decide(build_draft(session, version, now))
     )
+    if decision.status == "published" and not eligibility.eligible:
+        decision = Decision("withheld", eligibility.rule_ids)
 
     version.policy_version = POLICY_VERSION
     match decision.status:
         case "published":
-            _publish(session, situation, version, now, kind)
+            publication_decision = _publish(session, situation, version, now, kind)
+            if not publication_decision.eligible:
+                decision = Decision("withheld", publication_decision.rule_ids)
         case "held":
             version.hold_until = decision.hold_until
         case _:  # withheld, or unchanged: a draft identical to what is already published
@@ -369,10 +403,25 @@ def release_version(session: Session, version: AssessmentVersion, now: datetime)
         session.flush()
         return "withheld"
     draft = build_draft(session, version, now)
+    from africasignal.publish.eligibility import publication_eligibility
+
+    eligibility = publication_eligibility(
+        session,
+        version,
+        channel="website",
+        now=now,
+        allow_draft=True,
+        require_current=False,
+    )
+    version.publication_eligibility = eligibility.snapshot()
     decision = decide(VersionDraft(**{**draft.__dict__, "ever_published": True}))
+    if decision.status == "published" and not eligibility.eligible:
+        decision = Decision("withheld", eligibility.rule_ids)
     if decision.status == "published":
-        _publish(session, situation, version, now)
-        return "published"
+        publication_decision = _publish(session, situation, version, now)
+        if publication_decision.eligible:
+            return "published"
+        decision = Decision("withheld", publication_decision.rule_ids)
     version.status = "withheld"
     version.withheld_reasons = list(decision.reasons)
     version.hold_until = None

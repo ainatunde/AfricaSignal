@@ -1,35 +1,39 @@
 """The email outbox: queue messages transactionally, send them from ``dispatch_outbox``.
 
-Delivery is at-least-once. A row is sent, then marked ``sent`` and committed, so a crash between
-the two sends that one message again; the provider gets the row's ``dedupe_key`` as its
-idempotency key to absorb that. Status meanings:
+The exact authorization and content hash are committed before a provider call. Ambiguous outcomes
+are held for operator reconciliation rather than retried. Status meanings:
 
 - ``pending``: never tried
 - ``failed``: tried and failed, will be retried at ``next_attempt_at``
-- ``sent``: the provider accepted it
+- ``sent``: the provider accepted it (mailbox delivery is not confirmed)
+- ``simulated``: a console or test adapter recorded no external send
+- ``outcome_unknown``: the request may have reached the provider; do not retry blindly
 - ``dead``: gave up (too many attempts, a permanent error, or cancelled because it was superseded)
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from sqlalchemy import func, or_, select, true
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from africasignal.assess.retrieval import assessment_evidence_is_current, assessment_passages
+from africasignal import settings_store
+from africasignal.assess.retrieval import assessment_passages
 from africasignal.config import get_settings
 from africasignal.jobs.execution import fenced_effect
 from africasignal.jobs.queue import backoff_seconds
 from africasignal.models import (
     AppUser,
     AssessmentVersion,
+    DeliveryAttempt,
     EditorialInsightDraft,
     Follow,
     LoginToken,
@@ -37,6 +41,7 @@ from africasignal.models import (
     Situation,
 )
 from africasignal.publish import email_render
+from africasignal.publish.eligibility import publication_eligibility
 from africasignal.publish.email import (
     EmailMessage,
     EmailNotConfigured,
@@ -76,6 +81,8 @@ def enqueue_email(
 @dataclass
 class DispatchResult:
     sent: int = 0
+    simulated: int = 0
+    unknown: int = 0
     retried: int = 0
     dead: int = 0
     held: int = 0
@@ -124,7 +131,6 @@ def _build_message(
             or draft.status != "email_queued"
             or draft.assessment_version_id != version_id
             or not _current_version(session, version_id, send_time)
-            or not assessment_evidence_is_current(session, version_id, now=send_time)
         ):
             return None
         available_claim_ids = {
@@ -194,27 +200,60 @@ def _current_version(
 ) -> bool:
     if version_id is None:
         return False
+    version = session.get(AssessmentVersion, version_id)
     return (
-        session.scalar(
-            select(AssessmentVersion.id)
-            .join(Situation, Situation.current_version_id == AssessmentVersion.id)
-            .where(
-                AssessmentVersion.id == version_id,
-                AssessmentVersion.status == ("withdrawn" if withdrawal else "published"),
-                or_(AssessmentVersion.valid_until.is_(None), AssessmentVersion.valid_until > now)
-                if not withdrawal
-                else true(),
-            )
-        )
-        is not None
+        version is not None
+        and publication_eligibility(
+            session,
+            version,
+            channel="email",
+            now=now,
+            allow_withdrawal_notice=withdrawal,
+        ).eligible
     )
 
 
 def dispatch_pending(
     session: Session, provider: EmailProvider, now: datetime, limit: int = BATCH_SIZE
 ) -> DispatchResult:
-    """Send up to ``limit`` due rows. Commits after every row so a crash loses no progress."""
+    """Send due rows after persisting an attempt fence and authorization snapshot."""
     result = DispatchResult()
+    stale = list(
+        session.scalars(
+            select(Outbox)
+            .where(
+                Outbox.status == "sending",
+                Outbox.attempt_started_at < now - timedelta(minutes=5),
+            )
+            .order_by(Outbox.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+    )
+    for stale_row in stale:
+        stale_row.status = "outcome_unknown"
+        stale_row.last_error = (
+            "The sender stopped during the request; confirm the mailbox before retrying."
+        )
+        attempt = session.scalar(
+            select(DeliveryAttempt)
+            .where(
+                DeliveryAttempt.outbox_id == stale_row.id,
+                DeliveryAttempt.status == "prepared",
+            )
+            .order_by(DeliveryAttempt.attempt_no.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        if attempt is not None:
+            attempt.status = "outcome_unknown"
+            attempt.completed_at = now
+            attempt.outcome_detail = stale_row.last_error
+        _scrub(stale_row)
+        result.unknown += 1
+    if stale:
+        session.commit()
+
     # Lock only the row whose send this transaction owns. A prefetched locked batch loses
     # every remaining lock when the first row commits, allowing another worker to send it.
     for _ in range(limit):
@@ -240,7 +279,6 @@ def dispatch_pending(
         )
         if row is None:
             break
-        # Suspension applies between sends; an already-started provider request is in flight.
         _send_one(session, provider, row, now, result)
         session.commit()
     return result
@@ -263,20 +301,288 @@ def _send_one(
             and message.to.strip().casefold() not in settings.staging_email_recipients
         ):
             raise EmailSendError("staging recipient is not allowlisted", retryable=False)
-        with fenced_effect():
-            row.provider_message_id = provider.send(message)
-        if not row.provider_message_id or not row.provider_message_id.strip():
-            raise EmailSendError("provider returned no message id; outcome uncertain")
     except EmailSendError as exc:
         _record_failure(row, str(exc), retryable=exc.retryable, now=now, result=result)
         return
-    except Exception as exc:  # a rendering bug or a provider bug must not stall the batch
-        log.exception("outbox row %s failed", row.id)
-        _record_failure(row, f"{type(exc).__name__}: {exc}", retryable=True, now=now, result=result)
+    except Exception as exc:
+        log.exception("outbox row %s could not be prepared", row.id)
+        _record_failure(
+            row,
+            f"{type(exc).__name__}: {exc}",
+            retryable=False,
+            now=now,
+            result=result,
+        )
         return
-    row.status, row.last_error = "sent", None
-    _scrub(row)
-    result.sent += 1
+
+    row_id = row.id
+    content_hash = _message_hash(message)
+    user_id = row.payload.get("user_id")
+    destination_hash = hashlib.sha256(message.to.encode("utf-8")).hexdigest()
+    version_ids = _assessment_version_ids(row)
+    eligibility = []
+    for version_id in version_ids:
+        version = session.get(AssessmentVersion, version_id)
+        if version is not None:
+            allow_withdrawal = (
+                row.kind == "email_correction"
+                and row.payload.get("notification_kind") == "withdrawal"
+            )
+            eligibility.append(
+                {
+                    "assessment_version_id": version_id,
+                    "decision": publication_eligibility(
+                        session,
+                        version,
+                        channel="email",
+                        now=now,
+                        allow_withdrawal_notice=allow_withdrawal,
+                    ).snapshot(),
+                }
+            )
+    user = session.get(AppUser, user_id) if isinstance(user_id, int) else None
+    provider_name = type(provider).__name__
+    sender = settings_store.get(session, "email_from") or get_settings().email_from
+    draft = (
+        session.get(EditorialInsightDraft, row.payload.get("editorial_draft_id"))
+        if row.kind == "email_insight"
+        else None
+    )
+    authorization = {
+        "kind": row.kind,
+        "outbox_id": row.id,
+        "dedupe_key": row.dedupe_key,
+        "recipient_user_id": user.id if user is not None else None,
+        "email_verified": user.email_verified_at is not None if user is not None else False,
+        "digest_opt_in": user.digest_opt_in if user is not None else False,
+        "insight_email_opt_in": user.insight_email_opt_in if user is not None else False,
+        "provider_adapter": provider_name,
+        "sender_account": sender,
+        "assessment_dependencies": eligibility,
+        "editorial_approval": (
+            {
+                "draft_id": draft.id,
+                "status": draft.status,
+                "reviewed_by_operator_id": draft.reviewed_by_operator_id,
+                "reviewed_at": draft.reviewed_at.isoformat() if draft.reviewed_at else None,
+                "prompt_version": draft.prompt_version,
+            }
+            if draft is not None
+            else None
+        ),
+    }
+    row.status = "sending"
+    row.attempt_started_at = now
+    row.content_sha256 = content_hash
+    row.destination_sha256 = destination_hash
+    row.authorization_snapshot = authorization
+    attempt = DeliveryAttempt(
+        outbox_id=row.id,
+        attempt_no=row.attempts,
+        channel="email",
+        content_sha256=content_hash,
+        destination_sha256=destination_hash,
+        destination_account_id=sender or provider_name,
+        target_reference=f"app_user:{user_id}" if isinstance(user_id, int) else None,
+        assessment_version_ids=version_ids,
+        authorization_snapshot=authorization,
+        status="prepared",
+        dedupe_key=f"email-outbox:{row.id}:attempt:{row.attempts}",
+        attempted_at=now,
+    )
+    session.add(attempt)
+    session.commit()  # persist the no-retry fence before the provider side effect
+    attempt_id = attempt.id
+
+    # Re-render against current consent, evidence and recipient immediately before dispatch.
+    current_row = session.scalar(
+        select(Outbox).where(Outbox.id == row_id).execution_options(populate_existing=True)
+    )
+    try:
+        current_message = (
+            _build_message(session, current_row, now) if current_row is not None else None
+        )
+    except Exception as exc:
+        current_message = None
+        preflight_error: str | None = f"{type(exc).__name__}: {exc}"
+    else:
+        preflight_error = None
+    if current_row is None or current_row.status != "sending" or current_message is None:
+        _finish_attempt(
+            session,
+            row_id,
+            attempt_id,
+            "dead",
+            now,
+            attempt_status="cancelled",
+            error=(
+                preflight_error
+                or "Current consent, evidence, or recipient no longer authorizes this send."
+            ),
+        )
+        result.dead += 1
+        return
+    if _message_hash(current_message) != content_hash:
+        _finish_attempt(
+            session,
+            row_id,
+            attempt_id,
+            "dead",
+            now,
+            attempt_status="cancelled",
+            error="Rendered content or recipient changed after authorization; review again.",
+        )
+        result.dead += 1
+        return
+    session.commit()
+
+    try:
+        with fenced_effect():
+            receipt = provider.send(current_message)
+        if not receipt or not receipt.strip():
+            raise EmailSendError(
+                "provider returned no message id; outcome uncertain",
+                retryable=False,
+                outcome_unknown=True,
+            )
+    except EmailSendError as exc:
+        _finish_email_error(session, row_id, attempt_id, exc, now, result)
+        return
+    except Exception as exc:
+        log.exception("outbox row %s failed without a definitive provider outcome", row_id)
+        _finish_email_error(
+            session,
+            row_id,
+            attempt_id,
+            EmailSendError(f"{type(exc).__name__}: {exc}", retryable=False, outcome_unknown=True),
+            now,
+            result,
+        )
+        return
+
+    simulated = bool(getattr(provider, "simulated", False))
+    finished = _finish_attempt(
+        session,
+        row_id,
+        attempt_id,
+        "simulated" if simulated else "sent",
+        now,
+        receipt=receipt,
+    )
+    if not finished:
+        result.unknown += 1
+        return
+    if simulated:
+        result.simulated += 1
+    else:
+        result.sent += 1
+
+
+def _message_hash(message: EmailMessage) -> str:
+    exact_message = {
+        "to": message.to,
+        "subject": message.subject,
+        "text": message.text,
+        "html": message.html,
+        "headers": dict(sorted(message.headers.items())),
+        "idempotency_key": message.idempotency_key,
+    }
+    encoded = json.dumps(exact_message, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _assessment_version_ids(row: Outbox) -> list[int]:
+    found: set[int] = set()
+    direct = row.payload.get("assessment_version_id")
+    if isinstance(direct, int) and not isinstance(direct, bool):
+        found.add(direct)
+    for section in ("followed", "top"):
+        for item in row.payload.get(section, []):
+            value = item.get("assessment_version_id") if isinstance(item, dict) else None
+            if isinstance(value, int) and not isinstance(value, bool):
+                found.add(value)
+    return sorted(found)
+
+
+def _finish_attempt(
+    session: Session,
+    row_id: int,
+    attempt_id: int,
+    status: str,
+    now: datetime,
+    *,
+    attempt_status: str | None = None,
+    receipt: str | None = None,
+    error: str | None = None,
+    next_attempt_at: datetime | None = None,
+) -> bool:
+    row = session.scalar(select(Outbox).where(Outbox.id == row_id).with_for_update())
+    attempt = session.scalar(
+        select(DeliveryAttempt).where(DeliveryAttempt.id == attempt_id).with_for_update()
+    )
+    if row is None or attempt is None:
+        session.rollback()
+        return False
+    active_attempt = row.status == "sending" and attempt.status == "prepared"
+    late_resolution = (
+        row.status == "outcome_unknown"
+        and attempt.status == "outcome_unknown"
+        and status in {"sent", "simulated", "failed", "dead", "outcome_unknown"}
+    )
+    if not active_attempt and not late_resolution:
+        session.rollback()
+        return False
+    row.status = status
+    row.provider_message_id = receipt
+    row.last_error = error[:500] if error else None
+    if next_attempt_at is not None:
+        row.next_attempt_at = next_attempt_at
+    attempt.status = attempt_status or ("rejected" if status in ("failed", "dead") else status)
+    attempt.provider_receipt_id = receipt
+    attempt.completed_at = now
+    attempt.outcome_detail = error[:500] if error else None
+    if status in ("sent", "simulated", "dead", "outcome_unknown", "cancelled"):
+        _scrub(row)
+    session.commit()
+    return True
+
+
+def _finish_email_error(
+    session: Session,
+    row_id: int,
+    attempt_id: int,
+    error: EmailSendError,
+    now: datetime,
+    result: DispatchResult,
+) -> None:
+    row = session.get(Outbox, row_id)
+    if row is None:
+        session.rollback()
+        return
+    message = str(error)[:500]
+    if error.outcome_unknown:
+        _finish_attempt(session, row_id, attempt_id, "outcome_unknown", now, error=message)
+        result.unknown += 1
+    elif error.retryable and row.attempts < MAX_ATTEMPTS:
+        finished = _finish_attempt(
+            session,
+            row_id,
+            attempt_id,
+            "failed",
+            now,
+            error=message,
+            next_attempt_at=now + timedelta(seconds=backoff_seconds(row.attempts)),
+        )
+        if finished:
+            result.retried += 1
+        else:
+            result.unknown += 1
+    else:
+        finished = _finish_attempt(session, row_id, attempt_id, "dead", now, error=message)
+        if finished:
+            result.dead += 1
+        else:
+            result.unknown += 1
 
 
 def _record_failure(

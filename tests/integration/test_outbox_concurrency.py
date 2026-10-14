@@ -45,7 +45,7 @@ def test_concurrent_dispatch_does_not_send_prefetched_row_twice(engine: Engine) 
                     assert (
                         dispatch_pending(
                             competitor, other, now + timedelta(seconds=1), limit=1
-                        ).sent
+                        ).simulated
                         == 0
                     )
             return super().send(message)
@@ -53,7 +53,7 @@ def test_concurrent_dispatch_does_not_send_prefetched_row_twice(engine: Engine) 
     provider = RacingProvider()
     try:
         with factory() as session:
-            assert dispatch_pending(session, provider, now + timedelta(seconds=1)).sent == 2
+            assert dispatch_pending(session, provider, now + timedelta(seconds=1)).simulated == 2
         assert len(provider.sent) == 2 and other.sent == []
     finally:
         with factory() as session:

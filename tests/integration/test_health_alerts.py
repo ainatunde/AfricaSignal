@@ -10,11 +10,21 @@ import pytest
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from africasignal import backup_alerts, health_alerts, settings_store
+from africasignal import backup_alerts, health_alerts, settings_store, storage
 from africasignal.jobs import handlers
 from africasignal.jobs.handlers import JobContext
 from africasignal.jobs.queue import ClaimedJob
-from africasignal.models import AuditLog, Job, LlmCall, Setting, Source
+from africasignal.models import (
+    AuditLog,
+    GuardianRepairAttempt,
+    Job,
+    LlmCall,
+    Outbox,
+    Series,
+    Setting,
+    Source,
+    SourcePermission,
+)
 from tests.integration.test_admin_console import make_operator
 
 NOW = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
@@ -171,3 +181,221 @@ def test_the_job_runs_the_check_and_the_scheduler_queues_it(session: Session) ->
     handler(JobContext(session=session, job=job, worker_id="test"))
     found = row(session, health_alerts.SOURCES_FAILING)
     assert found is not None and found["state"] == "open"
+
+
+def test_scheduler_stall_and_oldest_due_job_open_then_resolve_incidents(session: Session) -> None:
+    session.add(
+        Setting(
+            key=health_alerts.SCHEDULER_TICK_KEY,
+            value={"last_tick_at": (NOW - timedelta(minutes=7)).isoformat()},
+        )
+    )
+    stalled = Job(
+        kind="fetch_source",
+        payload={"source_id": 1},
+        status="queued",
+        created_at=NOW - timedelta(minutes=8),
+        run_at=NOW - timedelta(minutes=8),
+    )
+    session.add(stalled)
+    session.flush()
+
+    opened = health_alerts.check(session, NOW)
+
+    assert opened.opened == [health_alerts.SCHEDULER_STALLED, health_alerts.QUEUE_LAG]
+    assert row(session, health_alerts.QUEUE_LAG)["detail"]["job_id"] == stalled.id  # type: ignore[index]
+
+    session.get(Setting, health_alerts.SCHEDULER_TICK_KEY).value = {  # type: ignore[union-attr]
+        "last_tick_at": NOW.isoformat()
+    }
+    stalled.status = "running"
+    session.flush()
+    resolved = health_alerts.check(session, NOW + timedelta(minutes=1))
+    assert resolved.resolved == [health_alerts.SCHEDULER_STALLED, health_alerts.QUEUE_LAG]
+
+
+def test_monthly_series_without_reference_data_opens_a_freshness_incident(
+    session: Session,
+) -> None:
+    source_row = source(session, "monthly-source", "healthy")
+    session.add(
+        Series(
+            item_code="pms_litre",
+            topic="energy",
+            source_id=source_row.id,
+            unit="NGN/litre",
+            currency="NGN",
+            frequency="monthly",
+        )
+    )
+    session.flush()
+
+    result = health_alerts.check(session, NOW)
+
+    assert result.opened == [health_alerts.SERIES_REFERENCE_STALE]
+    found = row(session, health_alerts.SERIES_REFERENCE_STALE)
+    assert found is not None
+    assert found["detail"]["series"][0]["latest_period_end"] is None  # type: ignore[index]
+
+
+def test_due_email_backlog_opens_a_delivery_lag_incident(session: Session) -> None:
+    session.add(
+        Outbox(
+            kind="email_digest",
+            payload={"user_id": 1},
+            dedupe_key="health-alert-delivery-lag",
+            status="pending",
+            created_at=NOW - timedelta(minutes=15),
+            next_attempt_at=NOW - timedelta(minutes=12),
+        )
+    )
+    session.flush()
+
+    result = health_alerts.check(session, NOW)
+
+    assert result.opened == [health_alerts.DELIVERY_LAG]
+
+
+def test_unknown_email_outcome_opens_a_reconciliation_incident(session: Session) -> None:
+    session.add(
+        Outbox(
+            kind="email_digest",
+            payload={"user_id": 1},
+            dedupe_key="health-alert-email-unknown",
+            status="outcome_unknown",
+            attempt_started_at=NOW - timedelta(minutes=6),
+        )
+    )
+    session.flush()
+
+    result = health_alerts.check(session, NOW)
+
+    assert result.opened == [health_alerts.EMAIL_OUTCOME_UNKNOWN]
+    found = row(session, health_alerts.EMAIL_OUTCOME_UNKNOWN)
+    assert found is not None
+    assert "do not blindly retry" in found["summary"]
+
+
+def test_storage_probe_records_a_safe_incident_and_resolves_on_recovery(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(storage, "probe_storage", lambda _session: None)
+    healthy = health_alerts.check_storage_probe(session, NOW)
+    assert healthy["available"] is True
+    assert health_alerts.check(session, NOW).opened == []
+
+    def unavailable(_session: Session) -> None:
+        raise PermissionError("secret endpoint response must not be recorded")
+
+    monkeypatch.setattr(storage, "probe_storage", unavailable)
+    failed = health_alerts.check_storage_probe(session, NOW + timedelta(minutes=5))
+    assert failed["error_type"] == "PermissionError"
+    assert "secret endpoint" not in str(failed)
+    assert health_alerts.check(session, NOW + timedelta(minutes=5)).opened == [
+        health_alerts.STORAGE_UNAVAILABLE
+    ]
+
+    monkeypatch.setattr(storage, "probe_storage", lambda _session: None)
+    health_alerts.check_storage_probe(session, NOW + timedelta(minutes=10))
+    assert health_alerts.check(session, NOW + timedelta(minutes=10)).resolved == [
+        health_alerts.STORAGE_UNAVAILABLE
+    ]
+
+
+def test_guardian_schedules_one_delayed_retry_for_permitted_transient_fetch_failure(
+    session: Session,
+) -> None:
+    source_row = source(session, "recoverable", "failing")
+    source_row.created_at = NOW - timedelta(days=2)
+    session.add(
+        SourcePermission(
+            source_id=source_row.id,
+            version=1,
+            may_collect=True,
+            may_store_full_text=False,
+            may_republish_numbers=False,
+            terms_url="https://example.test/terms",
+            rights_basis="approved collection access",
+            approved_at=NOW - timedelta(days=2),
+        )
+    )
+    failed = Job(
+        kind="fetch_source",
+        payload={"source_id": source_row.id},
+        status="dead",
+        attempts=5,
+        max_attempts=5,
+        last_error="FeedError: Request timed out: connection deadline",
+        created_at=NOW - timedelta(hours=1),
+        finished_at=NOW - timedelta(minutes=10),
+    )
+    session.add(failed)
+    session.flush()
+
+    from africasignal.guardian.remediation import check_and_repair
+
+    assert check_and_repair(session, NOW) == 1
+    attempt = session.scalar(select(GuardianRepairAttempt))
+    assert attempt is not None and attempt.state == "queued"
+    retry = session.get(Job, attempt.retry_job_id)
+    assert retry is not None
+    assert retry.kind == "fetch_source" and retry.payload == {"source_id": source_row.id}
+    assert retry.run_at == NOW + timedelta(minutes=15)
+    assert retry.max_attempts == 1
+    assert check_and_repair(session, NOW + timedelta(minutes=1)) == 0
+    assert len(list(session.scalars(select(GuardianRepairAttempt)))) == 1
+
+
+def test_guardian_does_not_repair_denied_or_nontransient_collection_failures(
+    session: Session,
+) -> None:
+    denied = source(session, "denied", "failing")
+    denied.created_at = NOW - timedelta(days=2)
+    session.add(
+        SourcePermission(
+            source_id=denied.id,
+            version=1,
+            may_collect=False,
+            may_store_full_text=False,
+            may_republish_numbers=False,
+            terms_url="https://example.test/terms",
+            rights_basis="approved restriction",
+            approved_at=NOW - timedelta(days=2),
+        )
+    )
+    parser = source(session, "parser-failure", "failing")
+    parser.created_at = NOW - timedelta(days=2)
+    session.add(
+        SourcePermission(
+            source_id=parser.id,
+            version=1,
+            may_collect=True,
+            may_store_full_text=False,
+            may_republish_numbers=False,
+            terms_url="https://example.test/terms",
+            rights_basis="approved collection access",
+            approved_at=NOW - timedelta(days=2),
+        )
+    )
+    for source_row, error in (
+        (denied, "FeedError: Request timed out: connection deadline"),
+        (parser, "FeedError: the response is not an RSS or Atom feed"),
+    ):
+        session.add(
+            Job(
+                kind="fetch_source",
+                payload={"source_id": source_row.id},
+                status="dead",
+                attempts=5,
+                max_attempts=5,
+                last_error=error,
+                created_at=NOW - timedelta(hours=1),
+                finished_at=NOW - timedelta(minutes=10),
+            )
+        )
+    session.flush()
+
+    from africasignal.guardian.remediation import check_and_repair
+
+    assert check_and_repair(session, NOW) == 0
+    assert session.scalar(select(GuardianRepairAttempt.id)) is None

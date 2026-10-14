@@ -1,0 +1,48 @@
+{% extends "admin/base.html" %}
+{% block title %}Delivered item corrections{% endblock %}
+{% block content %}
+<h1>Delivered item corrections</h1>
+<p>When source evidence or reuse permission changes, this ledger identifies previously accepted deliveries that may need follow-up. It never sends a correction automatically. “Fulfilled” requires a confirmed receipt for the same channel and recipient or account, tied to the current eligible assessment. Provider acceptance does not prove that a recipient read an email.</p>
+
+{% for row in rows %}
+<section class="card" style="margin-bottom:1rem">
+  <h2>{{ row.situation.title or row.situation.slug }} · {{ row.original.channel }} · {{ row.work.state }}</h2>
+  <p><strong>Reason:</strong> {{ row.work.reason_code }} — {{ row.work.reason_detail }}</p>
+  <p><strong>Prior assessment:</strong> v{{ row.invalidated_version.version }} · {{ row.invalidated_version.headline }}</p>
+  <p><strong>Original receipt:</strong> {{ row.original.provider_receipt_id or 'not available' }} · target {{ row.original.target_reference or 'account publication' }} · content hash {{ row.original.content_sha256 }}</p>
+  <p><strong>Current page:</strong> <a href="/s/{{ row.situation.slug }}">{{ row.situation.slug }}</a>{% if row.current_version %} · v{{ row.current_version.version }} · {{ row.current_version.headline }}{% else %} · no current published version{% endif %}</p>
+  {% if row.original.channel == 'x' and row.original.provider_receipt_id and row.original.provider_receipt_id.isdigit() %}
+  <p><a href="https://x.com/i/status/{{ row.original.provider_receipt_id }}" rel="noreferrer">Open original X post or reply</a></p>
+  {% endif %}
+  {% if row.work.state == 'pending_review' %}
+  <form method="post" action="/admin/delivery-corrections/{{ row.work.id }}/review" class="stack">
+    <label>Review note
+      <textarea name="reason" required maxlength="500" rows="2"></textarea>
+    </label>
+    {% if row.follow_ups %}
+    <label>Confirmed follow-up receipt
+      <select name="follow_up_attempt_id">
+        <option value="">Choose a receipt</option>
+        {% for attempt in row.follow_ups %}
+        <option value="{{ attempt.id }}">Attempt {{ attempt.id }} · {{ attempt.provider_receipt_id }} · {{ attempt.completed_at|when }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button name="decision" value="fulfilled">Mark fulfilled</button>
+    {% else %}
+    <p class="muted">No matching confirmed follow-up receipt is available yet.</p>
+    {% endif %}
+    <button name="decision" value="blocked">Mark blocked</button>
+    <button name="decision" value="dismissed">Dismiss with reason</button>
+  </form>
+  {% else %}
+  <p><strong>Reviewed:</strong> {{ row.work.reviewed_at|when }} · {{ row.work.operator_note or '—' }}</p>
+  {% if row.work.follow_up_delivery_attempt_id %}
+  <p><strong>Follow-up:</strong> receipt attempt {{ row.work.follow_up_delivery_attempt_id }} · replacement assessment v{{ row.work.replacement_assessment_version_id }}</p>
+  {% endif %}
+  {% endif %}
+</section>
+{% else %}
+<p>No delivered item has been flagged for correction follow-up.</p>
+{% endfor %}
+{% endblock %}

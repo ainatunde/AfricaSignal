@@ -13,9 +13,11 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from africasignal.db import get_engine
+from africasignal.health_alerts import SCHEDULER_TICK_KEY
 from africasignal.jobs import handlers as handler_registry
 from africasignal.jobs import queue
 from africasignal.jobs.log import configure_logging
+from africasignal.models import Setting
 from africasignal.ops_heartbeat import ProcessHeartbeat
 from africasignal.publish.recovery import require_recovery_complete
 from africasignal.settings_store import get, get_int
@@ -45,6 +47,12 @@ def _enqueue_if_handled(
 def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
     """One scheduler pass. The caller commits. Returns counts, for logging and tests."""
     now = now or datetime.now(UTC)
+    tick_record = session.get(Setting, SCHEDULER_TICK_KEY)
+    if tick_record is None:
+        session.add(Setting(key=SCHEDULER_TICK_KEY, value={"last_tick_at": now.isoformat()}))
+    else:
+        tick_record.value = {"last_tick_at": now.isoformat()}
+        tick_record.updated_at = now
     counts = {"fetch_source": 0, "reclaimed": 0, "periodic": 0}
 
     # 1. Sources that are due. Missed runs collapse into one job through the dedupe key.
@@ -75,6 +83,8 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
         ("explain_backfill", f"explain_backfill:{_slot(now, 60)}"),  # AS-028
         ("dispatch_outbox", f"dispatch_outbox:{_slot(now, 1)}"),
         ("dispatch_social_publication", f"dispatch_social_publication:{_slot(now, 1)}"),
+        ("social_reply_dispatch", f"social_reply_dispatch:{_slot(now, 1)}"),
+        ("social_mention_expire", f"social_mention_expire:{_slot(now, 24 * 60)}"),
         ("social_listen_expire", f"social_listen_expire:{_slot(now, 24 * 60)}"),
         ("prune_events", f"prune_events:{_slot(now, 24 * 60)}"),  # retention: 13 months
         ("archive_operations", f"archive_operations:{_slot(now, 1)}"),
@@ -88,7 +98,12 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
             f"external_agent_expire:{_slot(now, 24 * 60)}",
         ),  # task output retention and deadline cancellation
         ("check_backups", f"check_backups:{_slot(now, 60)}"),  # stale backup, failed drill alerts
-        ("check_health", f"check_health:{_slot(now, 15)}"),  # failing sources, dead jobs, budget
+        ("check_health", f"check_health:{_slot(now, 1)}"),  # Guardian checks, every minute
+        ("check_storage", f"check_storage:{_slot(now, 5)}"),  # bounded read-only bucket probe
+        (
+            "refresh_insight_candidates",
+            f"refresh_insight_candidates:{_slot(now, 15)}",
+        ),  # private deterministic selection
     ]
     if get(session, "x_listening_enabled") == "yes":
         listen_minutes = get_int(session, "x_listening_poll_minutes") or 360
@@ -102,6 +117,8 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
         ).first()
         if due_query is not None:
             periodic.append(("social_listen_poll", f"social_listen_poll:{_slot(now, 1)}"))
+    if get(session, "x_replies_enabled") == "yes":
+        periodic.append(("social_mention_poll", f"social_mention_poll:{_slot(now, 1)}"))
 
     # 4. Weekly digest: the operator-configured weekday/hour in Africa/Lagos.
     lagos = now.astimezone(LAGOS)

@@ -117,9 +117,9 @@ def test_unconfigured_mail_stays_pending_and_nothing_is_dropped(
     )
     email_module.set_provider(FakeProvider())
     result = dispatch_with_configured_provider(session, NOW)
-    assert result is not None and result.sent == 1
+    assert result is not None and result.simulated == 1
     session.refresh(row)
-    assert row.status == "sent"
+    assert row.status == "simulated"
 
 
 # --- the public address -------------------------------------------------------------------------
@@ -183,7 +183,7 @@ def test_emails_built_at_send_time_use_the_current_address(
     )
     save(session, operator, public_base_url=ADDRESS)  # saved after the emails were queued
     provider = FakeProvider()
-    assert dispatch_pending(session, provider, NOW).sent == 2
+    assert dispatch_pending(session, provider, NOW).simulated == 2
     for message in provider.sent:
         links = [w for w in message.text.split() if w.startswith("http")]
         assert links and all(urlparse(link).netloc == "africasignal.example" for link in links)

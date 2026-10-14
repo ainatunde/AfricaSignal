@@ -80,6 +80,8 @@ class AssessmentVersion(CreatedMixin, Base):
     headline: Mapped[str] = mapped_column(Text, nullable=False)
     facts: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, server_default="[]")
     explanation: Mapped[str | None] = mapped_column(Text)
+    explanation_assertions: Mapped[list[Any] | None] = mapped_column(JSONB)
+    publication_eligibility: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     possible_factors: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, server_default="[]")
     unknowns: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, server_default="[]")
     scope_label: Mapped[str] = mapped_column(Text, nullable=False)

@@ -32,6 +32,36 @@ class ObjectStore(Protocol):
     def delete(self, key: str) -> None: ...
 
 
+class StorageNotConfigured(RuntimeError):
+    """Raised by the read-only availability probe when no evidence bucket is configured."""
+
+
+def probe_storage(session: Session) -> None:
+    """Check evidence-bucket availability with a bounded, read-only S3 HEAD request.
+
+    A separate client keeps the short probe timeout from changing upload/download timeouts for
+    normal application work. No test object is written and no bucket is created.
+    """
+    config = storage_config(session)
+    if not (config.bucket and config.access_key_id and config.secret_access_key):
+        raise StorageNotConfigured("object storage is not configured")
+    client = boto3.client(
+        "s3",
+        endpoint_url=config.endpoint_url or None,
+        aws_access_key_id=config.access_key_id,
+        aws_secret_access_key=config.secret_access_key,
+        region_name="auto",
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+            connect_timeout=2,
+            read_timeout=3,
+            retries={"max_attempts": 0},
+        ),
+    )
+    client.head_bucket(Bucket=config.bucket)
+
+
 def evidence_key(sha256: str, extension: str) -> str:
     """``evidence/<aa>/<bb>/<sha256>.<ext>``: the object key for a captured document."""
     if len(sha256) != 64 or any(c not in "0123456789abcdef" for c in sha256):

@@ -3,7 +3,69 @@
 {% block content %}
 <h1>Editorial insight drafts</h1>
 <p>New assessments can prompt a private AI draft when draft-only synthesis is enabled in Language model settings. Every draft stays attached to the assessment version and its evidence. Approval records an editor's review only. A separate ‘approve and queue email’ action sends to verified followers who opted into reviewed insight emails; it does not publish or post to X.</p>
+<h2>Evidence-linked insight candidates</h2>
+<p>These private opportunities are selected deterministically from current eligible assessments. Comparison packets require the same topic, exact place, month-on-month measure, unit, and period. A candidate’s selection is an editorial choice only; it does not approve, email, publish, or post anything.</p>
+<p>Human review sample: {{ candidate_quality.reviewed }} rated · {% if candidate_quality.useful_and_scoped_pct is not none %}{{ candidate_quality.useful_and_scoped_pct }}%{% else %}not measured{% endif %} rated useful (4–5/5) and correctly scoped · {{ candidate_quality.unsupported_critical }} critical unsupported assertions. The proposed target is at least 90% useful and correctly scoped with zero critical unsupported assertions; this live review sample is not a held-out evaluation.</p>
 {% if error %}<p class="error" role="alert" tabindex="-1">{{ error }}</p>{% endif %}
+{% if candidates %}
+{% for candidate in candidates %}
+<details {% if candidate.status == 'pending_review' %}open{% endif %}>
+  <summary>{{ candidate.candidate_type|replace('_', ' ')|title }} · {{ candidate.status|replace('_', ' ')|title }} · {{ candidate.created_at|when }}</summary>
+  <p><strong>Selection reasons:</strong> {{ candidate.reason_codes|join(', ') }}{% if candidate.stale_reason %} · {{ candidate.stale_reason }}{% endif %}</p>
+  {% set brief = candidate.packet.get('brief', {}) %}
+  {% if candidate.candidate_type == 'material_change' %}
+  <h3>{{ brief.get('what_changed', 'Material change') }}</h3>
+  <p><strong>Scope and period:</strong> {{ brief.get('affected_scope') }} · {{ brief.get('baseline') }}</p>
+  <p><strong>Assessment headline:</strong> {{ brief.get('assessment_headline') }}</p>
+  {% if brief.get('source_reported_explanations') %}<h4>Source-reported explanations</h4><ul>{% for assertion in brief.get('source_reported_explanations', []) %}<li>{{ assertion.get('text', assertion) }}</li>{% endfor %}</ul>{% endif %}
+  {% elif candidate.candidate_type == 'multi_series_comparison' %}
+  <h3>Comparable price changes differ by {{ brief.get('difference_percentage_points') }} percentage points</h3>
+  <p>{{ brief.get('comparison_rule') }} {{ brief.get('interpretation_limit') }}</p>
+  <ul>{% for item in brief.get('comparison', []) %}<li>{{ item.get('item') }}: {{ item.get('value') }}{{ item.get('unit') }}</li>{% endfor %}</ul>
+  {% elif candidate.candidate_type == 'persistent_trend' %}
+  <h3>Two consecutive monthly {{ brief.get('direction') }} in {{ brief.get('scope') }}</h3>
+  <ul>{% for point in brief.get('trend', []) %}<li>{{ point.get('period') }}: {{ point.get('value') }}{{ point.get('unit') }}</li>{% endfor %}</ul>
+  <p>{{ brief.get('interpretation_limit') }}</p>
+  {% else %}
+  <h3>Evidence disagreement · {{ brief.get('scope') }} · {{ brief.get('period') }}</h3>
+  <p>{{ brief.get('measurement_or_policy_position') }} {{ brief.get('interpretation_limit') }}</p>
+  {% for fact in brief.get('what_disagrees', []) %}<p>{{ fact.get('label') }}: {{ fact.get('value') }} {{ fact.get('unit') }}</p>{% endfor %}
+  {% endif %}
+  {% for assessment in candidate.packet.get('assessments', []) %}
+  <h4>{{ assessment.get('situation_title') }} · {{ assessment.get('scope') }} · {{ assessment.get('period') }}</h4>
+  <p>{{ assessment.get('evidence_state')|title }} · severity {{ assessment.get('severity') }} · checked {{ assessment.get('freshness', {}).get('last_checked_at') or 'unknown' }}</p>
+  <ul>{% for fact in assessment.get('facts', []) %}<li>{{ fact.get('label') }}: {{ fact.get('value') }} {{ fact.get('unit') }} · {{ fact.get('period') }} · evidence IDs {{ fact.get('evidence_ids', [])|join(', ') }}</li>{% endfor %}</ul>
+  <ul>{% for unknown in assessment.get('unknowns', []) %}<li>{{ unknown }}</li>{% endfor %}</ul>
+  {% endfor %}
+  <h4>Sources and evidence dates</h4>
+  {% for source in candidate.packet.get('source_coverage', []) %}<p>{{ source.get('source') }} · permission version {{ source.get('permission_versions') or source.get('permission_version') }} · published {{ source.get('published_dates', [])|join(', ') or 'date not recorded' }} · retrieved {{ source.get('retrieved_dates', [])|join(', ') }}</p>
+    <ul>{% for link in source.get('document_links', []) %}<li><a href="{{ link.get('url') }}" target="_blank" rel="noopener noreferrer">{{ link.get('title') or ('Evidence document ' ~ link.get('document_id')) }}</a></li>{% endfor %}</ul>
+  {% endfor %}
+  {% if candidate.status == 'pending_review' %}
+  <form method="post" action="/admin/insight-candidates/{{ candidate.id }}/review">
+    <label for="candidate-usefulness-{{ candidate.id }}">Usefulness (1 = not useful, 5 = very useful)</label>
+    <select id="candidate-usefulness-{{ candidate.id }}" name="usefulness_rating" required>
+      <option value="">Choose a rating</option>
+      {% for rating in range(1, 6) %}<option value="{{ rating }}">{{ rating }}</option>{% endfor %}
+    </select>
+    <label for="candidate-scope-{{ candidate.id }}">Is the scope correctly described?</label>
+    <select id="candidate-scope-{{ candidate.id }}" name="scope_correct" required>
+      <option value="">Choose yes or no</option><option value="true">Yes</option><option value="false">No</option>
+    </select>
+    <label for="candidate-critical-{{ candidate.id }}">Does it contain an unsupported critical assertion?</label>
+    <select id="candidate-critical-{{ candidate.id }}" name="unsupported_critical" required>
+      <option value="">Choose yes or no</option><option value="false">No</option><option value="true">Yes</option>
+    </select>
+    <label for="candidate-reason-{{ candidate.id }}">Review reason (required for audit)</label>
+    <input id="candidate-reason-{{ candidate.id }}" type="text" name="reason" minlength="8" maxlength="200" required>
+    <button type="submit" name="decision" value="selected">Select for editorial use</button>
+    <button type="submit" name="decision" value="rejected">Reject candidate</button>
+  </form>
+  {% endif %}
+</details>
+{% endfor %}
+{% else %}<p>No current eligible opportunities have been selected yet. The deterministic selector runs every 15 minutes.</p>{% endif %}
+<h2>Model-generated editorial drafts</h2>
 {% if drafts %}
 {% for draft, version, situation in drafts %}
 {% set current = version.status == 'published' and situation.current_version_id == version.id and (version.valid_until is none or version.valid_until > now) %}

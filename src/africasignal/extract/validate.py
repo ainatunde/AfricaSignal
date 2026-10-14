@@ -35,6 +35,9 @@ FUTURE_DATE = "future_date"
 UNKNOWN_ITEM_CODE = "unknown_item_code"
 UNKNOWN_POLICY_SERIES = "unknown_policy_series"
 INVALID_FIELD = "invalid_field"
+UNIT_MISMATCH = "unit_mismatch"
+UNIT_NOT_IN_PASSAGE = "unit_not_in_passage"
+DIRECTION_MISMATCH = "direction_mismatch"
 
 CLAIM_TYPES = ("price_statement", "policy_statement", "other")
 DIRECTIONS = ("up", "down", "unchanged", "unknown")
@@ -57,6 +60,28 @@ _FUTURE = re.compile(
     r"\b(will|shall|would|is expected to|are expected to|expected to|plans? to|planning to|"
     r"set to|scheduled|to take effect|takes? effect|from next|next (?:week|month|year)|"
     r"effective (?:from|on))\b",
+    re.IGNORECASE,
+)
+_DIRECTION_CUES = {
+    "up": re.compile(
+        r"\b(?:rose|rise[ns]?|rising|increas(?:e|ed|es|ing)|went up|up from|up by|"
+        r"higher|surged?|jumped?|climbed?|gained?)\b",
+        re.IGNORECASE,
+    ),
+    "down": re.compile(
+        r"\b(?:fell|fall(?:s|ing)?|decreas(?:e|ed|es|ing)|dropped?|declin(?:e|ed|es|ing)|"
+        r"went down|down from|down by|lower|reduced?|cut)\b",
+        re.IGNORECASE,
+    ),
+    "unchanged": re.compile(
+        r"\b(?:unchanged|remained the same|stayed the same|no change|no increase|no decrease)\b",
+        re.IGNORECASE,
+    ),
+}
+_NEGATED_CUE = re.compile(
+    r"\b(?:not|never|didn't|doesn't|don't|hasn't|haven't|hadn't|did not|does not|"
+    r"do not|has not|have not|had not|no longer|cannot|can't|without)"
+    r"(?:\s+\w+){0,2}\s*$",
     re.IGNORECASE,
 )
 
@@ -89,6 +114,155 @@ def numbers_in(text: str) -> set[Decimal]:
 
 def number_in_passage(value: Decimal, passage: str) -> bool:
     return value in numbers_in(passage)
+
+
+def _unit_dimension(unit: str) -> str | None:
+    """Map the units used in the item and policy catalogues to comparable dimensions."""
+    value = unit.casefold().replace(",", ".")
+    if re.search(r"(?<!\d)12\.5\s*(?:kg|kilograms?)\b", value):
+        return "12.5kg"
+    if re.search(r"(?<!\d)5\s*(?:kg|kilograms?)\b", value):
+        return "5kg"
+    if re.search(r"\b(?:kwh|kilowatt[- ]?hours?)\b", value):
+        return "kwh"
+    if re.search(r"%|\bpercent(?:age)?\b", value):
+        return "percent"
+    if re.search(r"\b(?:kg|kilograms?)\b", value):
+        return "kg"
+    if re.search(r"\b(?:litres?|liters?)\b|\bper\s+l\b", value):
+        return "litre"
+    if re.search(r"\b(?:tonnes?|tons?)\b", value):
+        return "tonne"
+    return None
+
+
+def _unit_currency(unit: str) -> str | None:
+    prefix = re.split(r"[/\s]", unit.strip(), maxsplit=1)[0].upper()
+    if prefix in {"NGN", "USD", "GHS", "KES", "EUR", "GBP"}:
+        return prefix
+    if "₦" in unit:
+        return "NGN"
+    if "$" in unit:
+        return "USD"
+    return None
+
+
+def _unit_appears_with_value(value: Decimal, unit: str, passage: str) -> bool:
+    """Require the selected quantity and its unit to occur close together in the quote."""
+    dimension = _unit_dimension(unit)
+    if dimension is None:
+        return False
+    for match in _NUMBER.finditer(passage):
+        raw_value = Decimal(match["int"].replace(",", "") + (match["frac"] or ""))
+        possibilities = {raw_value}
+        if match["scale"]:
+            possibilities.add(raw_value * _SCALES[match["scale"].lower()])
+        if value not in possibilities:
+            continue
+        nearby = passage[max(0, match.start() - 20) : min(len(passage), match.end() + 45)]
+        if _unit_dimension(nearby) == dimension:
+            return True
+    return False
+
+
+def _passage_currency_conflicts(
+    value: Decimal, expected_currency: str | None, passage: str
+) -> bool:
+    if expected_currency is None:
+        return False
+    for match in _NUMBER.finditer(passage):
+        raw_value = Decimal(match["int"].replace(",", "") + (match["frac"] or ""))
+        possibilities = {raw_value}
+        if match["scale"]:
+            possibilities.add(raw_value * _SCALES[match["scale"].lower()])
+        if value not in possibilities:
+            continue
+        nearby = passage[max(0, match.start() - 12) : match.end()]
+        has_usd = bool(re.search(r"\$|\bUSD\b|\b(?:US\s+)?dollars?\b", nearby, re.IGNORECASE))
+        has_ngn = bool(re.search(r"₦|\bNGN\b|(?<!\w)N(?=\s*[\d,.])", nearby, re.IGNORECASE))
+        if expected_currency == "NGN" and has_usd and not has_ngn:
+            return True
+        if expected_currency == "USD" and has_ngn and not has_usd:
+            return True
+    return False
+
+
+def _value_has_currency(value: Decimal, expected_currency: str | None, passage: str) -> bool:
+    """Require currency to bind to the selected number, not merely another number nearby."""
+    prefixes = {
+        "NGN": r"(?:₦|\bNGN\b|(?<!\w)N)\s*$",
+        "USD": r"(?:\$|\bUSD\b|\bUS\$)\s*$",
+        "GHS": r"(?:₵|\bGHS\b)\s*$",
+        "KES": r"(?:\bKES\b)\s*$",
+        "EUR": r"(?:€|\bEUR\b)\s*$",
+        "GBP": r"(?:£|\bGBP\b)\s*$",
+    }
+    suffixes = {
+        "NGN": r"\s*(?:naira|NGN)\b",
+        "USD": r"\s*(?:US\s+)?dollars?\b",
+        "GHS": r"\s*(?:Ghanaian\s+)?cedis?\b",
+        "KES": r"\s*shillings?\b",
+        "EUR": r"\s*euros?\b",
+        "GBP": r"\s*pounds?\b",
+    }
+    pattern = prefixes.get(expected_currency or "")
+    suffix_pattern = suffixes.get(expected_currency or "")
+    if pattern is None or suffix_pattern is None:
+        return True
+    for match in _NUMBER.finditer(passage):
+        raw_value = Decimal(match["int"].replace(",", "") + (match["frac"] or ""))
+        possibilities = {raw_value}
+        if match["scale"]:
+            possibilities.add(raw_value * _SCALES[match["scale"].lower()])
+        if value not in possibilities:
+            continue
+        prefix = passage[max(0, match.start() - 12) : match.start()]
+        suffix = passage[match.end() : min(len(passage), match.end() + 12)]
+        if re.search(pattern, prefix, re.IGNORECASE) or re.match(
+            suffix_pattern, suffix, re.IGNORECASE
+        ):
+            return True
+    return False
+
+
+def _explicit_direction(passage: str) -> str | None:
+    """Return one clearly stated direction; ambiguity is represented as unknown."""
+    found: set[str] = set()
+    for direction, pattern in _DIRECTION_CUES.items():
+        for match in pattern.finditer(passage):
+            prefix = passage[max(0, match.start() - 45) : match.start()]
+            if _NEGATED_CUE.search(prefix):
+                continue
+            found.add(direction)
+    # Numeric comparisons can contradict a nearby verb ("rose from N1,200 to N1,000").
+    # Treat that passage as ambiguous rather than letting the verb alone set a direction.
+    matches = list(_NUMBER.finditer(passage))
+    for first, second in zip(matches, matches[1:], strict=False):
+        before = passage[max(0, first.start() - 30) : first.start()]
+        between = passage[first.end() : second.start()]
+        if not re.search(r"\bfrom\b", before, re.IGNORECASE) or not re.search(
+            r"\bto\b", between, re.IGNORECASE
+        ):
+            continue
+        first_context = passage[max(0, first.start() - 10) : first.end() + 20]
+        second_context = passage[max(0, second.start() - 10) : second.end() + 20]
+        money = re.compile(r"₦|\$|\b(?:NGN|USD)\b|(?<!\w)N(?=\s*[\d,.])", re.IGNORECASE)
+        if not money.search(first_context) or not money.search(second_context):
+            continue
+        first_value = Decimal(first["int"].replace(",", "") + (first["frac"] or ""))
+        second_value = Decimal(second["int"].replace(",", "") + (second["frac"] or ""))
+        if first["scale"]:
+            first_value *= _SCALES[first["scale"].lower()]
+        if second["scale"]:
+            second_value *= _SCALES[second["scale"].lower()]
+        found.add(
+            "up"
+            if second_value > first_value
+            else "down"
+            if second_value < first_value
+            else "unchanged"
+        )
+    return next(iter(found)) if len(found) == 1 else None
 
 
 def _parse_date(raw: str | None) -> date | None:
@@ -139,10 +313,14 @@ def validate_claim(
     published_at: datetime | None,
     allowed_item_codes: set[str],
     allowed_policy_series: set[str],
+    allowed_item_units: dict[str, str] | None = None,
+    allowed_policy_units: dict[str, str] | None = None,
 ) -> ValidatedClaim:
     passage = str(raw["passage"]).strip()
     span = find_passage(document_text, passage)
     value = _stated_value(raw.get("stated_value"))
+    item_code = raw.get("item_code")
+    policy_series = raw.get("policy_series")
 
     reason: str | None = None
     occurred_from = occurred_to = None
@@ -162,10 +340,60 @@ def validate_claim(
         reason = INVALID_DATE
     elif _is_future(occurred_from, occurred_to, published_at, passage):
         reason = FUTURE_DATE
-    elif raw.get("item_code") is not None and raw["item_code"] not in allowed_item_codes:
+    elif item_code is not None and (
+        not isinstance(item_code, str) or item_code not in allowed_item_codes
+    ):
         reason = UNKNOWN_ITEM_CODE
-    elif raw.get("policy_series") is not None and raw["policy_series"] not in allowed_policy_series:
+    elif policy_series is not None and (
+        not isinstance(policy_series, str) or policy_series not in allowed_policy_series
+    ):
         reason = UNKNOWN_POLICY_SERIES
+
+    # The code's catalogue unit is authoritative. The model's free-text unit must agree with it,
+    # and the selected number must be locally attached to that unit in the quoted passage.
+    stated_unit = raw.get("stated_unit")
+    item_units = allowed_item_units
+    if item_units is None:
+        from africasignal.catalog import load_items
+
+        item_units = {item.code: item.unit for item in load_items().items}
+    policy_units = allowed_policy_units
+    if policy_units is None:
+        from africasignal.policy_series import all_series
+
+        policy_units = {series.code: series.unit for series in all_series()}
+    expected_unit = (
+        item_units.get(item_code)
+        if isinstance(item_code, str)
+        else policy_units.get(policy_series)
+        if isinstance(policy_series, str)
+        else None
+    )
+    checked_unit = expected_unit or (stated_unit if isinstance(stated_unit, str) else None)
+    if reason is None and value is not None:
+        if stated_unit is not None and not isinstance(stated_unit, str):
+            reason = UNIT_MISMATCH
+        elif (
+            expected_unit is not None
+            and stated_unit is not None
+            and (
+                _unit_dimension(stated_unit) != _unit_dimension(expected_unit)
+                or (
+                    _unit_currency(stated_unit) is not None
+                    and _unit_currency(expected_unit) is not None
+                    and _unit_currency(stated_unit) != _unit_currency(expected_unit)
+                )
+            )
+        ):
+            reason = UNIT_MISMATCH
+        elif checked_unit is None or _unit_dimension(checked_unit) is None:
+            reason = UNIT_NOT_IN_PASSAGE
+        elif not _unit_appears_with_value(value, checked_unit, passage):
+            reason = UNIT_NOT_IN_PASSAGE
+        elif not _value_has_currency(value, _unit_currency(checked_unit), passage):
+            reason = UNIT_MISMATCH
+        elif _passage_currency_conflicts(value, _unit_currency(checked_unit), passage):
+            reason = UNIT_MISMATCH
 
     claim_type = _word(raw, "claim_type", CLAIM_TYPES, "other")
     direction = _word(raw, "direction", DIRECTIONS, "unknown")
@@ -176,6 +404,18 @@ def validate_claim(
     ):
         reason = INVALID_FIELD
 
+    direction = _word(raw, "direction", DIRECTIONS, "unknown")
+    explicit_direction = _explicit_direction(passage)
+    if direction in ("up", "down", "unchanged"):
+        if explicit_direction is None:
+            # Direction is useful as corroboration only when the source says it. Keep an
+            # otherwise usable numeric claim, but do not let the model supply the trend.
+            direction = "unknown"
+        elif direction != explicit_direction:
+            direction = "unknown"
+            if reason is None:
+                reason = DIRECTION_MISMATCH
+
     return ValidatedClaim(
         claim_type=claim_type,
         text=raw["text"],
@@ -185,7 +425,7 @@ def validate_claim(
         item_code=raw.get("item_code"),
         policy_series=raw.get("policy_series"),
         stated_value=value if value is not None and value.is_finite() else None,
-        stated_unit=raw.get("stated_unit"),
+        stated_unit=expected_unit or stated_unit,
         direction=direction,
         occurred_from=occurred_from,
         occurred_to=occurred_to,
@@ -214,8 +454,18 @@ def validate_claims(
     published_at: datetime | None,
     allowed_item_codes: set[str],
     allowed_policy_series: set[str],
+    allowed_item_units: dict[str, str] | None = None,
+    allowed_policy_units: dict[str, str] | None = None,
 ) -> list[ValidatedClaim]:
     return [
-        validate_claim(r, document_text, published_at, allowed_item_codes, allowed_policy_series)
+        validate_claim(
+            r,
+            document_text,
+            published_at,
+            allowed_item_codes,
+            allowed_policy_series,
+            allowed_item_units,
+            allowed_policy_units,
+        )
         for r in raws
     ]

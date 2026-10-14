@@ -11,9 +11,11 @@ from africasignal.assess.explain import (
     MAX_WORDS,
     ExplainInput,
     clean_text,
+    explanation_schema,
     numbers_written,
     permitted_places,
     system_prompt,
+    validate_assertions,
     validate_explanation,
 )
 from africasignal.assess.retrieval import RetrievedPassage
@@ -199,6 +201,206 @@ def test_banned_words_are_allowed_only_with_exact_attributed_source_passage() ->
     assert problems(text, possible_factors=supported, retrieved_evidence=[passage]) == []
     assert problems(text, possible_factors=supported) != []
     assert problems(text, possible_factors=supported, retrieved_evidence=[]) != []
+
+
+def test_causal_attribution_cannot_reverse_a_source_negation() -> None:
+    supported = [{"factor": "Exchange rate", "status": "supported", "claim_ids": [3]}]
+    passage = RetrievedPassage(
+        claim_id=3,
+        source="NBS",
+        published="2026-09-30",
+        passage="Petrol prices were not caused by Exchange rate changes, according to NBS.",
+    )
+    output = "According to NBS, petrol prices were caused by Exchange rate changes."
+    assert problems(output, possible_factors=supported, retrieved_evidence=[passage]) != []
+
+
+def test_universal_household_impacts_need_household_level_evidence() -> None:
+    assert any(
+        "household-level evidence" in issue
+        for issue in problems("Petrol costs have made every household poorer.")
+    )
+
+
+def test_household_impact_claims_and_unreviewed_predictions_are_rejected() -> None:
+    household = validate_explanation("Rising petrol costs have made households poorer.", data())
+    prediction = validate_explanation("Petrol prices may rise next month.", data())
+    assert any("household-level evidence" in issue for issue in household)
+    assert any("predicts a future change" in issue for issue in prediction)
+
+
+def test_independence_claims_require_the_assessment_independent_report_fact() -> None:
+    statement = "Independent reports describe the price movement."
+    assert any("distinct-source evidence" in issue for issue in problems(statement))
+    independent = fact("Independent reports", 2, "independent outlets", "October 2024")
+    supported = data(facts=[*FACTS, independent])
+    typed = [
+        {
+            "text": statement,
+            "fact_refs": [f"fact_{len(FACTS) + 1}"],
+            "evidence_refs": [],
+        }
+    ]
+    text, provenance, issues = validate_assertions(typed, supported)
+    assert issues == [] and text == statement
+    assert provenance[0]["fact_refs"] == [f"fact_{len(FACTS) + 1}"]
+
+
+def test_source_reported_causality_keeps_the_source_period() -> None:
+    supported = [{"factor": "Exchange rate", "status": "supported", "claim_ids": [3]}]
+    passage = RetrievedPassage(
+        claim_id=3,
+        source="NBS",
+        published="2024-10-01",
+        passage="NBS reports that the increase was caused by the exchange rate in September 2024.",
+    )
+    text = "According to NBS, the increase was caused by the exchange rate in October 2024."
+    assert problems(
+        text,
+        possible_factors=supported,
+        retrieved_evidence=[passage],
+    )
+
+
+def test_explanation_schema_requires_typed_assertions_and_references() -> None:
+    schema = explanation_schema()
+    assert schema["required"] == ["assertions"]
+    assertion = schema["properties"]["assertions"]["items"]
+    assert assertion["required"] == ["text", "fact_refs", "evidence_refs"]
+
+
+def test_typed_assertion_is_stored_with_only_its_cited_fact() -> None:
+    raw = [
+        {
+            "text": "The current price was ₦1,080.95 per litre in October 2024.",
+            "fact_refs": ["fact_1"],
+            "evidence_refs": [],
+        }
+    ]
+    text, provenance, issues = validate_assertions(raw, data())
+    assert issues == []
+    assert text == raw[0]["text"]
+    assert provenance == [{"text": raw[0]["text"], "fact_refs": ["fact_1"], "claim_ids": []}]
+
+
+def test_numbers_must_be_supported_by_the_fact_referenced_by_the_assertion() -> None:
+    raw = [
+        {
+            "text": "The measure covered 12 states.",
+            "fact_refs": ["fact_1"],
+            "evidence_refs": [],
+        }
+    ]
+    text, provenance, issues = validate_assertions(raw, data())
+    assert text is None and provenance == []
+    assert any("number 12 is not a figure in the facts" in issue for issue in issues)
+
+
+def test_cited_numeric_values_must_keep_their_currency_and_measurement_unit() -> None:
+    wrong_unit = [
+        {
+            "text": "The current price was ₦1,080.95 per kg in October 2024.",
+            "fact_refs": ["fact_1"],
+            "evidence_refs": [],
+        }
+    ]
+    missing_currency = [
+        {
+            "text": "The current price was 1,080.95 per litre in October 2024.",
+            "fact_refs": ["fact_1"],
+            "evidence_refs": [],
+        }
+    ]
+    missing_percent = [
+        {
+            "text": "Prices rose 8.0 month-on-month.",
+            "fact_refs": ["fact_4"],
+            "evidence_refs": [],
+        }
+    ]
+    assert any(
+        "retain its litre unit" in issue for issue in validate_assertions(wrong_unit, data())[2]
+    )
+    assert any(
+        "currency marker" in issue for issue in validate_assertions(missing_currency, data())[2]
+    )
+    assert any("percent unit" in issue for issue in validate_assertions(missing_percent, data())[2])
+
+
+def test_direction_and_comparison_baseline_must_match_the_cited_change_fact() -> None:
+    correct = [
+        {
+            "text": "Prices rose 8.0% month-on-month.",
+            "fact_refs": ["fact_4"],
+            "evidence_refs": [],
+        }
+    ]
+    wrong_direction = [
+        {
+            **correct[0],
+            "text": "Prices fell 8.0% month-on-month.",
+        }
+    ]
+    missing_baseline = [{**correct[0], "text": "Prices rose 8.0%."}]
+    ungrounded_direction = [
+        {
+            "text": "Prices rose in October 2024.",
+            "fact_refs": ["fact_1"],
+            "evidence_refs": [],
+        }
+    ]
+    assert validate_assertions(correct, data())[2] == []
+    assert any(
+        "direction conflicts" in issue for issue in validate_assertions(wrong_direction, data())[2]
+    )
+    assert any(
+        "previous month" in issue for issue in validate_assertions(missing_baseline, data())[2]
+    )
+    assert any(
+        "without citing" in issue for issue in validate_assertions(ungrounded_direction, data())[2]
+    )
+
+
+def test_assertions_without_support_or_with_unknown_refs_are_rejected() -> None:
+    unsupported = [{"text": "Prices are higher.", "fact_refs": [], "evidence_refs": []}]
+    unknown = [{"text": "Prices are higher.", "fact_refs": ["fact_99"], "evidence_refs": []}]
+    assert any(
+        "needs at least one supporting" in issue
+        for issue in validate_assertions(unsupported, data())[2]
+    )
+    assert any(
+        "unknown fact references" in issue for issue in validate_assertions(unknown, data())[2]
+    )
+
+
+def test_source_reported_explanation_must_cite_the_exact_permitted_passage() -> None:
+    supported = [{"factor": "Exchange rate", "status": "supported", "claim_ids": [3]}]
+    passage = RetrievedPassage(
+        claim_id=3,
+        source="NBS",
+        published="2024-10-01",
+        passage="NBS reports that the rise was caused by the exchange rate.",
+    )
+    input_data = data(possible_factors=supported, retrieved_evidence=[passage])
+    raw = [
+        {
+            "text": "According to NBS, the rise was caused by the exchange rate.",
+            "fact_refs": [],
+            "evidence_refs": ["evidence_1"],
+        }
+    ]
+    text, provenance, issues = validate_assertions(raw, input_data)
+    assert issues == [] and text == raw[0]["text"]
+    assert provenance[0]["claim_ids"] == [3]
+
+    reversed_claim = [
+        {
+            **raw[0],
+            "text": "According to NBS, the rise was not caused by the exchange rate.",
+        }
+    ]
+    text, provenance, issues = validate_assertions(reversed_claim, input_data)
+    assert text is None and provenance == [] and issues
 
 
 def test_every_banned_word_is_in_the_prompt() -> None:

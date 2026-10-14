@@ -29,7 +29,7 @@ import logging
 import re
 import unicodedata
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 from sqlalchemy import or_, select
@@ -51,7 +51,7 @@ log = logging.getLogger("africasignal.assess.explain")
 
 PURPOSE = "explain"
 PROMPT_NAME = "explain_v3"
-PROMPT_VERSION = PROMPT_NAME
+PROMPT_VERSION = f"{PROMPT_NAME}+grounding_v3"
 MAX_WORDS = 90
 MAX_OUTPUT_TOKENS = 1_500  # the paragraph is about 130 tokens; the rest is thinking headroom
 MAX_ATTEMPTS = 2  # the first answer, then one retry with the validator's complaints
@@ -79,9 +79,16 @@ BANNED_WORDS: tuple[str, ...] = (
     "accounted for",
     "due to",
     "as a result of",
+    "result from",
+    "results from",
+    "resulted from",
+    "resulting from",
+    "result in",
+    "results in",
+    "resulted in",
+    "resulting in",
     "driven by",
     "led to",
-    "resulted in",
     "linked to",
     "associated with",
     "triggered by",
@@ -141,20 +148,27 @@ class ExplainInput:
             "headline": self.headline,
             "facts": [
                 {
+                    "fact_ref": f"fact_{index + 1}",
                     "label": f.get("label"),
                     "value": f.get("value"),
                     "unit": f.get("unit"),
                     "period": f.get("period"),
                     "source": f.get("source_label"),
                 }
-                for f in self.facts
+                for index, f in enumerate(self.facts)
             ],
             "possible_factors": [
                 {"factor": f.get("factor"), "status": f.get("status")}
                 for f in self.possible_factors
             ],
             "unknowns": list(self.unknowns),
-            "retrieved_evidence": [item.prompt_value() for item in self.retrieved_evidence],
+            "retrieved_evidence": [
+                {
+                    "evidence_ref": f"evidence_{index + 1}",
+                    **item.prompt_value(),
+                }
+                for index, item in enumerate(self.retrieved_evidence)
+            ],
         }
 
     def payload_text(self) -> str:
@@ -248,6 +262,58 @@ _ATTRIBUTION = re.compile(
     r"documents?\s+(?:say|state)|data\s+(?:from|shows?))\b",
     re.IGNORECASE,
 )
+_CAUSAL_NEGATION = re.compile(
+    r"\b(?:not|never|no|didn't|doesn't|don't|hasn't|haven't|hadn't|did not|does not|"
+    r"do not|has not|have not|had not|cannot|can't|without)"
+    r"(?:\s+\w+){0,3}\s*$",
+    re.IGNORECASE,
+)
+_NOT_ONLY = re.compile(r"\bnot\s+only(?:\s+\w+){0,2}\s*$", re.IGNORECASE)
+_UNIVERSAL_HOUSEHOLD = re.compile(
+    r"\b(?:every|all)\s+(?:single\s+)?households?\b|"
+    r"\bhouseholds?\s+(?:are|were|have|will)\s+all\b",
+    re.IGNORECASE,
+)
+_HOUSEHOLD_IMPACT = re.compile(
+    r"\bhouseholds?\b.{0,48}\b(?:poorer|richer|worse\s+off|better\s+off|struggling|"
+    r"suffer(?:ed|ing)?|burdened|harder\s+to\s+afford|unable\s+to\s+afford)\b|"
+    r"\b(?:made|left|pushed)\s+(?:many\s+|most\s+|some\s+)?households?\s+"
+    r"(?:poorer|richer|worse\s+off|better\s+off|struggling)\b",
+    re.IGNORECASE,
+)
+_PREDICTION = re.compile(
+    r"\b(?:may|might|could)\s+(?:rise|increase|fall|drop|decrease|surge|decline|"
+    r"become|worsen|improve|affect)\b|"
+    r"\b(?:is|are|was|were)\s+expected\s+to\s+"
+    r"(?:rise|increase|fall|drop|decrease|surge|decline|worsen|improve|affect)\b",
+    re.IGNORECASE,
+)
+_CORROBORATION = re.compile(
+    r"\b(?:independent(?:ly)?|corroborat(?:e|ed|es|ion)|multiple\s+(?:sources|outlets)|"
+    r"several\s+(?:sources|outlets)|both\s+(?:sources|outlets))\b",
+    re.IGNORECASE,
+)
+_MONTH_OR_YEAR = re.compile(
+    r"\b(?:january|february|march|april|may|june|july|august|september|october|november|"
+    r"december)\s+20\d{2}\b|\b20\d{2}\b",
+    re.IGNORECASE,
+)
+_DIRECTION_UP = re.compile(
+    r"\b(?:rose|rise|risen|increased|increase|up|higher|grew|gained|climbed|surged)\b",
+    re.IGNORECASE,
+)
+_DIRECTION_DOWN = re.compile(
+    r"\b(?:fell|fall|fallen|decreased|decrease|down|lower|dropped|declined|slumped)\b",
+    re.IGNORECASE,
+)
+_DIRECTION_FLAT = re.compile(r"\b(?:unchanged|flat|stable|no\s+change)\b", re.IGNORECASE)
+_MONTH_BASELINE = re.compile(
+    r"\b(?:month(?:-on-month)?|monthly|previous month|prior month)\b", re.IGNORECASE
+)
+_YEAR_BASELINE = re.compile(
+    r"\b(?:year(?:-on-year| over year)|same month last year|compared with last year)\b",
+    re.IGNORECASE,
+)
 
 
 def _sentence_containing(text: str, position: int) -> str:
@@ -282,14 +348,30 @@ def _causal_sentence_has_evidence(
     for evidence in data.retrieved_evidence:
         if evidence.claim_id not in claim_ids:
             continue
-        if not phrase_pattern.search(evidence.passage):
+        source_matches = list(phrase_pattern.finditer(evidence.passage))
+        output_matches = list(phrase_pattern.finditer(sentence))
+        if not source_matches or not output_matches:
+            continue
+        source_polarities = {_causal_negated(evidence.passage, match) for match in source_matches}
+        output_polarities = {_causal_negated(sentence, match) for match in output_matches}
+        if len(source_polarities) != 1 or source_polarities != output_polarities:
             continue
         if not _factor_named(evidence.passage, [factor]):
+            continue
+        source_periods = {m.group(0).lower() for m in _MONTH_OR_YEAR.finditer(evidence.passage)}
+        output_periods = {m.group(0).lower() for m in _MONTH_OR_YEAR.finditer(sentence)}
+        if source_periods and not source_periods.issubset(output_periods):
             continue
         source_pattern = re.compile(rf"(?<!\w){re.escape(evidence.source)}(?!\w)", re.IGNORECASE)
         if source_pattern.search(sentence) and _ATTRIBUTION.search(sentence):
             return True
     return False
+
+
+def _causal_negated(text: str, match: re.Match[str]) -> bool:
+    """Whether the source explicitly denies the relationship at this phrase."""
+    prefix = text[max(0, match.start() - 60) : match.start()]
+    return not _NOT_ONLY.search(prefix) and _CAUSAL_NEGATION.search(prefix) is not None
 
 
 def validate_explanation(text: str, data: ExplainInput) -> list[str]:
@@ -309,6 +391,39 @@ def validate_explanation(text: str, data: ExplainInput) -> list[str]:
         problems.append("It must be one paragraph.")
     if _MARKUP.search(flat):
         problems.append("It must be plain text: no links, markup or @ signs.")
+    if _UNIVERSAL_HOUSEHOLD.search(flat):
+        fact_text = " ".join(_strings(data.facts))
+        if not _UNIVERSAL_HOUSEHOLD.search(fact_text):
+            problems.append(
+                "It makes a universal household impact claim without household-level evidence."
+            )
+    if _HOUSEHOLD_IMPACT.search(flat):
+        fact_text = " ".join(_strings(data.facts)).lower()
+        if "household" not in fact_text:
+            problems.append("It makes a household impact claim without household-level evidence.")
+    if _PREDICTION.search(flat):
+        problems.append("It predicts a future change; use only dated observed or reported facts.")
+    if _CORROBORATION.search(flat):
+        independent_counts = [
+            f.get("value")
+            for f in data.facts
+            if isinstance(f, dict) and f.get("label") == "Independent reports"
+        ]
+        count = max(
+            (int(value) for value in independent_counts if isinstance(value, int | float)),
+            default=0,
+        )
+        plural = re.search(
+            r"\b(?:independent(?:ly)?\s+(?:reports?|sources?)|corroborat|multiple|several|"
+            r"both\s+(?:sources|outlets))\b",
+            flat,
+            re.IGNORECASE,
+        )
+        required = 2 if plural else 1
+        if count < required:
+            problems.append(
+                "It claims independent corroboration without enough distinct-source evidence."
+            )
     odd = sorted({ch for ch in flat if ord(ch) > 127 and ch not in _EXTRA_ALLOWED})
     if odd:
         problems.append(
@@ -377,10 +492,214 @@ def validate_explanation(text: str, data: ExplainInput) -> list[str]:
 def explanation_schema() -> dict[str, Any]:
     return {
         "type": "object",
-        "properties": {"explanation": {"type": "string"}},
-        "required": ["explanation"],
+        "properties": {
+            "assertions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"},
+                        "fact_refs": {"type": "array", "items": {"type": "string"}},
+                        "evidence_refs": {"type": "array", "items": {"type": "string"}},
+                    },
+                    "required": ["text", "fact_refs", "evidence_refs"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["assertions"],
         "additionalProperties": False,
     }
+
+
+def validate_assertions(
+    raw_assertions: Any, data: ExplainInput
+) -> tuple[str | None, list[dict[str, Any]], list[str]]:
+    """Check assertion references, validate each assertion against only its cited facts/evidence,
+    and return reader text plus durable provenance. Numeric claims require assessment facts; source
+    passages can support attributed context but do not become authoritative measurements."""
+    if not isinstance(raw_assertions, list) or not raw_assertions:
+        return None, [], ["At least one typed assertion is required."]
+    if len(raw_assertions) > 8:
+        return None, [], ["Use at most eight assertions in one paragraph."]
+
+    accepted: list[dict[str, Any]] = []
+    sentences: list[str] = []
+    issues: list[str] = []
+    for index, raw in enumerate(raw_assertions, start=1):
+        prefix = f"Assertion {index}"
+        if not isinstance(raw, dict):
+            issues.append(f"{prefix} must be an object.")
+            continue
+        text = raw.get("text")
+        fact_refs = raw.get("fact_refs")
+        evidence_refs = raw.get("evidence_refs")
+        if (
+            not isinstance(text, str)
+            or not isinstance(fact_refs, list)
+            or not isinstance(evidence_refs, list)
+        ):
+            issues.append(f"{prefix} has an invalid text or reference list.")
+            continue
+        if not all(isinstance(ref, str) for ref in fact_refs + evidence_refs):
+            issues.append(f"{prefix} references must be strings.")
+            continue
+
+        fact_index_by_ref = {f"fact_{i + 1}": i for i in range(len(data.facts))}
+        evidence_by_ref = {
+            f"evidence_{i + 1}": item for i, item in enumerate(data.retrieved_evidence)
+        }
+        normalized_fact_refs = list(dict.fromkeys(fact_refs))
+        normalized_evidence_refs = list(dict.fromkeys(evidence_refs))
+        unknown_facts = sorted(set(normalized_fact_refs) - set(fact_index_by_ref))
+        unknown_evidence = sorted(set(normalized_evidence_refs) - set(evidence_by_ref))
+        if unknown_facts:
+            issues.append(f"{prefix} cites unknown fact references: {', '.join(unknown_facts)}.")
+        if unknown_evidence:
+            issues.append(
+                f"{prefix} cites unknown evidence references: {', '.join(unknown_evidence)}."
+            )
+        if unknown_facts or unknown_evidence:
+            continue
+        if not normalized_fact_refs and not normalized_evidence_refs:
+            issues.append(f"{prefix} needs at least one supporting fact or evidence reference.")
+            continue
+
+        cited_facts = [data.facts[fact_index_by_ref[ref]] for ref in normalized_fact_refs]
+        cited_evidence = [evidence_by_ref[ref] for ref in normalized_evidence_refs]
+        scoped = replace(data, facts=cited_facts, retrieved_evidence=cited_evidence)
+        text = clean_text(text)
+        quantity_issues = validate_assertion_quantity_bindings(text, cited_facts)
+        if quantity_issues:
+            issues.extend(f"{prefix}: {issue}" for issue in quantity_issues)
+            continue
+        direction_issues = validate_assertion_direction(text, cited_facts, cited_evidence)
+        if direction_issues:
+            issues.extend(f"{prefix}: {issue}" for issue in direction_issues)
+            continue
+        sentence_issues = validate_explanation(text, scoped)
+        if sentence_issues:
+            issues.extend(f"{prefix}: {issue}" for issue in sentence_issues)
+            continue
+
+        sentences.append(text)
+        accepted.append(
+            {
+                "text": text,
+                "fact_refs": normalized_fact_refs,
+                "claim_ids": [item.claim_id for item in cited_evidence],
+            }
+        )
+
+    if issues:
+        return None, [], issues
+    paragraph = clean_text(" ".join(sentences))
+    whole_issues = validate_explanation(paragraph, data)
+    if whole_issues:
+        return None, [], whole_issues
+    return paragraph, accepted, []
+
+
+def validate_assertion_quantity_bindings(text: str, facts: list[dict[str, Any]]) -> list[str]:
+    """Require an output quantity to preserve the cited fact's currency and measurement unit."""
+    lower = text.lower()
+    for fact in facts:
+        unit = str(fact.get("unit") or "").strip()
+        value = fact.get("value")
+        if value is None:
+            continue
+        value_numbers = allowed_numbers([{"value": value, "period": "", "unit": ""}])
+        if not value_numbers.intersection(numbers_written(text)):
+            continue
+        if unit.startswith("NGN"):
+            if not re.search(r"(?:₦|\bnaira\b|\bNGN\s*\d|(?<!\w)N\s*\d)", text, re.IGNORECASE):
+                return ["A naira amount must keep its currency marker."]
+            if re.search(r"(?:\$|\bUSD\b|\bGHS\b|\bKES\b|\bGBP\b|\bEUR\b)", text, re.IGNORECASE):
+                return ["A naira amount cannot be relabelled with a different currency."]
+            dimension = unit.partition("/")[2].lower()
+            if dimension:
+                aliases = {
+                    "litre": r"\b(?:litres?|liters?)\b",
+                    "kg": r"\b(?:kg|kilograms?)\b",
+                    "5kg": r"\b5\s?kg\b",
+                    "12.5kg": r"\b12\.5\s?kg\b",
+                    "kwh": r"\b(?:kwh|kilowatt[- ]hours?)\b",
+                    "tonne": r"\btonnes?\b",
+                    "percent": r"(?:%|\bpercent\b)",
+                }
+                pattern = aliases.get(dimension)
+                if pattern and not re.search(pattern, lower, re.IGNORECASE):
+                    return [f"A naira amount must retain its {dimension} unit."]
+                recognized = {
+                    name
+                    for name, candidate in aliases.items()
+                    if re.search(candidate, lower, re.IGNORECASE)
+                }
+                if dimension in {"5kg", "12.5kg"}:
+                    recognized.discard("kg")
+                if recognized - {dimension}:
+                    return ["A naira amount cannot be assigned a different measurement unit."]
+        elif unit == "%" and not re.search(r"(?:%|\bpercent\b)", lower):
+            return ["A percentage value must retain its percent unit."]
+        elif unit == "states" and not re.search(r"\bstates?\b", lower):
+            return ["A state count must retain its states unit."]
+    return []
+
+
+def validate_assertion_direction(
+    text: str, facts: list[dict[str, Any]], evidence: list[RetrievedPassage] | None = None
+) -> list[str]:
+    """Bind direction language and comparison baselines to the cited change fact(s)."""
+    requested: set[str] = set()
+    if _DIRECTION_UP.search(text):
+        requested.add("up")
+    if _DIRECTION_DOWN.search(text):
+        requested.add("down")
+    if _DIRECTION_FLAT.search(text):
+        requested.add("flat")
+
+    supported: set[str] = set()
+    labels: list[str] = []
+    for fact in facts:
+        label = str(fact.get("label") or "").lower()
+        value = fact.get("value")
+        if label == "states up":
+            supported.add("up")
+        elif label == "states down":
+            supported.add("down")
+        elif label == "states unchanged":
+            supported.add("flat")
+        elif "change" in label and isinstance(value, int | float) and not isinstance(value, bool):
+            supported.add("up" if value > 0 else "down" if value < 0 else "flat")
+            labels.append(label)
+
+    if requested and not supported:
+        evidence_directions: set[str] = set()
+        for passage in evidence or []:
+            for direction, pattern in (
+                ("up", _DIRECTION_UP),
+                ("down", _DIRECTION_DOWN),
+                ("flat", _DIRECTION_FLAT),
+            ):
+                for match in pattern.finditer(passage.passage):
+                    prefix = passage.passage[max(0, match.start() - 40) : match.start()]
+                    if not _CAUSAL_NEGATION.search(prefix):
+                        evidence_directions.add(direction)
+        if requested.issubset(evidence_directions):
+            return []
+        return ["It states a direction without citing a comparable change or direction fact."]
+    if requested and not requested.issubset(supported):
+        return ["Its direction conflicts with the cited change fact."]
+    if len(supported) > 1:
+        return [
+            "It mixes change facts with different directions; split them into separate assertions."
+        ]
+
+    if any("month-on-month" in label for label in labels) and not _MONTH_BASELINE.search(text):
+        return ["A month-on-month value must say that it is compared with the previous month."]
+    if any("year-on-year" in label for label in labels) and not _YEAR_BASELINE.search(text):
+        return ["A year-on-year value must say that it is compared with the same period last year."]
+    return []
 
 
 def system_prompt() -> str:
@@ -406,6 +725,7 @@ class ExplainResult:
 
     text: str | None
     model_id: str
+    assertions: list[dict[str, Any]] = field(default_factory=list)
     attempts: int = 0
     problems: list[list[str]] = field(default_factory=list)  # per failed attempt
 
@@ -438,12 +758,12 @@ def generate_explanation(
             result.problems.append([str(exc)])
             return result
         else:
-            text = clean_text(str(answer["explanation"]))  # what is checked is what is stored
-            problems = validate_explanation(text, data)
+            text, assertions, problems = validate_assertions(answer["assertions"], data)
             if not problems:
                 result.text = text
+                result.assertions = assertions
                 return result
-            rejected = (text, problems)
+            rejected = (str(answer["assertions"]), problems)
         result.problems.append(problems)
     return result
 
@@ -526,6 +846,7 @@ def explain_version(
     version.model_id = result.model_id
     version.prompt_version = PROMPT_VERSION
     version.explanation = result.text
+    version.explanation_assertions = result.assertions if result.text is not None else None
     session.flush()
     if result.text is None:
         log.warning(

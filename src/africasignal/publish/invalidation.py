@@ -24,7 +24,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import select, union
 from sqlalchemy.orm import Session
 
 from africasignal.assess.invalidation import (
@@ -40,11 +40,13 @@ from africasignal.jobs import queue
 from africasignal.models import (
     AssessmentInput,
     AssessmentVersion,
+    Claim,
     EvidenceDocument,
     Measurement,
     Situation,
     Source,
 )
+from africasignal.operations import delivery_corrections
 from africasignal.publish.hooks import notify_published
 from africasignal.publish.situations import source_short_name
 from africasignal.publish.versions import cancel_pending_delivery
@@ -146,12 +148,119 @@ def invalidate(session: Session, kind: str, ids: Iterable[int], now: datetime) -
     withhold_affected_drafts(session, kind, ids)
     digest = hashlib.sha256(f"{kind}:{sorted(ids)}".encode()).hexdigest()[:16]
     queued: list[int] = []
-    for situation_id, correction in sorted(plan_corrections(session, kind, ids).items()):
+    correction_plan = plan_corrections(session, kind, ids)
+    for situation_id, correction in sorted(correction_plan.items()):
+        situation = session.get(Situation, situation_id)
+        if situation is not None and situation.current_version_id is not None:
+            delivery_corrections.record_for_version(
+                session,
+                situation.current_version_id,
+                reason_key=f"{kind}:{digest}",
+                reason_code=f"{kind}_invalidated",
+                reason_detail=correction,
+                now=now,
+            )
         key = f"assess_situation:{situation_id}:invalidate:{digest}"
         if queue_correction(session, situation_id, correction, key) is not None:
             queued.append(situation_id)
     log.info("invalidate %s %s: %d situations to correct", kind, sorted(ids), len(queued))
     return queued
+
+
+def invalidate_source_permission(
+    session: Session, source_id: int, permission_version: int, now: datetime
+) -> list[int]:
+    """Suppress and reassess current output when a newly approved permission removes reuse rights.
+
+    Polling state (``Source.active`` or ``may_collect``) is intentionally not used here. The
+    shared eligibility gate evaluates the new permission's actual reuse and retention terms.
+    """
+    document_ids = select(EvidenceDocument.id).where(EvidenceDocument.source_id == source_id)
+    claim_ids = select(Claim.id).where(Claim.evidence_document_id.in_(document_ids))
+    measurement_ids = select(Measurement.id).where(
+        Measurement.evidence_document_id.in_(document_ids)
+    )
+    used_version_ids = union(
+        select(AssessmentInput.assessment_version_id).where(
+            AssessmentInput.input_kind == "evidence_document",
+            AssessmentInput.input_id.in_(document_ids),
+        ),
+        select(AssessmentInput.assessment_version_id).where(
+            AssessmentInput.input_kind == "claim", AssessmentInput.input_id.in_(claim_ids)
+        ),
+        select(AssessmentInput.assessment_version_id).where(
+            AssessmentInput.input_kind == "measurement",
+            AssessmentInput.input_id.in_(measurement_ids),
+        ),
+    ).subquery()
+    affected = list(
+        session.scalars(
+            select(AssessmentVersion)
+            .join(
+                used_version_ids, used_version_ids.c.assessment_version_id == AssessmentVersion.id
+            )
+            .order_by(AssessmentVersion.id)
+        )
+    )
+    from africasignal.publish.eligibility import publication_eligibility
+
+    queued: list[int] = []
+    for version in affected:
+        if version.status == "draft":
+            version.status = "withheld"
+            version.withheld_reasons = ["source_permission_changed"]
+            version.hold_until = None
+            continue
+        situation = session.get(Situation, version.situation_id)
+        if (
+            situation is None
+            or situation.current_version_id != version.id
+            or version.status not in {"published", "stale"}
+        ):
+            continue
+        decision = publication_eligibility(session, version, channel="website", now=now)
+        if decision.eligible:
+            continue
+        delivery_corrections.record_for_version(
+            session,
+            version.id,
+            reason_key=f"source_permission:{source_id}:v{permission_version}",
+            reason_code="source_permission_changed",
+            reason_detail=(
+                "The source permission changed and the current assessment is no longer eligible: "
+                + ", ".join(decision.rule_ids)
+            ),
+            now=now,
+        )
+        cancel_pending_delivery(session, version.id, now)
+        from africasignal.publish.social import cancel_queued_for_version
+
+        cancel_queued_for_version(
+            session,
+            version.id,
+            "Source permission changed: " + ", ".join(decision.rule_ids),
+        )
+        key = (
+            f"assess_situation:{situation.id}:source_permission:{source_id}"
+            f":v{permission_version}:assessment:{version.id}"
+        )
+        job_id = queue_correction(
+            session,
+            situation.id,
+            "A source's current permission no longer supports this assessment. "
+            "We are reassessing it.",
+            key,
+        )
+        if job_id is not None:
+            queued.append(situation.id)
+    session.flush()
+    log.info(
+        "source %s permission v%s: queued %d permission corrections",
+        source_id,
+        permission_version,
+        len(queued),
+    )
+    return sorted(set(queued))
 
 
 def withdraw_situation(

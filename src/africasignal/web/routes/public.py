@@ -392,7 +392,14 @@ def situation_page(request: Request, slug: str, db: Db) -> Response:
     base_url = public_base_url(db)
     version = current.version
     explanation_current = version.prompt_version == PROMPT_VERSION
-    key = (version.id, status, suspended, base_url, explanation_current)
+    key = (
+        version.id,
+        status,
+        suspended,
+        base_url,
+        explanation_current,
+        current.authorization_signature,
+    )
     page = _page_cache.get(key)
     if page is None:
         points = queries.chart_points(db, current.situation)
@@ -417,7 +424,9 @@ def situation_page(request: Request, slug: str, db: Db) -> Response:
         }
         page = templates.env.get_template("situation.html").render(context)
         _page_cache.set(key, page)
-    return HTMLResponse(page, headers={"Cache-Control": f"public, max-age={PAGE_CACHE_SECONDS}"})
+    # A permission version can revoke reuse without changing the assessment row. Do not let a
+    # browser or intermediary keep source-derived content after that change.
+    return HTMLResponse(page, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/s/{slug}/history", response_class=HTMLResponse)

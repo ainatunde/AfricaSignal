@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import uuid
 from dataclasses import dataclass
@@ -15,19 +16,33 @@ from africasignal import audit, settings_store
 from africasignal.models import (
     AssessmentVersion,
     ChannelPost,
+    DeliveryAttempt,
     Operator,
     Situation,
     SocialPublication,
 )
 from africasignal.publish import social_creative, social_platforms, versions
+from africasignal.publish.eligibility import publication_eligibility
 from africasignal.publish.whatsapp_text import PostError, write_post
-from africasignal.publish.x_api import XPostOutcomeUnknown, XPostRejected, create_post
+from africasignal.publish.x_api import (
+    XPostOutcomeUnknown,
+    XPostRejected,
+    authenticated_user_id,
+    create_post,
+)
 from africasignal.storage import store_for_session
 
 log = logging.getLogger("africasignal.social_publication")
 LAGOS = ZoneInfo("Africa/Lagos")
 MAX_BATCH = 3
 STALE_SENDING_AFTER = timedelta(minutes=5)
+DESTINATION_SETTINGS = {
+    "x": "x_account_user_id",
+    "facebook": "facebook_page_id",
+    "instagram": "instagram_professional_account_id",
+    "telegram": "telegram_channel_id",
+    "youtube": "youtube_channel_id",
+}
 
 
 class SocialPublicationError(ValueError):
@@ -41,6 +56,21 @@ class DispatchResult:
     unknown: int = 0
     cancelled: int = 0
     held: int = 0
+
+
+def _destination_identity(session: Session, channel: str) -> str:
+    setting_key = DESTINATION_SETTINGS.get(channel)
+    destination = settings_store.get(session, setting_key) if setting_key else None
+    if not destination or destination != destination.strip() or len(destination) > 128:
+        raise SocialPublicationError(f"the {channel} account identity is not configured")
+    if channel == "x" and (not destination.isdigit() or len(destination) > 19):
+        raise SocialPublicationError("the X account user ID must be numeric")
+    return destination
+
+
+def _content_hash(body: str, media_key: str | None, media_type: str | None) -> str:
+    material = f"{body}\0{media_key or ''}\0{media_type or ''}"
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
 def _daily_usage(
@@ -94,6 +124,11 @@ def queue_current_x_post(
         or (version.valid_until is not None and version.valid_until <= now)
     ):
         raise SocialPublicationError("that version is no longer current and publishable")
+    eligibility = publication_eligibility(session, version, channel="social", now=now)
+    if not eligibility.eligible:
+        raise SocialPublicationError(
+            "that version is ineligible for social publication: " + ", ".join(eligibility.rule_ids)
+        )
     if (
         session.scalar(
             select(ChannelPost.id).where(
@@ -122,6 +157,7 @@ def queue_current_x_post(
         draft = write_post(version, situation, base_url=base_url, channel="x")
     except PostError as exc:
         raise SocialPublicationError(str(exc)) from None
+    destination = _destination_identity(session, "x")
 
     local_day = now.astimezone(LAGOS).date()
     day_start = datetime.combine(local_day, time.min, tzinfo=LAGOS).astimezone(UTC)
@@ -144,6 +180,9 @@ def queue_current_x_post(
         requested_by_operator_id=operator.id,
         approved_at=now,
         body=draft.text,
+        approved_content_sha256=_content_hash(draft.text, None, None),
+        destination_account_id=destination,
+        eligibility_decision=eligibility.snapshot(),
         status="queued",
     )
     session.add(row)
@@ -233,6 +272,11 @@ def queue_current_social_post(
         or (version.valid_until is not None and version.valid_until <= now)
     ):
         raise SocialPublicationError("that version is no longer current and publishable")
+    eligibility = publication_eligibility(session, version, channel="social", now=now)
+    if not eligibility.eligible:
+        raise SocialPublicationError(
+            "that version is ineligible for social publication: " + ", ".join(eligibility.rule_ids)
+        )
     manual = session.scalar(
         select(ChannelPost.id).where(
             ChannelPost.assessment_version_id == version_id,
@@ -262,6 +306,7 @@ def queue_current_social_post(
     except PostError as exc:
         raise SocialPublicationError(str(exc)) from None
     body = draft.text.replace("?ref=x", f"?ref={channel}")
+    destination = _destination_identity(session, channel)
 
     media_key = None
     media_data = None
@@ -308,6 +353,9 @@ def queue_current_social_post(
         requested_by_operator_id=operator.id,
         approved_at=now,
         body=body,
+        approved_content_sha256=_content_hash(body, media_key, media_type),
+        destination_account_id=destination,
+        eligibility_decision=eligibility.snapshot(),
         status="queued",
         media_storage_key=media_key,
         media_content_type=media_type,
@@ -367,6 +415,12 @@ def retry_rejected_post(
         or (version.valid_until is not None and version.valid_until <= now)
     ):
         raise SocialPublicationError("that version is no longer current and publishable")
+    eligibility = publication_eligibility(session, version, channel="social", now=now)
+    if not eligibility.eligible:
+        raise SocialPublicationError(
+            "that version is ineligible for social publication: " + ", ".join(eligibility.rule_ids)
+        )
+    row.eligibility_decision = eligibility.snapshot()
 
     local_day = now.astimezone(LAGOS).date()
     day_start = datetime.combine(local_day, time.min, tzinfo=LAGOS).astimezone(UTC)
@@ -429,6 +483,25 @@ def _delete_media(session: Session, row: SocialPublication) -> None:
     row.media_content_type = None
 
 
+def cancel_queued_for_version(session: Session, version_id: int, reason: str) -> int:
+    """Cancel unsent channel posts and remove their generated media after eligibility changes."""
+    rows = list(
+        session.scalars(
+            select(SocialPublication)
+            .where(
+                SocialPublication.assessment_version_id == version_id,
+                SocialPublication.status == "queued",
+            )
+            .with_for_update()
+        )
+    )
+    for row in rows:
+        row.status = "cancelled"
+        row.last_error = reason[:300]
+        _delete_media(session, row)
+    return len(rows)
+
+
 def _purge_old_media(session: Session, now: datetime) -> None:
     """Delete queued, rejected, or ambiguous media after 30 days; sent media is removed earlier."""
     store = store_for_session(session)
@@ -475,6 +548,24 @@ def _finish(
     row.external_post_id = post_id
     row.sent_at = now if status == "sent" else None
     row.last_error = error[:300] if error else None
+    delivery = session.scalar(
+        select(DeliveryAttempt)
+        .where(
+            DeliveryAttempt.social_publication_id == row.id,
+            DeliveryAttempt.attempt_no == 1,
+        )
+        .with_for_update()
+    )
+    if delivery is not None:
+        delivery.status = {
+            "sent": "sent",
+            "failed": "rejected",
+            "cancelled": "cancelled",
+            "outcome_unknown": "outcome_unknown",
+        }[status]
+        delivery.provider_receipt_id = post_id
+        delivery.completed_at = now
+        delivery.outcome_detail = error[:300] if error else None
     if status == "sent":
         _delete_media(session, row)
     session.commit()
@@ -501,6 +592,17 @@ def dispatch_pending(session: Session, now: datetime, limit: int = MAX_BATCH) ->
         row.last_error = (
             "The sender stopped during the request; confirm the account before any retry."
         )
+        delivery = session.scalar(
+            select(DeliveryAttempt)
+            .where(DeliveryAttempt.social_publication_id == row.id)
+            .order_by(DeliveryAttempt.attempt_no.desc())
+            .limit(1)
+            .with_for_update()
+        )
+        if delivery is not None:
+            delivery.status = "outcome_unknown"
+            delivery.completed_at = now
+            delivery.outcome_detail = row.last_error
         result.unknown += 1
     if stale:
         session.commit()
@@ -572,24 +674,66 @@ def dispatch_pending(session: Session, now: datetime, limit: int = MAX_BATCH) ->
             select(AssessmentVersion).where(AssessmentVersion.id == row.assessment_version_id)
         )
         situation = session.get(Situation, version.situation_id) if version else None
-        if (
-            version is None
-            or situation is None
-            or version.status != "published"
-            or situation.current_version_id != version.id
-            or (version.valid_until is not None and version.valid_until <= now)
-        ):
+        eligibility = (
+            publication_eligibility(session, version, channel="social", now=now)
+            if version is not None
+            else None
+        )
+        if version is None or situation is None or eligibility is None or not eligibility.eligible:
+            if eligibility is not None:
+                row.eligibility_decision = eligibility.snapshot()
             row.status = "cancelled"
-            row.last_error = "The approved version is no longer current and publishable."
+            row.last_error = (
+                "The approved version is no longer current and publishable."
+                if eligibility is None
+                else "The approved version is no longer eligible: "
+                + ", ".join(eligibility.rule_ids)
+            )
             _delete_media(session, row)
             result.cancelled += 1
             session.commit()
             continue
 
+        current_destination = settings_store.get(session, DESTINATION_SETTINGS.get(row.channel, ""))
+        current_hash = _content_hash(row.body, row.media_storage_key, row.media_content_type)
+        if (
+            not row.destination_account_id
+            or current_destination != row.destination_account_id
+            or row.approved_content_sha256 != current_hash
+        ):
+            row.status = "cancelled"
+            row.last_error = (
+                "The approved content or destination changed; create a new reviewed publication."
+            )
+            _delete_media(session, row)
+            result.cancelled += 1
+            session.commit()
+            continue
+
+        row.eligibility_decision = eligibility.snapshot()
         row.status = "sending"
         row.attempt_started_at = now
         row.last_error = None
         row_id, channel, body, media_key = row.id, row.channel, row.body, row.media_storage_key
+        delivery = DeliveryAttempt(
+            social_publication_id=row.id,
+            attempt_no=1,
+            channel=channel,
+            content_sha256=current_hash,
+            destination_account_id=row.destination_account_id,
+            target_reference=None,
+            assessment_version_ids=[row.assessment_version_id],
+            authorization_snapshot={
+                "kind": "operator_review",
+                "operator_id": row.requested_by_operator_id,
+                "approved_at": row.approved_at.isoformat(),
+                "eligibility": eligibility.snapshot(),
+            },
+            status="prepared",
+            dedupe_key=f"social-publication:{row.id}:attempt:1",
+            attempted_at=now,
+        )
+        session.add(delivery)
         session.commit()  # establish the no-retry fence before the remote side effect
         store = store_for_session(session)
         try:
@@ -597,6 +741,10 @@ def dispatch_pending(session: Session, now: datetime, limit: int = MAX_BATCH) ->
                 token = settings_store.get(session, "x_user_access_token")
                 if not token:
                     raise social_platforms.SocialRejected("X user access token is not configured")
+                if authenticated_user_id(token) != row.destination_account_id:
+                    raise social_platforms.SocialRejected(
+                        "X token does not belong to the reviewed destination account"
+                    )
                 external_id = create_post(token, body).post_id
             elif channel == "facebook":
                 external_id = social_platforms.create_facebook_post(

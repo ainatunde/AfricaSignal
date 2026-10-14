@@ -160,7 +160,7 @@ def test_an_email_already_sent_is_not_touched_by_cancellation(
     notify_followers(session, v1.id, NOW, kind="correction")
     dispatch_pending(session, FakeProvider(), NOW)
     cancel_superseded(session, v1.id, NOW)
-    assert session.scalars(select(Outbox)).one().status == "sent"
+    assert session.scalars(select(Outbox)).one().status == "simulated"
 
 
 @pytest.mark.parametrize("status", ["draft", "withheld", "superseded", "stale"])
@@ -285,12 +285,12 @@ def test_reviewed_insight_email_uses_separate_consent_and_outbox(
     assert row.kind == "email_insight"
     assert row.payload["editorial_draft_id"] == draft.id
     provider = FakeProvider()
-    assert dispatch_pending(session, provider, NOW).sent == 1
+    assert dispatch_pending(session, provider, NOW).simulated == 1
     assert len(provider.sent) == 1
     assert provider.sent[0].to == user.email
     assert "Reviewed insight" in provider.sent[0].subject
     assert "list=insights" in provider.sent[0].headers["List-Unsubscribe"]
-    assert row.status == "sent"
+    assert row.status == "simulated"
 
 
 def test_withdrawn_insight_email_consent_cancels_queued_rows(

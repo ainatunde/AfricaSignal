@@ -514,7 +514,7 @@ def test_held_versions_are_checked_every_minute(
     assert _kinds(factory) == ["release_held_versions"] * 2
 
 
-def test_check_health_is_enqueued_every_fifteen_minutes(
+def test_check_health_is_enqueued_every_minute(
     factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _register(monkeypatch, "check_health", lambda ctx: None)
@@ -522,8 +522,20 @@ def test_check_health_is_enqueued_every_fifteen_minutes(
     _tick(factory, t)
     _tick(factory, t.replace(minute=10))
     assert _kinds(factory) == ["check_health"]
-    _tick(factory, t.replace(minute=20))
+    _tick(factory, t.replace(minute=11))
     assert _kinds(factory) == ["check_health", "check_health"]
+
+
+def test_insight_candidate_scan_is_enqueued_every_fifteen_minutes(
+    factory: sessionmaker[Session], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _register(monkeypatch, "refresh_insight_candidates", lambda ctx: None)
+    t = datetime(2026, 10, 7, 10, 3, 10, tzinfo=UTC)
+    _tick(factory, t)
+    _tick(factory, t.replace(minute=10))
+    assert _kinds(factory) == ["refresh_insight_candidates"]
+    _tick(factory, t.replace(minute=18))
+    assert _kinds(factory) == ["refresh_insight_candidates"] * 2
 
 
 def test_load_all_imports_every_handler_and_source_module() -> None:
@@ -552,7 +564,13 @@ def test_load_all_imports_every_handler_and_source_module() -> None:
     ).stdout
     modules, kinds = (part.split() for part in out.split("--\n"))
     assert expected <= set(modules)
-    assert {"fetch_source", "check_health", "check_backups", "gdelt_poll"} <= set(kinds)
+    assert {
+        "fetch_source",
+        "check_health",
+        "check_backups",
+        "gdelt_poll",
+        "refresh_insight_candidates",
+    } <= set(kinds)
 
 
 def test_expired_lease_cannot_be_completed_failed_or_revived(factory):

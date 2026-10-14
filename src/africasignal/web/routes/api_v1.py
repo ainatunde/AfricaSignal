@@ -25,7 +25,6 @@ from africasignal.web.ratelimit import RateLimiter
 from africasignal.web.session_dep import get_db
 
 rate_limiter = RateLimiter(scope="api_v1.rate_limiter", limit=60, window_seconds=60)
-CACHE_SECONDS = 60
 DEFAULT_LIMIT, MAX_LIMIT = 50, 200
 
 
@@ -37,7 +36,8 @@ def limit_requests(request: Request, response: Response) -> None:
             detail="Too many requests: the limit is 60 per minute.",
             headers={"Retry-After": str(retry_after)},
         )
-    response.headers["Cache-Control"] = f"public, max-age={CACHE_SECONDS}"
+    # Source reuse rights can change independently of these response bodies.
+    response.headers["Cache-Control"] = "no-store"
 
 
 Db = Annotated[Session, Depends(get_db)]

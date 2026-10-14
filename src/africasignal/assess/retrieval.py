@@ -1,15 +1,16 @@
 """Permission-aware retrieval of the exact claims already used by an assessment.
 
 This is a first RAG context layer, not a competing article store. It deliberately retrieves only
-validated passages linked to the assessment, after rechecking source activity, the current
-collection permission, quotation bounds, and evidence retention. Semantic/vector expansion stays
-out until retrieval quality is measured on representative Nigeria-focused cases.
+validated passages linked to the assessment, after rechecking current numeric reuse rights,
+quotation bounds, and evidence retention. A collection pause does not erase reuse rights for
+retained material. Semantic/vector expansion stays out until retrieval quality is measured on
+representative Nigeria-focused cases.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -18,7 +19,6 @@ from africasignal.models import (
     AssessmentInput,
     Claim,
     EvidenceDocument,
-    Measurement,
     Source,
     SourcePermission,
 )
@@ -74,8 +74,7 @@ def assessment_passages(
             Claim.valid.is_(True),
             EvidenceDocument.status == "active",
             (EvidenceDocument.retention_until.is_(None) | (EvidenceDocument.retention_until > now)),
-            Source.active.is_(True),
-            SourcePermission.may_collect.is_(True),
+            SourcePermission.may_republish_numbers.is_(True),
         )
         .order_by(EvidenceDocument.published_at.desc().nullslast(), Claim.id.desc())
         .limit(MAX_PASSAGES * 3)
@@ -83,6 +82,12 @@ def assessment_passages(
     result: list[RetrievedPassage] = []
     seen_documents: set[int] = set()
     for claim, document, source, permission in rows:
+        # Collection may be paused while stored evidence remains reusable. The active retention
+        # window is the stricter of the document's captured limit and the current permission.
+        if permission.retention_days is not None and (
+            document.retrieved_at + timedelta(days=permission.retention_days) <= now
+        ):
+            continue
         if document.id in seen_documents:
             continue
         passage = claim.passage.strip()
@@ -112,65 +117,16 @@ def assessment_passages(
 def assessment_evidence_is_current(
     session: Session, assessment_version_id: int, *, now: datetime | None = None
 ) -> bool:
-    """Recheck every document-backed assessment input against current source rights/retention."""
-    now = now or datetime.now(UTC)
-    evidence_ids = set(
-        session.scalars(
-            select(AssessmentInput.input_id).where(
-                AssessmentInput.assessment_version_id == assessment_version_id,
-                AssessmentInput.input_kind == "evidence_document",
-            )
-        )
-    )
-    evidence_ids.update(
-        session.scalars(
-            select(Claim.evidence_document_id)
-            .join(AssessmentInput, AssessmentInput.input_id == Claim.id)
-            .where(
-                AssessmentInput.assessment_version_id == assessment_version_id,
-                AssessmentInput.input_kind == "claim",
-            )
-        )
-    )
-    evidence_ids.update(
-        session.scalars(
-            select(Measurement.evidence_document_id)
-            .join(AssessmentInput, AssessmentInput.input_id == Measurement.id)
-            .where(
-                AssessmentInput.assessment_version_id == assessment_version_id,
-                AssessmentInput.input_kind == "measurement",
-            )
-        )
-    )
-    if not evidence_ids:
+    """Backwards-compatible wrapper for the shared, channel-aware publication decision."""
+    from africasignal.models import AssessmentVersion
+    from africasignal.publish.eligibility import publication_eligibility
+
+    version = session.get(AssessmentVersion, assessment_version_id)
+    if version is None:
         return False
-    latest_permission = (
-        select(
-            SourcePermission.source_id.label("source_id"),
-            func.max(SourcePermission.version).label("version"),
-        )
-        .where(SourcePermission.approved_at.is_not(None))
-        .group_by(SourcePermission.source_id)
-        .subquery()
-    )
-    eligible_ids = set(
-        session.scalars(
-            select(EvidenceDocument.id)
-            .join(Source, Source.id == EvidenceDocument.source_id)
-            .join(latest_permission, latest_permission.c.source_id == Source.id)
-            .join(
-                SourcePermission,
-                (SourcePermission.source_id == latest_permission.c.source_id)
-                & (SourcePermission.version == latest_permission.c.version),
-            )
-            .where(
-                EvidenceDocument.id.in_(evidence_ids),
-                EvidenceDocument.status == "active",
-                EvidenceDocument.retention_until.is_(None)
-                | (EvidenceDocument.retention_until > now),
-                Source.active.is_(True),
-                SourcePermission.may_collect.is_(True),
-            )
-        )
-    )
-    return eligible_ids == evidence_ids
+    return publication_eligibility(
+        session,
+        version,
+        channel="email",
+        now=now or datetime.now(UTC),
+    ).eligible

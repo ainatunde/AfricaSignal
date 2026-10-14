@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from africasignal.models import LoginToken, Outbox, Setting
+from africasignal.models import DeliveryAttempt, LoginToken, Outbox, Setting
 from africasignal.publish.email import EmailSendError, FakeProvider
 from africasignal.publish.login_tokens import hash_token
 from africasignal.publish.outbox import MAX_ATTEMPTS, dispatch_pending, enqueue_email
@@ -46,15 +46,36 @@ def test_sends_marks_sent_and_scrubs_the_link(session: Session) -> None:
 
     result = dispatch_pending(session, provider, NOW)
 
-    assert result.sent == 1
+    assert result.simulated == 1 and result.sent == 0
     assert [m.to for m in provider.sent] == ["a@example.com"]
     assert LINK in provider.sent[0].text
     assert provider.sent[0].idempotency_key == "login:1"
-    assert (row.status, row.provider_message_id, row.attempts) == ("sent", "fake-1", 1)
+    assert (row.status, row.provider_message_id, row.attempts) == ("simulated", "fake-1", 1)
+    attempt = session.scalars(select(DeliveryAttempt)).one()
+    assert attempt.status == "simulated" and attempt.provider_receipt_id == "fake-1"
+    assert len(attempt.content_sha256) == 64 and len(attempt.destination_sha256) == 64
     assert "link" not in row.payload  # a leaked database holds no working sign-in link
 
     assert dispatch_pending(session, provider, NOW).sent == 0  # nothing is sent twice
     assert len(provider.sent) == 1
+
+
+def test_provider_acceptance_is_distinct_from_simulated_delivery(session: Session) -> None:
+    user = add_user(session, "accepted@example.com", verified=False)
+    row = login_row(session, user.id, "login:accepted")
+
+    class AcceptedProvider:
+        simulated = False
+
+        def send(self, message):
+            return "provider-accepted-1"
+
+    result = dispatch_pending(session, AcceptedProvider(), NOW)
+
+    assert result.sent == 1 and result.simulated == 0
+    assert row.status == "sent" and row.provider_message_id == "provider-accepted-1"
+    attempt = session.scalars(select(DeliveryAttempt)).one()
+    assert attempt.status == "sent" and attempt.provider_receipt_id == "provider-accepted-1"
 
 
 def test_staging_sends_only_to_allowlisted_test_recipients(
@@ -76,25 +97,27 @@ def test_staging_sends_only_to_allowlisted_test_recipients(
 
     result = dispatch_pending(session, provider, NOW)
 
-    assert (result.sent, result.dead) == (1, 1)
+    assert (result.simulated, result.sent, result.dead) == (1, 0, 1)
     assert [message.to for message in provider.sent] == ["qa@example.test"]
     assert (blocked_row.status, blocked_row.last_error) == (
         "dead",
         "staging recipient is not allowlisted",
     )
     assert "link" not in blocked_row.payload
-    assert allowed_row.status == "sent"
+    assert allowed_row.status == "simulated"
 
 
 def test_retryable_failure_backs_off_then_goes_dead(session: Session) -> None:
     user = add_user(session, "a@example.com")
     row = login_row(session, user.id)
-    provider = FakeProvider(fail_with=EmailSendError("HTTP 503"))
+    provider = FakeProvider(
+        fail_with=EmailSendError("HTTP 429", retryable=True, outcome_unknown=False)
+    )
 
     now = NOW
     for attempt in range(1, MAX_ATTEMPTS):
         assert dispatch_pending(session, provider, now).retried == 1
-        assert (row.status, row.attempts, row.last_error) == ("failed", attempt, "HTTP 503")
+        assert (row.status, row.attempts, row.last_error) == ("failed", attempt, "HTTP 429")
         assert row.next_attempt_at > now
         assert dispatch_pending(session, provider, now).retried == 0  # not due yet
         now = row.next_attempt_at + timedelta(seconds=1)
@@ -107,17 +130,65 @@ def test_retryable_failure_backs_off_then_goes_dead(session: Session) -> None:
 def test_a_retry_that_succeeds_is_sent(session: Session) -> None:
     user = add_user(session, "a@example.com")
     row = login_row(session, user.id)
-    provider = FakeProvider(fail_with=EmailSendError("timeout"))
-    dispatch_pending(session, provider, NOW)
+    provider = FakeProvider(
+        fail_with=EmailSendError("HTTP 429", retryable=True, outcome_unknown=False)
+    )
+    assert dispatch_pending(session, provider, NOW).retried == 1
     provider.fail_with = None
     result = dispatch_pending(session, provider, row.next_attempt_at + timedelta(seconds=1))
-    assert result.sent == 1 and row.status == "sent" and row.attempts == 2
+    assert result.simulated == 1 and row.status == "simulated" and row.attempts == 2
+
+
+def test_ambiguous_provider_outcome_is_recorded_without_retry(session: Session) -> None:
+    user = add_user(session, "a@example.com")
+    row = login_row(session, user.id)
+    provider = FakeProvider(
+        fail_with=EmailSendError("timeout", retryable=False, outcome_unknown=True)
+    )
+
+    result = dispatch_pending(session, provider, NOW)
+
+    assert result.unknown == 1 and result.retried == 0
+    assert row.status == "outcome_unknown" and "link" not in row.payload
+    attempt = session.scalars(select(DeliveryAttempt)).one()
+    assert attempt.status == "outcome_unknown" and attempt.provider_receipt_id is None
+    assert dispatch_pending(session, provider, NOW + timedelta(days=1)).unknown == 0
+    assert provider.sent == []
+
+
+def test_stale_sending_attempt_becomes_unknown_not_retryable(session: Session) -> None:
+    user = add_user(session, "a@example.com")
+    row = login_row(session, user.id)
+    row.status = "sending"
+    row.attempts = 1
+    row.attempt_started_at = NOW - timedelta(minutes=10)
+    attempt = DeliveryAttempt(
+        outbox_id=row.id,
+        attempt_no=1,
+        channel="email",
+        content_sha256="a" * 64,
+        destination_sha256="b" * 64,
+        target_reference=f"app_user:{user.id}",
+        authorization_snapshot={"kind": "email_login"},
+        status="prepared",
+        dedupe_key=f"email-outbox:{row.id}:attempt:1",
+        attempted_at=row.attempt_started_at,
+    )
+    session.add(attempt)
+    session.flush()
+
+    result = dispatch_pending(session, FakeProvider(), NOW)
+
+    assert result.unknown == 1 and row.status == "outcome_unknown"
+    assert attempt.status == "outcome_unknown"
 
 
 def test_permanent_failure_goes_dead_at_once(session: Session) -> None:
     user = add_user(session, "a@example.com")
     row = login_row(session, user.id)
-    provider = FakeProvider(fail_with=EmailSendError("bad address", retryable=False))
+    provider = FakeProvider(
+        fail_with=EmailSendError("bad address", retryable=False, outcome_unknown=False)
+    )
     assert dispatch_pending(session, provider, NOW).dead == 1
     assert (row.status, row.attempts) == ("dead", 1)
 
@@ -129,7 +200,7 @@ def test_one_bad_row_does_not_stall_the_batch(session: Session) -> None:
 
     provider = FakeProvider()
     result = dispatch_pending(session, provider, NOW)
-    assert (result.sent, result.dead) == (1, 1)
+    assert (result.simulated, result.sent, result.dead) == (1, 0, 1)
     gone = session.scalars(select(Outbox).where(Outbox.dedupe_key == "login:gone")).one()
     assert (gone.status, gone.last_error) == ("dead", "recipient unavailable")
 
@@ -139,8 +210,8 @@ def test_batch_limit(session: Session) -> None:
     for n in range(3):
         login_row(session, user.id, f"login:{n}")
     provider = FakeProvider()
-    assert dispatch_pending(session, provider, NOW, limit=2).sent == 2
-    assert dispatch_pending(session, provider, NOW, limit=2).sent == 1
+    assert dispatch_pending(session, provider, NOW, limit=2).simulated == 2
+    assert dispatch_pending(session, provider, NOW, limit=2).simulated == 1
 
 
 def test_digest_is_held_while_publication_is_suspended_but_login_is_sent(
@@ -155,12 +226,12 @@ def test_digest_is_held_while_publication_is_suspended_but_login_is_sent(
     provider = FakeProvider()
 
     result = dispatch_pending(session, provider, NOW)
-    assert (result.sent, result.held) == (1, 1)
+    assert (result.simulated, result.sent, result.held) == (1, 0, 1)
     assert [m.subject for m in provider.sent] == ["Your AfricaSignal sign-in link"]
 
     session.get(Setting, "publication_suspended").value = False  # type: ignore[union-attr]
     session.flush()
-    assert dispatch_pending(session, provider, NOW).sent == 1
+    assert dispatch_pending(session, provider, NOW).simulated == 1
 
 
 @pytest.mark.parametrize("kind", ["email_digest", "email_correction"])

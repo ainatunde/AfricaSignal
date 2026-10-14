@@ -44,12 +44,14 @@ class EmailMessage:
 
 
 class EmailSendError(Exception):
-    """A send failed. ``retryable`` is False when trying again cannot help (bad address,
-    rejected content, bad credentials); the outbox then marks the row ``dead`` at once."""
+    """A send result needs classification; the safe default is no retry and unknown outcome."""
 
-    def __init__(self, message: str, *, retryable: bool = True) -> None:
+    def __init__(
+        self, message: str, *, retryable: bool = False, outcome_unknown: bool = True
+    ) -> None:
         super().__init__(message)
         self.retryable = retryable
+        self.outcome_unknown = outcome_unknown
 
 
 class EmailProvider(Protocol):
@@ -61,6 +63,8 @@ class EmailProvider(Protocol):
 class ConsoleProvider:
     """Logs each message. The body is not logged: it can hold a sign-in link."""
 
+    simulated = True
+
     def send(self, message: EmailMessage) -> str:
         log.info("email not sent (console provider): subject=%r", message.subject)
         return f"console-{message.idempotency_key or 'none'}"
@@ -68,6 +72,8 @@ class ConsoleProvider:
 
 class FakeProvider:
     """Records messages in memory; ``fail_with`` makes every send raise that error."""
+
+    simulated = True
 
     def __init__(self, fail_with: EmailSendError | None = None) -> None:
         self.sent: list[EmailMessage] = []
@@ -85,17 +91,20 @@ def _classify(response: httpx.Response) -> EmailSendError | None:
     any other 4xx cannot."""
     if response.is_success:
         return None
-    retryable = response.status_code == 429 or response.status_code >= 500
+    retryable = response.status_code == 429
+    outcome_unknown = response.status_code >= 500
     if response.status_code == 409:
         try:
             data = response.json()
-            retryable = (
+            outcome_unknown = (
                 isinstance(data, dict) and data.get("name") == "concurrent_idempotent_requests"
             )
         except ValueError:
             pass
     return EmailSendError(
-        f"HTTP {response.status_code}: {response.text[:200]}", retryable=retryable
+        f"HTTP {response.status_code}: {response.text[:200]}",
+        retryable=retryable,
+        outcome_unknown=outcome_unknown,
     )
 
 
@@ -109,14 +118,22 @@ class _HttpProvider:
         try:
             response = self._client.post(url, headers=headers, json=body)
         except httpx.HTTPError as exc:  # timeouts, connection errors
-            raise EmailSendError(f"{type(exc).__name__}: {exc}") from exc
+            raise EmailSendError(
+                f"{type(exc).__name__}: {exc}",
+                retryable=False,
+                outcome_unknown=True,
+            ) from exc
         error = _classify(response)
         if error is not None:
             raise error
         try:
             data = response.json()
         except ValueError as exc:
-            raise EmailSendError("provider returned a non-JSON response") from exc
+            raise EmailSendError(
+                "provider returned a non-JSON response",
+                retryable=False,
+                outcome_unknown=True,
+            ) from exc
         return data if isinstance(data, dict) else {}
 
 
@@ -137,7 +154,11 @@ class PostmarkProvider(_HttpProvider):
         data = self._post(self.URL, {"X-Postmark-Server-Token": self._api_key}, body)
         # Postmark reports some rejections with HTTP 200 and a non-zero ErrorCode.
         if data.get("ErrorCode", 0) not in (0, "0"):
-            raise EmailSendError(str(data.get("Message", "rejected")), retryable=False)
+            raise EmailSendError(
+                str(data.get("Message", "rejected")),
+                retryable=False,
+                outcome_unknown=False,
+            )
         return _message_id(data, "MessageID")
 
 
@@ -164,7 +185,9 @@ def _message_id(data: dict[str, str], key: str) -> str:
     value = data.get(key)
     if not isinstance(value, str) or not value.strip():
         raise EmailSendError(
-            "provider accepted request without a valid message id; outcome uncertain"
+            "provider accepted request without a valid message id; outcome uncertain",
+            retryable=False,
+            outcome_unknown=True,
         )
     return value
 

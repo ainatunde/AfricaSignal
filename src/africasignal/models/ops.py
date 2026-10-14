@@ -42,7 +42,16 @@ feedback_status = pg_enum(
 outbox_kind = pg_enum(
     "outbox_kind", "email_login", "email_digest", "email_correction", "email_insight"
 )
-outbox_status = pg_enum("outbox_status", "pending", "sent", "failed", "dead")
+outbox_status = pg_enum(
+    "outbox_status",
+    "pending",
+    "sending",
+    "sent",
+    "simulated",
+    "failed",
+    "outcome_unknown",
+    "dead",
+)
 job_status = pg_enum("job_status", "queued", "running", "done", "failed", "dead")
 operator_role = pg_enum("operator_role", "admin", "editor")
 channel_post_channel = pg_enum("channel_post_channel", "wa", "x", "tiktok")
@@ -77,6 +86,10 @@ class Outbox(CreatedMixin, Base):
     )
     last_error: Mapped[str | None] = mapped_column(Text)
     provider_message_id: Mapped[str | None] = mapped_column(Text)
+    attempt_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    content_sha256: Mapped[str | None] = mapped_column(Text)
+    destination_sha256: Mapped[str | None] = mapped_column(Text)
+    authorization_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
 class Job(CreatedMixin, Base):
@@ -106,6 +119,32 @@ class Job(CreatedMixin, Base):
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class GuardianRepairAttempt(CreatedMixin, Base):
+    """One bounded idempotent collection retry for a source outage generation."""
+
+    __tablename__ = "guardian_repair_attempt"
+    __table_args__ = (
+        UniqueConstraint("incident_key"),
+        CheckConstraint(
+            "state IN ('queued', 'recovered', 'completed_without_recovery', 'exhausted')",
+            name="state_valid",
+        ),
+        Index("ix_guardian_repair_state_created", "state", "created_at"),
+    )
+
+    incident_key: Mapped[str] = mapped_column(Text, nullable=False)
+    source_id: Mapped[int] = mapped_column(ForeignKey("source.id", ondelete="RESTRICT"))
+    # Job rows are archived and deleted by operational retention; keep their numeric references
+    # without blocking that lifecycle.
+    failed_job_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    retry_job_id: Mapped[int | None] = mapped_column(BigInteger)
+    source_generation_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    error_class: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class LlmBudgetReservation(CreatedMixin, Base):
@@ -255,6 +294,9 @@ class SocialPublication(CreatedMixin, Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    approved_content_sha256: Mapped[str | None] = mapped_column(Text)
+    destination_account_id: Mapped[str | None] = mapped_column(Text)
+    eligibility_decision: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="queued")
     external_post_id: Mapped[str | None] = mapped_column(Text)
     media_storage_key: Mapped[str | None] = mapped_column(Text)
@@ -291,6 +333,60 @@ class EditorialInsightDraft(CreatedMixin, Base):
     reviewed_by_operator_id: Mapped[int | None] = mapped_column(ForeignKey("operator.id"))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     review_note: Mapped[str | None] = mapped_column(Text)
+
+
+class InsightCandidate(CreatedMixin, Base):
+    """Deterministic private evidence packet selected from eligible assessment versions."""
+
+    __tablename__ = "insight_candidate"
+    __table_args__ = (
+        UniqueConstraint("dedupe_key"),
+        CheckConstraint(
+            "candidate_type IN ('material_change', 'persistent_trend', 'multi_series_comparison', "
+            "'evidence_disagreement')",
+            name="candidate_type_valid",
+        ),
+        CheckConstraint(
+            "status IN ('pending_review', 'selected', 'rejected', 'stale')", name="status_valid"
+        ),
+        CheckConstraint(
+            "usefulness_rating IS NULL OR usefulness_rating BETWEEN 1 AND 5",
+            name="usefulness_rating_bounds",
+        ),
+        Index("ix_insight_candidate_status_created", "status", "created_at"),
+    )
+
+    candidate_type: Mapped[str] = mapped_column(Text, nullable=False)
+    dedupe_key: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending_review")
+    reason_codes: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, server_default="[]")
+    packet: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    stale_reason: Mapped[str | None] = mapped_column(Text)
+    reviewed_by_operator_id: Mapped[int | None] = mapped_column(ForeignKey("operator.id"))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    review_note: Mapped[str | None] = mapped_column(Text)
+    usefulness_rating: Mapped[int | None] = mapped_column(Integer)
+    scope_correct: Mapped[bool | None] = mapped_column(Boolean)
+    unsupported_critical: Mapped[bool | None] = mapped_column(Boolean)
+
+
+class InsightCandidateAssessment(Base):
+    """Relational version membership for a candidate's evidence packet."""
+
+    __tablename__ = "insight_candidate_assessment"
+    __table_args__ = (
+        CheckConstraint("role IN ('current', 'prior', 'series_1', 'series_2')", name="role_valid"),
+        Index("ix_insight_candidate_assessment_version", "assessment_version_id"),
+    )
+
+    candidate_id: Mapped[int] = mapped_column(
+        ForeignKey("insight_candidate.id", ondelete="CASCADE"), primary_key=True
+    )
+    assessment_version_id: Mapped[int] = mapped_column(
+        ForeignKey("assessment_version.id", ondelete="RESTRICT"), primary_key=True
+    )
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
 
 class SocialListeningQuery(CreatedMixin, Base):
@@ -368,6 +464,298 @@ class SocialListeningLead(CreatedMixin, Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default="new")
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SocialMentionPoll(CreatedMixin, Base):
+    """One metered account-bound X mentions read; post bodies are never persisted."""
+
+    __tablename__ = "social_mention_poll"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('running', 'succeeded', 'failed', 'outcome_unknown', 'discarded')",
+            name="status_valid",
+        ),
+        CheckConstraint("reserved_results BETWEEN 5 AND 100", name="reserved_results_bounds"),
+        CheckConstraint("fetched_results BETWEEN 0 AND 100", name="fetched_results_bounds"),
+        CheckConstraint("since_id IS NULL OR since_id ~ '^[0-9]{1,19}$'", name="since_id_numeric"),
+        CheckConstraint(
+            "newest_id IS NULL OR newest_id ~ '^[0-9]{1,19}$'", name="newest_id_numeric"
+        ),
+        Index("ix_social_mention_poll_status_created", "status", "created_at"),
+    )
+
+    account_user_id: Mapped[str] = mapped_column(Text, nullable=False)
+    token_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    identity_read_performed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    since_id: Mapped[str | None] = mapped_column(Text)
+    newest_id: Mapped[str | None] = mapped_column(Text)
+    page_token: Mapped[str | None] = mapped_column(Text)
+    next_page_token: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="running")
+    reserved_results: Mapped[int] = mapped_column(Integer, nullable=False)
+    fetched_results: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    new_mentions: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class SocialMention(CreatedMixin, Base):
+    """Short-lived pointer to a mention; text, author profile, and conversation text are omitted."""
+
+    __tablename__ = "social_mention"
+    __table_args__ = (
+        UniqueConstraint("post_id"),
+        CheckConstraint("post_id ~ '^[0-9]{1,19}$'", name="post_id_numeric"),
+        CheckConstraint(
+            "conversation_id IS NULL OR conversation_id ~ '^[0-9]{1,19}$'",
+            name="conversation_id_numeric",
+        ),
+        CheckConstraint(
+            "status IN ('new', 'drafted', 'replied', 'escalated', 'dismissed', 'unavailable')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "triage_category IS NULL OR triage_category IN "
+            "('dated_fact', 'source_request', 'clarification', 'correction_report', "
+            "'unsupported_premise', 'out_of_scope', 'abuse_or_spam', 'other')",
+            name="triage_category_valid",
+        ),
+        Index("ix_social_mention_status_expires", "status", "expires_at"),
+    )
+
+    poll_id: Mapped[int] = mapped_column(
+        ForeignKey("social_mention_poll.id", ondelete="RESTRICT"), nullable=False
+    )
+    post_id: Mapped[str] = mapped_column(Text, nullable=False)
+    conversation_id: Mapped[str | None] = mapped_column(Text)
+    remote_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="new")
+    triage_category: Mapped[str | None] = mapped_column(Text)
+
+
+class SocialReplyPolicy(CreatedMixin, Base):
+    """Immutable versioned X reply bounds with evaluation and staging activation gates."""
+
+    __tablename__ = "social_reply_policy"
+    __table_args__ = (
+        UniqueConstraint("revision"),
+        CheckConstraint("revision > 0", name="revision_positive"),
+        CheckConstraint(
+            "status IN ('draft', 'evaluated', 'approved', 'active', 'retired')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "account_user_id IS NULL OR account_user_id ~ '^[0-9]{1,19}$'",
+            name="account_user_id_numeric",
+        ),
+        CheckConstraint(
+            "evaluation_case_count IS NULL OR evaluation_case_count >= 0",
+            name="evaluation_case_count_nonnegative",
+        ),
+        CheckConstraint(
+            "evaluation_critical_errors IS NULL OR evaluation_critical_errors >= 0",
+            name="evaluation_critical_errors_nonnegative",
+        ),
+        CheckConstraint(
+            "status = 'draft' OR "
+            "(evaluation_case_set IS NOT NULL AND evaluation_evidence_ref IS NOT NULL "
+            "AND evaluation_case_count > 0 "
+            "AND evaluation_coverage IS NOT NULL AND evaluation_critical_errors = 0 "
+            "AND evaluated_by_operator_id IS NOT NULL AND evaluated_at IS NOT NULL)",
+            name="review_states_require_evaluation",
+        ),
+        CheckConstraint(
+            "status NOT IN ('approved', 'active', 'retired') OR "
+            "(approved_by_operator_id IS NOT NULL AND approved_at IS NOT NULL "
+            "AND approval_reason IS NOT NULL)",
+            name="approved_states_require_approval",
+        ),
+        CheckConstraint(
+            "status != 'active' OR "
+            "(staging_evidence_ref IS NOT NULL AND activated_by_operator_id IS NOT NULL "
+            "AND activated_at IS NOT NULL AND activation_reason IS NOT NULL)",
+            name="active_requires_staging_and_activation",
+        ),
+        Index(
+            "uq_social_reply_policy_active",
+            "status",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="draft")
+    policy: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    account_user_id: Mapped[str | None] = mapped_column(Text)
+    evaluation_case_set: Mapped[str | None] = mapped_column(Text)
+    evaluation_evidence_ref: Mapped[str | None] = mapped_column(Text)
+    evaluation_case_count: Mapped[int | None] = mapped_column(Integer)
+    evaluation_coverage: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    evaluation_critical_errors: Mapped[int | None] = mapped_column(Integer)
+    evaluated_by_operator_id: Mapped[int | None] = mapped_column(
+        ForeignKey("operator.id", ondelete="RESTRICT")
+    )
+    evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approved_by_operator_id: Mapped[int | None] = mapped_column(
+        ForeignKey("operator.id", ondelete="RESTRICT")
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    approval_reason: Mapped[str | None] = mapped_column(Text)
+    staging_evidence_ref: Mapped[str | None] = mapped_column(Text)
+    activated_by_operator_id: Mapped[int | None] = mapped_column(
+        ForeignKey("operator.id", ondelete="RESTRICT")
+    )
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    activation_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class SocialReply(CreatedMixin, Base):
+    """One reviewed, assessment-grounded reply draft for one inbound X mention."""
+
+    __tablename__ = "social_reply"
+    __table_args__ = (
+        UniqueConstraint("mention_id"),
+        CheckConstraint(
+            "status IN ('pending_review', 'queued', 'sending', 'sent', 'failed', "
+            "'outcome_unknown', 'cancelled', 'rejected', 'stale')",
+            name="status_valid",
+        ),
+        CheckConstraint("reply_to_post_id ~ '^[0-9]{1,19}$'", name="reply_to_post_id_numeric"),
+        CheckConstraint("content_sha256 ~ '^[a-f0-9]{64}$'", name="content_sha256_valid"),
+        Index("ix_social_reply_status_created", "status", "created_at"),
+    )
+
+    mention_id: Mapped[int] = mapped_column(
+        ForeignKey("social_mention.id", ondelete="RESTRICT"), nullable=False
+    )
+    assessment_version_id: Mapped[int] = mapped_column(
+        ForeignKey("assessment_version.id", ondelete="RESTRICT"), nullable=False
+    )
+    requested_by_operator_id: Mapped[int] = mapped_column(
+        ForeignKey("operator.id", ondelete="RESTRICT"), nullable=False
+    )
+    policy_revision: Mapped[int | None] = mapped_column(
+        ForeignKey("social_reply_policy.revision", ondelete="RESTRICT")
+    )
+    reviewed_by_operator_id: Mapped[int | None] = mapped_column(
+        ForeignKey("operator.id", ondelete="RESTRICT")
+    )
+    authorized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reply_to_post_id: Mapped[str] = mapped_column(Text, nullable=False)
+    destination_account_id: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    eligibility_decision: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending_review")
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    attempt_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    external_post_id: Mapped[str | None] = mapped_column(Text)
+    last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class DeliveryAttempt(CreatedMixin, Base):
+    """Immutable authorization snapshot and provider receipt for one outbound attempt."""
+
+    __tablename__ = "delivery_attempt"
+    __table_args__ = (
+        CheckConstraint(
+            "(outbox_id IS NOT NULL AND social_publication_id IS NULL "
+            "AND social_reply_id IS NULL) OR "
+            "(outbox_id IS NULL AND social_publication_id IS NOT NULL "
+            "AND social_reply_id IS NULL) OR "
+            "(outbox_id IS NULL AND social_publication_id IS NULL "
+            "AND social_reply_id IS NOT NULL)",
+            name="exactly_one_delivery_owner",
+        ),
+        CheckConstraint(
+            "status IN ('prepared', 'sent', 'simulated', 'rejected', "
+            "'outcome_unknown', 'cancelled')",
+            name="status_valid",
+        ),
+        CheckConstraint("attempt_no > 0", name="attempt_positive"),
+        CheckConstraint("content_sha256 ~ '^[a-f0-9]{64}$'", name="content_sha256_valid"),
+        UniqueConstraint("dedupe_key"),
+        UniqueConstraint("outbox_id", "attempt_no"),
+        UniqueConstraint("social_publication_id", "attempt_no"),
+        UniqueConstraint("social_reply_id", "attempt_no"),
+        Index("ix_delivery_attempt_status_created", "status", "created_at"),
+        Index(
+            "ix_delivery_attempt_assessment_versions",
+            "assessment_version_ids",
+            postgresql_using="gin",
+        ),
+    )
+
+    outbox_id: Mapped[int | None] = mapped_column(ForeignKey("outbox.id", ondelete="RESTRICT"))
+    social_publication_id: Mapped[int | None] = mapped_column(
+        ForeignKey("social_publication.id", ondelete="RESTRICT")
+    )
+    social_reply_id: Mapped[int | None] = mapped_column(
+        ForeignKey("social_reply.id", ondelete="RESTRICT")
+    )
+    attempt_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    destination_sha256: Mapped[str | None] = mapped_column(Text)
+    destination_account_id: Mapped[str | None] = mapped_column(Text)
+    target_reference: Mapped[str | None] = mapped_column(Text)
+    assessment_version_ids: Mapped[list[Any]] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
+    authorization_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default="prepared")
+    dedupe_key: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_receipt_id: Mapped[str | None] = mapped_column(Text)
+    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    outcome_detail: Mapped[str | None] = mapped_column(Text)
+
+
+class DeliveryCorrectionWork(CreatedMixin, Base):
+    """Reviewable follow-up for an externally accepted delivery later invalidated."""
+
+    __tablename__ = "delivery_correction_work"
+    __table_args__ = (
+        UniqueConstraint("delivery_attempt_id", "reason_key"),
+        CheckConstraint(
+            "state IN ('pending_review', 'fulfilled', 'blocked', 'dismissed')",
+            name="state_valid",
+        ),
+        CheckConstraint(
+            "state != 'fulfilled' OR follow_up_delivery_attempt_id IS NOT NULL",
+            name="fulfilled_has_receipt",
+        ),
+        Index("ix_delivery_correction_work_state_created", "state", "created_at"),
+    )
+
+    delivery_attempt_id: Mapped[int] = mapped_column(
+        ForeignKey("delivery_attempt.id", ondelete="RESTRICT"), nullable=False
+    )
+    invalidated_assessment_version_id: Mapped[int] = mapped_column(
+        ForeignKey("assessment_version.id", ondelete="RESTRICT"), nullable=False
+    )
+    reason_key: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_code: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_detail: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False, server_default="pending_review")
+    replacement_assessment_version_id: Mapped[int | None] = mapped_column(
+        ForeignKey("assessment_version.id", ondelete="RESTRICT")
+    )
+    follow_up_delivery_attempt_id: Mapped[int | None] = mapped_column(
+        ForeignKey("delivery_attempt.id", ondelete="RESTRICT")
+    )
+    reviewed_by_operator_id: Mapped[int | None] = mapped_column(
+        ForeignKey("operator.id", ondelete="RESTRICT")
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    operator_note: Mapped[str | None] = mapped_column(Text)
 
 
 class WorkloadControl(Base):

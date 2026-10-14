@@ -219,7 +219,7 @@ def test_the_page_cache_is_keyed_by_version(
     situation, v1 = seed_petrol(session, store, source)["NG-LA"]
     client.cookies.set("anon_id", "a-returning-visitor-1234")  # a first visit gets a private page
     first = client.get("/s/price-pms_litre-ng-la")
-    assert first.headers["cache-control"] == "public, max-age=300"
+    assert first.headers["cache-control"] == "no-store"
     v2 = AssessmentVersion(
         situation_id=situation.id,
         version=2,
@@ -276,6 +276,37 @@ def test_evidence_quotes_follow_the_source_permission(
     session.flush()
     public.clear_page_cache()
     assert "Prices of petrol" not in client.get("/s/price-pms_litre-ng-la").text
+
+
+def test_revoked_numeric_reuse_permission_suppresses_public_site_and_api(
+    session: Session, store: S3Store, source: Source, client: TestClient
+) -> None:
+    seed_petrol(session, store, source)
+    permission = session.scalars(
+        select(SourcePermission).where(SourcePermission.source_id == source.id)
+    ).one()
+    permission.may_republish_numbers = False
+    session.flush()
+
+    assert client.get("/s/price-pms_litre-ng-la").status_code == 404
+    assert client.get("/v1/situations/price-pms_litre-ng-la").status_code == 404
+    assert "Average petrol (PMS) price in Lagos State" not in client.get("/").text
+
+
+def test_collection_pause_does_not_revoke_reuse_of_retained_evidence(
+    session: Session, store: S3Store, source: Source, client: TestClient
+) -> None:
+    seed_petrol(session, store, source)
+    permission = session.scalars(
+        select(SourcePermission).where(SourcePermission.source_id == source.id)
+    ).one()
+    permission.may_collect = False
+    source.active = False
+    session.flush()
+
+    page = client.get("/s/price-pms_litre-ng-la")
+    assert page.status_code == 200
+    assert "₦1,080.95 per litre" in text_of(page.text)
 
 
 def test_history_lists_every_published_version_and_hides_drafts(

@@ -66,22 +66,30 @@ def test_resend_sends_idempotency_key() -> None:
 
 
 @pytest.mark.parametrize(
-    ("status", "retryable"), [(429, True), (500, True), (503, True), (400, False), (422, False)]
+    ("status", "retryable", "outcome_unknown"),
+    [
+        (429, True, False),
+        (500, False, True),
+        (503, False, True),
+        (400, False, False),
+        (422, False, False),
+    ],
 )
-def test_http_errors_are_classified(status: int, retryable: bool) -> None:
+def test_http_errors_are_classified(status: int, retryable: bool, outcome_unknown: bool) -> None:
     transport = httpx.MockTransport(lambda request: httpx.Response(status, text="nope"))
     with pytest.raises(EmailSendError) as info:
         ResendProvider("k", "a@b.co", client(transport)).send(MESSAGE)
     assert info.value.retryable is retryable
+    assert info.value.outcome_unknown is outcome_unknown
 
 
-def test_connection_errors_are_retryable() -> None:
+def test_connection_errors_have_unknown_outcomes() -> None:
     def handle(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectTimeout("slow")
 
     with pytest.raises(EmailSendError) as info:
         ResendProvider("k", "a@b.co", client(httpx.MockTransport(handle))).send(MESSAGE)
-    assert info.value.retryable
+    assert not info.value.retryable and info.value.outcome_unknown
 
 
 def test_postmark_rejection_with_http_200_is_permanent() -> None:
@@ -134,10 +142,11 @@ def test_success_without_message_id_is_uncertain(provider_type, key, value) -> N
 
 @pytest.mark.parametrize(
     "name,retryable",
-    [("concurrent_idempotent_requests", True), ("invalid_idempotent_request", False)],
+    [("concurrent_idempotent_requests", False), ("invalid_idempotent_request", False)],
 )
 def test_resend_conflicts_distinguish_concurrent_retries(name: str, retryable: bool) -> None:
     transport = httpx.MockTransport(lambda request: httpx.Response(409, json={"name": name}))
     with pytest.raises(EmailSendError) as exc:
         ResendProvider("key", "a@b.co", client(transport)).send(MESSAGE)
     assert exc.value.retryable is retryable
+    assert exc.value.outcome_unknown is (name == "concurrent_idempotent_requests")
