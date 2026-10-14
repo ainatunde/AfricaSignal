@@ -139,6 +139,7 @@ def upgrade() -> None:
             "created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
         ),
         sa.Column("outbox_id", sa.BigInteger()),
+        sa.Column("owner_erased_at", sa.DateTime(timezone=True)),
         sa.Column("social_publication_id", sa.BigInteger()),
         sa.Column("social_reply_id", sa.BigInteger()),
         sa.Column("attempt_no", sa.Integer(), nullable=False),
@@ -161,11 +162,16 @@ def upgrade() -> None:
         sa.Column("completed_at", sa.DateTime(timezone=True)),
         sa.Column("outcome_detail", sa.Text()),
         sa.CheckConstraint(
-            "(outbox_id IS NOT NULL AND social_publication_id IS NULL "
+            "(owner_erased_at IS NOT NULL AND outbox_id IS NULL "
+            "AND social_publication_id IS NULL AND social_reply_id IS NULL) OR "
+            "(owner_erased_at IS NULL AND outbox_id IS NOT NULL "
+            "AND social_publication_id IS NULL "
             "AND social_reply_id IS NULL) OR "
-            "(outbox_id IS NULL AND social_publication_id IS NOT NULL "
+            "(owner_erased_at IS NULL AND outbox_id IS NULL "
+            "AND social_publication_id IS NOT NULL "
             "AND social_reply_id IS NULL) OR "
-            "(outbox_id IS NULL AND social_publication_id IS NULL "
+            "(owner_erased_at IS NULL AND outbox_id IS NULL "
+            "AND social_publication_id IS NULL "
             "AND social_reply_id IS NOT NULL)",
             name="exactly_one_delivery_owner",
         ),
@@ -214,6 +220,7 @@ def downgrade() -> None:
     op.drop_column("outbox", "destination_sha256")
     op.drop_column("outbox", "content_sha256")
     op.drop_column("outbox", "attempt_started_at")
+    op.execute("ALTER TABLE outbox ALTER COLUMN status DROP DEFAULT")
     op.execute("ALTER TYPE outbox_status RENAME TO outbox_status_old")
     postgresql.ENUM("pending", "sent", "failed", "dead", name="outbox_status").create(
         op.get_bind(), checkfirst=False
@@ -223,4 +230,5 @@ def downgrade() -> None:
         "USING (CASE WHEN status IN ('sending', 'outcome_unknown', 'simulated') THEN 'dead' "
         "ELSE status::text END)::outbox_status"
     )
+    op.execute("ALTER TABLE outbox ALTER COLUMN status SET DEFAULT 'pending'::outbox_status")
     op.execute("DROP TYPE outbox_status_old")

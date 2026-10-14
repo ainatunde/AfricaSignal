@@ -8,12 +8,14 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from africasignal.models import (
     AppUser,
+    DeliveryAttempt,
+    DeliveryCorrectionWork,
     Event,
     Feedback,
     Follow,
@@ -135,18 +137,59 @@ def unsubscribe(session: Session, token: str, *, list_name: str = "digest") -> b
     return True
 
 
-def erase_user(session: Session, user: AppUser) -> None:
+def erase_user(session: Session, user: AppUser, *, now: datetime | None = None) -> None:
     """Hard-delete the user and everything tied to them. Feedback is kept but anonymised: it is
     unlinked from the user, the typed contact email is removed, and the address is removed from
-    the free text. Does not write to the deletion ledger."""
+    the free text. Delivery receipts are retained with their user linkage redacted. Does not write
+    to the deletion ledger."""
     user_id = user.id
     email = user.email
+    erased_at = now or datetime.now(UTC)
     session.execute(delete(Notification).where(Notification.user_id == user_id))
     session.execute(delete(Follow).where(Follow.user_id == user_id))
     session.execute(delete(Preference).where(Preference.user_id == user_id))
     session.execute(delete(LoginToken).where(LoginToken.user_id == user_id))
     session.execute(delete(UserSession).where(UserSession.user_id == user_id))
-    session.execute(delete(Outbox).where(Outbox.payload["user_id"].as_integer() == user_id))
+    outbox_ids = session.scalars(
+        select(Outbox.id).where(Outbox.payload["user_id"].as_integer() == user_id)
+    ).all()
+    attempt_predicates = [DeliveryAttempt.target_reference == f"app_user:{user_id}"]
+    if outbox_ids:
+        attempt_predicates.append(DeliveryAttempt.outbox_id.in_(outbox_ids))
+    attempts = session.scalars(select(DeliveryAttempt).where(or_(*attempt_predicates))).all()
+    attempt_ids = [attempt.id for attempt in attempts]
+    if attempt_ids:
+        correction_predicate = or_(
+            DeliveryCorrectionWork.delivery_attempt_id.in_(attempt_ids),
+            DeliveryCorrectionWork.follow_up_delivery_attempt_id.in_(attempt_ids),
+        )
+        correction_work = session.scalars(
+            select(DeliveryCorrectionWork).where(correction_predicate)
+        ).all()
+        for work in correction_work:
+            work.reason_detail = re.sub(
+                re.escape(email), REMOVED, work.reason_detail, flags=re.IGNORECASE
+            )
+            if work.operator_note:
+                work.operator_note = re.sub(
+                    re.escape(email), REMOVED, work.operator_note, flags=re.IGNORECASE
+                )
+            if work.state == "pending_review":
+                work.state = "blocked"
+                work.operator_note = "Recipient account erased; correction delivery is prohibited."
+        for attempt in attempts:
+            attempt.outbox_id = None
+            attempt.owner_erased_at = erased_at
+            attempt.destination_sha256 = None
+            attempt.target_reference = None
+            attempt.assessment_version_ids = []
+            attempt.authorization_snapshot = {"kind": "privacy_erased"}
+            if attempt.outcome_detail:
+                attempt.outcome_detail = re.sub(
+                    re.escape(email), REMOVED, attempt.outcome_detail, flags=re.IGNORECASE
+                )
+    if outbox_ids:
+        session.execute(delete(Outbox).where(Outbox.id.in_(outbox_ids)))
     session.execute(update(Event).where(Event.user_id == user_id).values(user_id=None))
     session.execute(update(Feedback).where(Feedback.user_id == user_id).values(user_id=None))
     session.execute(
@@ -170,8 +213,9 @@ def delete_account(session: Session, user_id: int, now: datetime | None = None) 
     user = session.get(AppUser, user_id)
     if user is None:
         return False
-    deletions.record(session, user.email, now or datetime.now(UTC))
-    erase_user(session, user)
+    deleted_at = now or datetime.now(UTC)
+    deletions.record(session, user.email, deleted_at)
+    erase_user(session, user, now=deleted_at)
     return True
 
 

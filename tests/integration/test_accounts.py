@@ -9,6 +9,9 @@ from sqlalchemy.orm import Session
 
 from africasignal.models import (
     AppUser,
+    AssessmentVersion,
+    DeliveryAttempt,
+    DeliveryCorrectionWork,
     Event,
     Feedback,
     Follow,
@@ -104,6 +107,21 @@ def populate(session: Session) -> tuple[AppUser, AppUser]:
 
 def test_the_email_is_everywhere_before_deletion_and_nowhere_after(session: Session) -> None:
     user, bystander = populate(session)
+    receipt = session.scalars(select(DeliveryAttempt)).one()
+    version_id = session.scalar(select(AssessmentVersion.id).limit(1))
+    assert version_id is not None
+    receipt.assessment_version_ids = [version_id]
+    work = DeliveryCorrectionWork(
+        delivery_attempt_id=receipt.id,
+        invalidated_assessment_version_id=version_id,
+        reason_key="account-erasure-test",
+        reason_code="permission_withdrawn",
+        reason_detail=f"Correction for {EMAIL}",
+        operator_note=f"Follow up at {EMAIL}",
+    )
+    session.add(work)
+    session.flush()
+    work_id = work.id
     before = occurrences(session, "ada.lovelace")
     assert {"app_user.email", "feedback.contact_email", "feedback.text"} <= set(before)
 
@@ -124,6 +142,17 @@ def test_the_email_is_everywhere_before_deletion_and_nowhere_after(session: Sess
         )
         == 0
     )
+    receipt = session.get(DeliveryAttempt, receipt.id)
+    assert receipt is not None
+    assert receipt.status == "sent"
+    assert receipt.outbox_id is None and receipt.owner_erased_at is not None
+    assert receipt.destination_sha256 is None and receipt.target_reference is None
+    assert receipt.assessment_version_ids == []
+    assert receipt.authorization_snapshot == {"kind": "privacy_erased"}
+    work = session.get(DeliveryCorrectionWork, work_id)
+    assert work is not None and work.state == "blocked"
+    assert "ada.lovelace" not in work.reason_detail.lower()
+    assert "ada.lovelace" not in (work.operator_note or "").lower()
 
     # feedback is kept, anonymised; the event is kept without the user
     feedback = session.scalars(select(Feedback).order_by(Feedback.id)).all()

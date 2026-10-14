@@ -666,11 +666,16 @@ class DeliveryAttempt(CreatedMixin, Base):
     __tablename__ = "delivery_attempt"
     __table_args__ = (
         CheckConstraint(
-            "(outbox_id IS NOT NULL AND social_publication_id IS NULL "
+            "(owner_erased_at IS NOT NULL AND outbox_id IS NULL "
+            "AND social_publication_id IS NULL AND social_reply_id IS NULL) OR "
+            "(owner_erased_at IS NULL AND outbox_id IS NOT NULL "
+            "AND social_publication_id IS NULL "
             "AND social_reply_id IS NULL) OR "
-            "(outbox_id IS NULL AND social_publication_id IS NOT NULL "
+            "(owner_erased_at IS NULL AND outbox_id IS NULL "
+            "AND social_publication_id IS NOT NULL "
             "AND social_reply_id IS NULL) OR "
-            "(outbox_id IS NULL AND social_publication_id IS NULL "
+            "(owner_erased_at IS NULL AND outbox_id IS NULL "
+            "AND social_publication_id IS NULL "
             "AND social_reply_id IS NOT NULL)",
             name="exactly_one_delivery_owner",
         ),
@@ -694,6 +699,7 @@ class DeliveryAttempt(CreatedMixin, Base):
     )
 
     outbox_id: Mapped[int | None] = mapped_column(ForeignKey("outbox.id", ondelete="RESTRICT"))
+    owner_erased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     social_publication_id: Mapped[int | None] = mapped_column(
         ForeignKey("social_publication.id", ondelete="RESTRICT")
     )
