@@ -56,9 +56,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["follow_up_delivery_attempt_id"], ["delivery_attempt.id"], ondelete="RESTRICT"
         ),
-        sa.ForeignKeyConstraint(
-            ["reviewed_by_operator_id"], ["operator.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["reviewed_by_operator_id"], ["operator.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("delivery_attempt_id", "reason_key"),
     )

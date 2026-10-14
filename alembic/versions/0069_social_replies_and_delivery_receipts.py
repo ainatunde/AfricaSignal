@@ -93,9 +93,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("post_id"),
     )
-    op.create_index(
-        "ix_social_mention_status_expires", "social_mention", ["status", "expires_at"]
-    )
+    op.create_index("ix_social_mention_status_expires", "social_mention", ["status", "expires_at"])
     op.create_table(
         "social_reply",
         sa.Column("id", sa.BigInteger(), sa.Identity(), nullable=False),
@@ -128,12 +126,8 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["assessment_version_id"], ["assessment_version.id"], ondelete="RESTRICT"
         ),
-        sa.ForeignKeyConstraint(
-            ["requested_by_operator_id"], ["operator.id"], ondelete="RESTRICT"
-        ),
-        sa.ForeignKeyConstraint(
-            ["reviewed_by_operator_id"], ["operator.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["requested_by_operator_id"], ["operator.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["reviewed_by_operator_id"], ["operator.id"], ondelete="RESTRICT"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("mention_id"),
     )
@@ -167,13 +161,17 @@ def upgrade() -> None:
         sa.Column("completed_at", sa.DateTime(timezone=True)),
         sa.Column("outcome_detail", sa.Text()),
         sa.CheckConstraint(
-            "(outbox_id IS NOT NULL AND social_publication_id IS NULL AND social_reply_id IS NULL) "
-            "OR (outbox_id IS NULL AND social_publication_id IS NOT NULL AND social_reply_id IS NULL) "
-            "OR (outbox_id IS NULL AND social_publication_id IS NULL AND social_reply_id IS NOT NULL)",
+            "(outbox_id IS NOT NULL AND social_publication_id IS NULL "
+            "AND social_reply_id IS NULL) OR "
+            "(outbox_id IS NULL AND social_publication_id IS NOT NULL "
+            "AND social_reply_id IS NULL) OR "
+            "(outbox_id IS NULL AND social_publication_id IS NULL "
+            "AND social_reply_id IS NOT NULL)",
             name="exactly_one_delivery_owner",
         ),
         sa.CheckConstraint(
-            "status IN ('prepared', 'sent', 'simulated', 'rejected', 'outcome_unknown', 'cancelled')",
+            "status IN ('prepared', 'sent', 'simulated', 'rejected', "
+            "'outcome_unknown', 'cancelled')",
             name="status_valid",
         ),
         sa.CheckConstraint("attempt_no > 0", name="attempt_positive"),
@@ -201,9 +199,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_delivery_attempt_assessment_versions", table_name="delivery_attempt"
-    )
+    op.drop_index("ix_delivery_attempt_assessment_versions", table_name="delivery_attempt")
     op.drop_index("ix_delivery_attempt_status_created", table_name="delivery_attempt")
     op.drop_table("delivery_attempt")
     op.drop_index("ix_social_reply_status_created", table_name="social_reply")
