@@ -2,10 +2,10 @@
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import Engine, delete
+from sqlalchemy import Engine, delete, select
 from sqlalchemy.orm import sessionmaker
 
-from africasignal.models import AppUser, LoginToken, Outbox
+from africasignal.models import AppUser, DeliveryAttempt, LoginToken, Outbox
 from africasignal.publish.email import FakeProvider
 from africasignal.publish.login_tokens import hash_token
 from africasignal.publish.outbox import dispatch_pending, enqueue_email
@@ -57,6 +57,13 @@ def test_concurrent_dispatch_does_not_send_prefetched_row_twice(engine: Engine) 
         assert len(provider.sent) == 2 and other.sent == []
     finally:
         with factory() as session:
+            session.execute(
+                delete(DeliveryAttempt).where(
+                    DeliveryAttempt.outbox_id.in_(
+                        select(Outbox.id).where(Outbox.dedupe_key.like("concurrent:%"))
+                    )
+                )
+            )
             session.execute(delete(Outbox).where(Outbox.dedupe_key.like("concurrent:%")))
             session.execute(delete(LoginToken).where(LoginToken.user_id == user.id))
             session.execute(delete(AppUser).where(AppUser.id == user.id))

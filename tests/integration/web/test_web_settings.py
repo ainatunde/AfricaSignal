@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session
 
 from africasignal import operators, settings_store
 from africasignal.web.routes import public
-from tests.integration.email_support import add_place, add_situation, add_version
+from tests.integration.email_support import (
+    add_place,
+    add_situation,
+    add_version,
+    attach_permissioned_evidence,
+)
 
 ADDRESS = "https://africasignal.example"
 BROWSER = {"User-Agent": "Mozilla/5.0"}
@@ -17,7 +22,8 @@ BROWSER = {"User-Agent": "Mozilla/5.0"}
 @pytest.fixture(autouse=True)
 def _situation(session: Session) -> None:
     situation = add_situation(session, "price-pms", add_place(session, "NG-LA", "Lagos", "state"))
-    add_version(session, situation)
+    version = add_version(session, situation)
+    attach_permissioned_evidence(session, version)
 
 
 def test_share_links_use_the_address_from_the_console(client: TestClient, session: Session) -> None:

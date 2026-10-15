@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -29,7 +30,12 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from africasignal.assess.explain import build_input, generate_explanation, needs_explanation
+from africasignal.assess.explain import (
+    build_input,
+    generate_explanation,
+    needs_explanation,
+    numbers_written,
+)
 from africasignal.assess.publication_policy import Decision, precision_of
 from africasignal.catalog import Item, load_items
 from africasignal.evidence.origins import assign_origin
@@ -58,6 +64,7 @@ from africasignal.models import (
 )
 from africasignal.places.load import load_aliases, load_boundaries
 from africasignal.places.resolve import resolve_candidates
+from africasignal.publish.factfmt import format_value
 from africasignal.publish.policy_situations import ensure_policy_situations
 from africasignal.publish.situations import (
     assess_situation,
@@ -213,12 +220,85 @@ class Models:
         replies = self.recorded.get("explanations", {}).get(case.id)
         if self.mode == "recorded" and replies is not None:
             return self._adapter(session, FakeProvider(list(replies)), case.now), "recorded"
-        if case.explanation is None:
+        explanation = case.explanation
+        if explanation is None:
             return None
-        answers = [json.dumps({"explanation": a}) for a in case.explanation.answers]
-        # An answer list that runs out raises in FakeProvider; the pipeline records that as an
-        # error for the case, which is what a mislabelled stand-in deserves.
-        return self._adapter(session, FakeProvider(answers), case.now), "stand_in"
+        answer_index = 0
+
+        def answer_with_provenance(request: Any) -> dict[str, Any]:
+            nonlocal answer_index
+            if answer_index >= len(explanation.answers):
+                raise AssertionError("stand-in explanation script ran out of answers")
+            answer = explanation.answers[answer_index]
+            answer_index += 1
+            input_json = request.user.split("BEGIN INPUT\n", 1)[1].split("\nEND INPUT", 1)[0]
+            payload = json.loads(input_json)
+            facts = payload.get("facts", [])
+            output_numbers = set(numbers_written(answer))
+            fact_refs = [
+                fact["fact_ref"]
+                for fact in facts
+                if isinstance(fact.get("value"), int | float)
+                and not isinstance(fact.get("value"), bool)
+                and output_numbers
+                & set(numbers_written(format_value(fact.get("value"), str(fact.get("unit") or ""))))
+            ]
+            lowered = answer.lower()
+            if "independent" in lowered or "corroborat" in lowered:
+                fact_refs.extend(
+                    fact["fact_ref"]
+                    for fact in facts
+                    if "independent" in str(fact.get("label", "")).lower()
+                    and fact["fact_ref"] not in fact_refs
+                )
+            direction = (
+                "up"
+                if re.search(r"\b(?:rose|rise|increased|up|higher)\b", lowered)
+                else "down"
+                if re.search(r"\b(?:fell|fall|decreased|down|lower|dropped)\b", lowered)
+                else "flat"
+                if re.search(r"\b(?:unchanged|flat|stable)\b", lowered)
+                else None
+            )
+            if direction and not any(
+                "change" in str(fact.get("label", "")).lower() and fact["fact_ref"] in fact_refs
+                for fact in facts
+            ):
+                for fact in facts:
+                    value = fact.get("value")
+                    if "change" not in str(fact.get("label", "")).lower():
+                        continue
+                    sign = (
+                        "up"
+                        if isinstance(value, int | float) and value > 0
+                        else "down"
+                        if isinstance(value, int | float) and value < 0
+                        else "flat"
+                    )
+                    if sign == direction:
+                        fact_refs.append(fact["fact_ref"])
+                        break
+            if not fact_refs and facts:
+                fact_refs.append(facts[0]["fact_ref"])
+
+            factor_names = [
+                str(factor.get("factor", "")).lower()
+                for factor in payload.get("possible_factors", [])
+            ]
+            evidence_refs = [
+                passage["evidence_ref"]
+                for passage in payload.get("retrieved_evidence", [])
+                if any(name and name in lowered for name in factor_names)
+            ]
+            return {
+                "assertions": [
+                    {"text": answer, "fact_refs": fact_refs, "evidence_refs": evidence_refs}
+                ]
+            }
+
+        # The current explanation schema requires typed facts and evidence references, so the
+        # stand-in uses the actual prompt payload to attach the same citations a model must supply.
+        return self._adapter(session, FakeProvider(answer_with_provenance), case.now), "stand_in"
 
 
 # --- setting up a case -------------------------------------------------------------------------

@@ -32,7 +32,7 @@ from africasignal.publish.outbox import (
     dispatch_with_configured_provider,
     enqueue_email,
 )
-from tests.integration.email_support import NOW, add_user
+from tests.integration.email_support import NOW, add_user, attach_permissioned_evidence
 
 ADDRESS = "https://africasignal.example"
 
@@ -163,6 +163,7 @@ def test_emails_built_at_send_time_use_the_current_address(
     place = add_place(session, "NG-LA", "Lagos", "state")
     situation = add_situation(session, "price-pms", place)
     version = add_version(session, situation)
+    attach_permissioned_evidence(session, version)
     item = item_snapshot(situation, version)
     enqueue_email(
         session,

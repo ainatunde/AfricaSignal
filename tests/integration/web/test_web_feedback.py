@@ -14,7 +14,13 @@ from africasignal import metrics
 from africasignal.models import AppUser, Event, Feedback, Situation
 from africasignal.publish import email_render
 from africasignal.web.routes.feedback import MAX_FEEDBACK_PER_DAY
-from tests.integration.email_support import add_place, add_situation, add_user, add_version
+from tests.integration.email_support import (
+    add_place,
+    add_situation,
+    add_user,
+    add_version,
+    attach_permissioned_evidence,
+)
 from tests.integration.web.web_support import ORIGIN
 
 SLUG = "price-pms"
@@ -26,7 +32,8 @@ def situation(session: Session) -> Situation:
     country = add_place(session, "NG", "Nigeria", "country")
     state = add_place(session, "NG-LA", "Lagos", "state", country)
     situation = add_situation(session, SLUG, state)
-    add_version(session, situation)
+    version = add_version(session, situation)
+    attach_permissioned_evidence(session, version)
     return situation
 
 
@@ -229,7 +236,7 @@ def test_a_situation_page_records_a_page_view_and_a_situation_view(
     assert response.status_code == 200
     cookie = response.headers["set-cookie"]
     assert "anon_id=" in cookie and "HttpOnly" in cookie and "SameSite=lax" in cookie
-    assert response.headers["cache-control"] == "private, no-cache"  # it set a cookie
+    assert response.headers["cache-control"] == "no-store"
 
     views = events(session)
     assert [e.name for e in views] == ["page_view", "situation_view"]
@@ -243,7 +250,7 @@ def test_a_returning_visitor_keeps_their_cookie(
 ) -> None:
     response = visitor.get(f"/s/{SLUG}")
     assert "set-cookie" not in response.headers
-    assert response.headers["cache-control"] == "public, max-age=300"
+    assert response.headers["cache-control"] == "no-store"
     assert {e.anon_id for e in events(session)} == {ANON}
 
 

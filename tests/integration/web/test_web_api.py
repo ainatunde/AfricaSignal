@@ -48,7 +48,7 @@ def test_list_follows_its_schema_and_carries_the_required_fields(
     assert lagos.period_label == "October 2024"
     assert (lagos.place.code, lagos.place.kind, lagos.topic) == ("NG-LA", "state", "energy")
     assert lagos.url == "/s/price-pms_litre-ng-la" and lagos.version == 1
-    assert response.headers["cache-control"] == "public, max-age=60"
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_filters_by_topic_and_place(

@@ -23,6 +23,7 @@ from tests.integration.email_support import (
     add_situation,
     add_user,
     add_version,
+    attach_permissioned_evidence,
     follow,
 )
 
@@ -107,7 +108,8 @@ def test_digest_is_queued_once_per_user_per_week_even_if_the_job_runs_twice(
     user = add_user(session, "a@example.com", digest=True)
     situation = add_situation(session, "s", places["lagos"])
     follow(session, user, situation)
-    add_version(session, situation)
+    version = add_version(session, situation)
+    attach_permissioned_evidence(session, version)
 
     first = run_weekly_digest(session, NOW)
     second = run_weekly_digest(session, NOW + timedelta(hours=2))
@@ -123,7 +125,8 @@ def test_digest_is_queued_once_per_user_per_week_even_if_the_job_runs_twice(
 
     # next week is a new digest
     next_week = NOW + timedelta(days=7)
-    add_version(session, situation, version=2, published_at=next_week)
+    next_version = add_version(session, situation, version=2, published_at=next_week)
+    attach_permissioned_evidence(session, next_version)
     assert run_weekly_digest(session, next_week).queued == 1
 
 
@@ -165,7 +168,10 @@ def test_sent_digest_content_and_headers(session: Session, places: dict[str, Pla
     user = add_user(session, "a@example.com", digest=True)
     situation = add_situation(session, "pms-ng-la", places["lagos"], title="Petrol, Lagos")
     follow(session, user, situation)
-    add_version(session, situation, headline="Petrol rose 5% in Lagos", change_summary="Up from 4%")
+    version = add_version(
+        session, situation, headline="Petrol rose 5% in Lagos", change_summary="Up from 4%"
+    )
+    attach_permissioned_evidence(session, version)
     run_weekly_digest(session, NOW)
     provider = FakeProvider()
     dispatch_pending(session, provider, NOW)

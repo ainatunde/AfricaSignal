@@ -69,7 +69,7 @@ def good_text(version: AssessmentVersion) -> str:
     by_label = {f["label"]: f for f in version.facts}
     current = by_label["Current price"]
     return (
-        f"NBS data shows 12.5kg cooking gas cost {format_value(current['value'], current['unit'])} "
+        f"Average 12.5kg cooking gas cost {format_value(current['value'], current['unit'])} "
         "on average across Nigeria in October 2024."
     )
 
@@ -80,8 +80,43 @@ def adapter_for(session: Session, provider: FakeProvider, budget: float = 10.0) 
     )
 
 
-def answer(text: str) -> dict[str, Any]:
-    return {"assertions": [{"text": text, "fact_refs": ["fact_1"], "evidence_refs": []}]}
+def answer(text: str, version: AssessmentVersion) -> dict[str, Any]:
+    refs: list[str] = []
+    for index, fact in enumerate(version.facts, start=1):
+        value = fact.get("value")
+        unit = str(fact.get("unit") or "")
+        if (
+            isinstance(value, int | float)
+            and not isinstance(value, bool)
+            and format_value(value, unit) in text
+        ):
+            refs.append(f"fact_{index}")
+    lowered = text.lower()
+    direction = (
+        "up"
+        if any(word in lowered.split() for word in ("rose", "rise", "increased", "up"))
+        else "down"
+        if any(word in lowered.split() for word in ("fell", "fall", "decreased", "down"))
+        else None
+    )
+    if direction and not any(
+        "change" in version.facts[int(ref[5:]) - 1]["label"].lower() for ref in refs
+    ):
+        for index, fact in enumerate(version.facts, start=1):
+            value = fact.get("value")
+            if "change" not in str(fact.get("label", "")).lower():
+                continue
+            sign = (
+                "up"
+                if isinstance(value, int | float) and value > 0
+                else ("down" if isinstance(value, int | float) and value < 0 else "flat")
+            )
+            if sign == direction:
+                refs.append(f"fact_{index}")
+                break
+    if not refs and version.facts:
+        refs.append("fact_1")
+    return {"assertions": [{"text": text, "fact_refs": refs, "evidence_refs": []}]}
 
 
 def test_a_valid_explanation_is_stored_with_the_model_and_prompt_version(
@@ -90,7 +125,7 @@ def test_a_valid_explanation_is_stored_with_the_model_and_prompt_version(
     v = published(session, store, source)
     text = good_text(v)
     assert validate_explanation(text, build_input(session, v)) == []
-    provider = FakeProvider([answer(text)])
+    provider = FakeProvider([answer(text, v)])
 
     assert explain_version(session, adapter_for(session, provider), v.id) == "explained"
 
@@ -106,7 +141,7 @@ def test_a_valid_explanation_is_stored_with_the_model_and_prompt_version(
 
 def test_a_version_is_explained_once(session: Session, store: S3Store, source: Source) -> None:
     v = published(session, store, source)
-    provider = FakeProvider([answer(good_text(v))])
+    provider = FakeProvider([answer(good_text(v), v)])
     adapter = adapter_for(session, provider)
     assert explain_version(session, adapter, v.id) == "explained"
     assert explain_version(session, adapter, v.id) == "skipped"
@@ -118,7 +153,7 @@ def test_a_rejected_answer_is_retried_once_with_the_problems_appended(
 ) -> None:
     v = published(session, store, source)
     bad = "Prices rose 99.9% and Kano was worse."
-    provider = FakeProvider([answer(bad), answer(good_text(v))])
+    provider = FakeProvider([answer(bad, v), answer(good_text(v), v)])
 
     assert explain_version(session, adapter_for(session, provider), v.id) == "explained"
 
@@ -133,7 +168,7 @@ def test_after_two_failures_the_version_keeps_publishing_without_an_explanation(
     session: Session, store: S3Store, source: Source
 ) -> None:
     v = published(session, store, source)
-    provider = FakeProvider([answer("It will definitely rise 99.9%."), "not json at all"])
+    provider = FakeProvider([answer("It will definitely rise 99.9%.", v), "not json at all"])
 
     assert explain_version(session, adapter_for(session, provider), v.id) == "failed"
 
@@ -148,7 +183,7 @@ def test_an_unusable_reply_counts_as_a_failed_attempt_not_a_crash(
     session: Session, store: S3Store, source: Source
 ) -> None:
     v = published(session, store, source)
-    provider = FakeProvider(["{broken", answer(good_text(v))])
+    provider = FakeProvider(["{broken", answer(good_text(v), v)])
     assert explain_version(session, adapter_for(session, provider), v.id) == "explained"
     assert "not valid JSON" in provider.calls[1].user
 
@@ -215,7 +250,7 @@ def test_the_job_writes_the_explanation(
     session: Session, store: S3Store, source: Source, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     v = published(session, store, source)
-    with_key(monkeypatch, FakeProvider([answer(good_text(v))]))
+    with_key(monkeypatch, FakeProvider([answer(good_text(v), v)]))
     run(session, explain_jobs.explain_version_job, "explain_version", {"version_id": v.id})
     assert v.explanation == good_text(v)
 
@@ -252,7 +287,7 @@ def test_the_backfill_explains_current_versions_and_stops_when_the_budget_is_spe
     session: Session, store: S3Store, source: Source, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     v = published(session, store, source)
-    provider = FakeProvider([answer(good_text(v))])
+    provider = FakeProvider([answer(good_text(v), v)])
     with_key(monkeypatch, provider)
     run(session, explain_jobs.explain_backfill_job, "explain_backfill", {})
     assert v.explanation == good_text(v) and versions_missing_explanation(session, 10) == []
@@ -346,6 +381,6 @@ def test_the_stored_paragraph_is_the_cleaned_one(
 ) -> None:
     v = published(session, store, source)
     messy = good_text(v).replace(" on average", "​  on average") + "​ "
-    provider = FakeProvider([answer(messy)])
+    provider = FakeProvider([answer(messy, v)])
     assert explain_version(session, adapter_for(session, provider), v.id) == "explained"
     assert v.explanation == good_text(v)

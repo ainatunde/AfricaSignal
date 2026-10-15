@@ -39,6 +39,7 @@ from tests.integration.email_support import (
     add_situation,
     add_user,
     add_version,
+    attach_permissioned_evidence,
     follow,
 )
 
@@ -94,6 +95,7 @@ def test_a_new_version_does_not_email_but_a_correction_does_for_opted_in_followe
         supersedes=v1,
         change_summary="Corrected: NBS revised the July figure",
     )
+    attach_permissioned_evidence(session, v2)
     result = notify_followers(session, v2.id, NOW, kind="correction")
     assert (result.created, result.emails) == (3, 1)
 
@@ -157,6 +159,7 @@ def test_an_email_already_sent_is_not_touched_by_cancellation(
     user = add_user(session, "a@example.com", digest=True)
     follow(session, user, situation)
     v1 = add_version(session, situation)
+    attach_permissioned_evidence(session, v1)
     notify_followers(session, v1.id, NOW, kind="correction")
     dispatch_pending(session, FakeProvider(), NOW)
     cancel_superseded(session, v1.id, NOW)

@@ -144,7 +144,7 @@ def test_the_email_is_everywhere_before_deletion_and_nowhere_after(session: Sess
     )
     receipt = session.get(DeliveryAttempt, receipt.id)
     assert receipt is not None
-    assert receipt.status == "sent"
+    assert receipt.status == "simulated"
     assert receipt.outbox_id is None and receipt.owner_erased_at is not None
     assert receipt.destination_sha256 is None and receipt.target_reference is None
     assert receipt.assessment_version_ids == []

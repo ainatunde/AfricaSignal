@@ -132,6 +132,18 @@ def test_a_number_that_is_not_in_the_facts_is_rejected(text: str, number: str) -
     assert any(f"number {number} " in p for p in found), found
 
 
+def test_a_12_5kg_unit_is_not_mistaken_for_a_separate_5kg_unit() -> None:
+    input_data = data(facts=[fact("Current gas price", 16734.55, "NGN/12.5kg", "October 2024")])
+    answer = [
+        {
+            "text": "Cooking gas cost ₦16,734.55 per 12.5kg in October 2024.",
+            "fact_refs": ["fact_1"],
+            "evidence_refs": [],
+        }
+    ]
+    assert validate_assertions(answer, input_data)[2] == []
+
+
 @pytest.mark.parametrize("word", ["two", "Three", "half", "double", "thousand", "twenty"])
 def test_numbers_written_as_words_are_rejected(word: str) -> None:
     assert any(word.lower() in p for p in problems(f"Prices rose by {word} times as much."))
@@ -139,6 +151,16 @@ def test_numbers_written_as_words_are_rejected(word: str) -> None:
 
 def test_one_is_ordinary_english() -> None:
     assert problems("No one can say from one report alone whether prices differ.") == []
+
+
+def test_a_single_independent_report_does_not_claim_corroboration() -> None:
+    facts = [*FACTS, fact("Independent reports", 1, "reports", "October 2024")]
+    assert (
+        validate_explanation(
+            "One independent report points in the same direction.", data(facts=facts)
+        )
+        == []
+    )
 
 
 def test_numbers_written_finds_digits_glued_to_letters_and_keeps_commas() -> None:

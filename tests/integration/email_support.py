@@ -6,7 +6,17 @@ from datetime import datetime, time, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from africasignal.models import AppUser, AssessmentVersion, Follow, Place, Situation
+from africasignal.models import (
+    AppUser,
+    AssessmentInput,
+    AssessmentVersion,
+    EvidenceDocument,
+    Follow,
+    Place,
+    Situation,
+    Source,
+    SourcePermission,
+)
 
 LAGOS = timezone(timedelta(hours=1))
 _today = datetime.now(LAGOS).date()
@@ -91,6 +101,51 @@ def add_version(
         situation.current_version_id = row.id
         session.flush()
     return row
+
+
+def attach_permissioned_evidence(session: Session, version: AssessmentVersion) -> EvidenceDocument:
+    """Give a synthetic published version explicit current evidence and numeric reuse rights."""
+    source = Source(
+        slug=f"email-test-{version.id}",
+        name="Email test source",
+        kind="official_statistics",
+        adapter="nbs",
+        schedule_minutes=1440,
+    )
+    session.add(source)
+    session.flush()
+    session.add(
+        SourcePermission(
+            source_id=source.id,
+            version=1,
+            may_collect=True,
+            may_store_full_text=False,
+            max_quote_chars=200,
+            may_republish_numbers=True,
+            approved_at=NOW,
+        )
+    )
+    document = EvidenceDocument(
+        source_id=source.id,
+        url="https://source.example/report",
+        canonical_url="https://source.example/report",
+        retrieved_at=NOW,
+        content_sha256=f"{version.id:064d}",
+        storage_key=f"test/{version.id}",
+        mime="text/html",
+        excerpt="An approved source excerpt.",
+    )
+    session.add(document)
+    session.flush()
+    session.add(
+        AssessmentInput(
+            assessment_version_id=version.id,
+            input_kind="evidence_document",
+            input_id=document.id,
+        )
+    )
+    session.flush()
+    return document
 
 
 def follow(session: Session, user: AppUser, situation: Situation) -> None:

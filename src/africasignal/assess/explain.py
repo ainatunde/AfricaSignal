@@ -414,7 +414,7 @@ def validate_explanation(text: str, data: ExplainInput) -> list[str]:
             default=0,
         )
         plural = re.search(
-            r"\b(?:independent(?:ly)?\s+(?:reports?|sources?)|corroborat|multiple|several|"
+            r"\b(?:independent\s+(?:reports|sources)|corroborat|multiple|several|"
             r"both\s+(?:sources|outlets))\b",
             flat,
             re.IGNORECASE,
@@ -621,7 +621,8 @@ def validate_assertion_quantity_bindings(text: str, facts: list[dict[str, Any]])
                 aliases = {
                     "litre": r"\b(?:litres?|liters?)\b",
                     "kg": r"\b(?:kg|kilograms?)\b",
-                    "5kg": r"\b5\s?kg\b",
+                    # Do not read the trailing ``5kg`` in ``12.5kg`` as a second unit.
+                    "5kg": r"(?<![\d.])5\s?kg\b",
                     "12.5kg": r"\b12\.5\s?kg\b",
                     "kwh": r"\b(?:kwh|kilowatt[- ]hours?)\b",
                     "tonne": r"\btonnes?\b",

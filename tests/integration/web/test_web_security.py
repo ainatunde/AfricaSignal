@@ -11,7 +11,12 @@ from sqlalchemy.orm import Session
 from africasignal.models import EvidenceDocument, Feedback, Situation, Source
 from africasignal.storage import S3Store
 from africasignal.web.routes import feedback, public
-from tests.integration.email_support import add_place, add_situation, add_version
+from tests.integration.email_support import (
+    add_place,
+    add_situation,
+    add_version,
+    attach_permissioned_evidence,
+)
 from tests.integration.web.web_support import ORIGIN, seed_petrol
 
 SLUG = "price-pms"
@@ -22,7 +27,8 @@ def situation(session: Session) -> Situation:
     country = add_place(session, "NG", "Nigeria", "country")
     state = add_place(session, "NG-LA", "Lagos", "state", country)
     situation = add_situation(session, SLUG, state)
-    add_version(session, situation)
+    version = add_version(session, situation)
+    attach_permissioned_evidence(session, version)
     return situation
 
 

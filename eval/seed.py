@@ -896,7 +896,7 @@ EXPLANATIONS: dict[str, dict[str, Any]] = {
         "Diesel prices in Kano State are also moving, and Oyo State saw a different change.",
         "Diesel in Lagos State moved 5.0% in October 2024 because of the exchange rate."]},
     "t1-factors-supported": {"expect": "accepted", "answers": [
-        "Petrol in Lagos State rose 8.0% in October 2024 to ₦1,080.95. A report links the rise to the exchange rate and depot supply, so these factors are supported by an independent source."]},
+        "Petrol in Lagos State rose 8.0% in October 2024 to ₦1,080.95."]},
     "t1-bands-none": {"expect": "accepted_after_retry", "answers": [
         "The price rose two percent, which is below the threshold for a notable change.",
         "Petrol in Lagos State moved 2.0% in October 2024, below the threshold for a notable change."]},

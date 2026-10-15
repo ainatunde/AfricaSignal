@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from africasignal.models import AssessmentVersion, Place, Situation, Source
+from africasignal.publish.eligibility import publication_eligibility
 from africasignal.publish.situations import assess_situation, ensure_situations
 from africasignal.storage import S3Store
 from tests.integration.nbs_support import import_bytes
@@ -35,6 +36,10 @@ def publish(
     version.valid_until = valid_until or datetime.now(UTC) + timedelta(days=365)
     situation.current_version_id = version.id
     session.flush()
+    decision = publication_eligibility(session, version, channel="website")
+    assert decision.eligible, (
+        f"web fixture lacks current publication eligibility: {decision.rule_ids}"
+    )
     return version
 
 
