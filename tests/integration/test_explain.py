@@ -152,7 +152,7 @@ def test_a_rejected_answer_is_retried_once_with_the_problems_appended(
     session: Session, store: S3Store, source: Source
 ) -> None:
     v = published(session, store, source)
-    bad = "Prices rose 99.9% and Kano was worse."
+    bad = "Prices rose 99.9% compared with the previous month and Kano was worse."
     provider = FakeProvider([answer(bad, v), answer(good_text(v), v)])
 
     assert explain_version(session, adapter_for(session, provider), v.id) == "explained"
