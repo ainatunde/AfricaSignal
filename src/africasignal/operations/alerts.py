@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from africasignal import backup_alerts
-from africasignal.models import AuditLog, Setting
+from africasignal.models import AuditLog, GuardianCheckRun, Setting
 
 
 @dataclass(frozen=True)
@@ -76,6 +76,17 @@ def history(session: Session, limit: int = 30) -> list[AuditLog]:
             select(AuditLog)
             .where(AuditLog.action.in_(("alert.opened", "alert.resolved")))
             .order_by(AuditLog.id.desc())
+            .limit(limit)
+        )
+    )
+
+
+def recent_guardian_checks(session: Session, limit: int = 30) -> list[GuardianCheckRun]:
+    """Latest persisted external visitor-page observations."""
+    return list(
+        session.scalars(
+            select(GuardianCheckRun)
+            .order_by(GuardianCheckRun.checked_at.desc(), GuardianCheckRun.id.desc())
             .limit(limit)
         )
     )

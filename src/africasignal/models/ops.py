@@ -147,6 +147,28 @@ class GuardianRepairAttempt(CreatedMixin, Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class GuardianCheckRun(CreatedMixin, Base):
+    """One bounded observation from an external visitor-facing page check."""
+
+    __tablename__ = "guardian_check_run"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pass', 'fail', 'unknown')",
+            name="status_valid",
+        ),
+        Index("ix_guardian_check_run_subject_checked", "check_code", "subject_key", "checked_at"),
+        Index("ix_guardian_check_run_checked", "checked_at"),
+    )
+
+    check_code: Mapped[str] = mapped_column(Text, nullable=False)
+    subject_key: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    observed: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class LlmBudgetReservation(CreatedMixin, Base):
     """Durable upper-bound reservations that prevent concurrent model calls exceeding the cap."""
 

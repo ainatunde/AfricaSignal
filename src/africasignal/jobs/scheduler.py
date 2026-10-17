@@ -99,6 +99,10 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
         ),  # task output retention and deadline cancellation
         ("check_backups", f"check_backups:{_slot(now, 60)}"),  # stale backup, failed drill alerts
         ("check_health", f"check_health:{_slot(now, 1)}"),  # Guardian checks, every minute
+        (
+            "check_public_pages",
+            f"check_public_pages:{_slot(now, 5)}",
+        ),  # external reader-facing HTTP checks
         ("check_storage", f"check_storage:{_slot(now, 5)}"),  # bounded read-only bucket probe
         (
             "refresh_insight_candidates",
