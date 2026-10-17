@@ -66,6 +66,7 @@ class Settings(BaseSettings):
 
     # Origin used in links inside emails (sign-in, unsubscribe, situation pages).
     public_base_url: str = Field(default="http://localhost:8000", alias="PUBLIC_BASE_URL")
+    guardian_public_base_url: str = Field(default="", alias="GUARDIAN_PUBLIC_BASE_URL")
 
     def validate_required(self) -> None:
         """Raise ``RuntimeError`` naming every missing required setting (non-development only)."""

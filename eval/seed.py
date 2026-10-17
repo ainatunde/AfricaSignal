@@ -883,26 +883,26 @@ def build_t2() -> list[dict[str, Any]]:
 # fmt: off
 EXPLANATIONS: dict[str, dict[str, Any]] = {
     "t1-bands-low": {"expect": "accepted", "answers": [
-        "The average petrol price in Lagos State moved up 8.0% in October 2024 to ₦1,080.95. This is a state-wide average from the National Bureau of Statistics, so prices near you may differ. No independent report for the month has been found yet."]},
+        "The average petrol price in Lagos State moved up 8.0% compared with the previous month in October 2024 to ₦1,080.95 per litre. This is a state-wide average from the National Bureau of Statistics, so prices near you may differ. No independent report for the month has been found yet."]},
     "t1-bands-medium": {"expect": "accepted_after_retry", "answers": [
         "Petrol prices in Kano State will keep rising after this 11.0% increase.",
-        "The average petrol price in Kano State rose 11.0% in October 2024 to ₦1,087.80, according to the National Bureau of Statistics. This is a state-wide average."]},
+        "The average petrol price in Kano State rose 11.0% compared with the previous month in October 2024 to ₦1,087.80 per litre, according to the National Bureau of Statistics. This is a state-wide average."]},
     "t1-corroborated-one-outlet": {"expect": "accepted", "answers": [
-        "Petrol in Lagos State rose 8.0% in October 2024, and one independent report points the same way."]},
+        "Petrol in Lagos State rose 8.0% compared with the previous month in October 2024, and one independent report points the same way."]},
     "t1-copied-wire-story": {"expect": "accepted_after_retry", "answers": [
         "Petrol in Lagos State rose 12.3% in October 2024.",
-        "Petrol in Lagos State rose 8.0% in October 2024, and the report repeated by other outlets is counted once."]},
+        "Petrol in Lagos State rose 8.0% compared with the previous month in October 2024, and the report repeated by other outlets is counted once."]},
     "t1-boundary-five": {"expect": "none", "answers": [
         "Diesel prices in Kano State are also moving, and Oyo State saw a different change.",
         "Diesel in Lagos State moved 5.0% in October 2024 because of the exchange rate."]},
     "t1-factors-supported": {"expect": "accepted", "answers": [
-        "Petrol in Lagos State rose 8.0% in October 2024 to ₦1,080.95."]},
+        "Petrol in Lagos State rose 8.0% compared with the previous month in October 2024 to ₦1,080.95 per litre."]},
     "t1-bands-none": {"expect": "accepted_after_retry", "answers": [
         "The price rose two percent, which is below the threshold for a notable change.",
-        "Petrol in Lagos State moved 2.0% in October 2024, below the threshold for a notable change."]},
+        "Petrol in Lagos State moved 2.0% compared with the previous month in October 2024, below the threshold for a notable change."]},
     "t1-bands-fell": {"expect": "accepted_after_retry", "answers": [
         "The price fell 6.5% in the Federal Capital Territory, see https://example.com for details.",
-        "Petrol in the Federal Capital Territory fell 6.5% in October 2024, to ₦981.75, a state-wide average."]},
+        "Petrol in the Federal Capital Territory fell 6.5% compared with the previous month in October 2024, to ₦981.75 per litre, a state-wide average."]},
     "t2-corroborated-wording": {"expect": "accepted", "answers": [
         "NERC's order raises the Band A tariff for Ikeja Electric customers by 14.6% to ₦240.00 per kWh from 1 September 2025, and an independent report says customers are being charged it."]},
     "t2-low-7": {"expect": "accepted_after_retry", "answers": [

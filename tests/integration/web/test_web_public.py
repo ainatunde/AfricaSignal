@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from africasignal.assess.explain import PROMPT_VERSION
 from africasignal.models import (
+    AssessmentInput,
     AssessmentVersion,
     EvidenceDocument,
     Setting,
@@ -240,6 +241,20 @@ def test_the_page_cache_is_keyed_by_version(
         supersedes_id=v1.id,
     )
     session.add(v2)
+    session.flush()
+    # A published replacement must retain the exact source inputs it represents.
+    for input_kind, input_id in session.execute(
+        select(AssessmentInput.input_kind, AssessmentInput.input_id).where(
+            AssessmentInput.assessment_version_id == v1.id
+        )
+    ):
+        session.add(
+            AssessmentInput(
+                assessment_version_id=v2.id,
+                input_kind=input_kind,
+                input_id=input_id,
+            )
+        )
     session.flush()
     v1.status = "superseded"
     publish(session, situation, v2)

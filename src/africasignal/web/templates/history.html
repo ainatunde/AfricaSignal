@@ -5,7 +5,7 @@
 <p class="crumbs"><a href="/s/{{ situation.slug }}">{{ situation.title }}</a></p>
 <h1>Version history</h1>
 <p>Every published version of this assessment, newest first. When a figure is corrected, the old version stays here with the reason.</p>
-<ol class="history" reversed>
+<ol class="history" reversed data-guardian-current-version-id="{{ situation.current_version_id }}">
   {% for v, b, status in versions %}
   <li>
     <h2>Version {{ v.version }}{% if v.id == situation.current_version_id %} <span class="tag">Current</span>{% endif %}

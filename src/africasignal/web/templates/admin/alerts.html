@@ -2,7 +2,7 @@
 {% block title %}Alerts{% endblock %}
 {% block content %}
 <h1>Alerts</h1>
-<p>Raised by the hourly backup check, five-minute object-storage probe, and every-minute Guardian check. Incidents cover source failures, scheduler and queue progress, monthly-series reference age, delivery lag, unresolved email and social outcomes, model spend, retention, storage, backups, and restore drills. A recognized transient collection outage can receive one delayed, permission-checked retry per source recovery interval; parser and delivery failures require an operator. Already delivered items affected by invalidation appear in <a href="/admin/delivery-corrections">Delivered item corrections</a>. An incident closes when a later check confirms recovery. No external alert recipient is configured; review this page or the <a href="/admin/audit">audit log</a>.</p>
+<p>Raised by the hourly backup check, five-minute public-page and object-storage checks, and every-minute operational Guardian check. Incidents cover source failures, scheduler and queue progress, monthly-series reference age, delivery lag, unresolved email and social outcomes, model spend, retention, storage, backups, restore drills, and public-page failures. A recognized transient collection outage can receive one delayed, permission-checked retry per source recovery interval; parser and delivery failures require an operator. Already delivered items affected by invalidation appear in <a href="/admin/delivery-corrections">Delivered item corrections</a>. An incident closes when a later check confirms recovery. No external alert recipient is configured; review this page or the <a href="/admin/audit">audit log</a>.</p>
 
 <h2>Alerts</h2>
 {% for a in alerts %}
@@ -16,6 +16,17 @@
 {% else %}
 <p>No alert has been raised. Either everything is healthy, or the checks have not run yet.</p>
 {% endfor %}
+
+<h2>Latest public page checks</h2>
+<p class="muted">Unauthenticated GET checks of the configured public site. Two consecutive failures open an alert; two passes resolve it. These HTTP checks do not replace browser layout or interaction checks.</p>
+{% if page_checks %}
+<table>
+  <thead><tr><th scope="col">Checked</th><th scope="col">Page</th><th scope="col">Result</th><th scope="col">Observation</th><th scope="col">Duration</th></tr></thead>
+  <tbody>{% for c in page_checks %}
+    <tr><td>{{ c.checked_at|when }}</td><th scope="row">{{ c.subject_key }}</th><td>{{ c.status|capitalize }}</td><td>{{ c.summary }}{% if c.observed.get('h1') %}<br><span class="muted">{{ c.observed.get('h1') }}</span>{% endif %}</td><td>{{ c.duration_ms if c.duration_ms is not none else '—' }} ms</td></tr>
+  {% endfor %}</tbody>
+</table>
+{% else %}<p class="muted">No public page checks have run.</p>{% endif %}
 
 <h2>Last backup</h2>
 {% if backup %}

@@ -3,7 +3,7 @@
 {% block title %}{{ version|reader_headline }} · AfricaSignal{% endblock %}
 {% block description %}{{ version.scope_label }} · {{ version.period_label }}. {{ b.text }}.{% endblock %}
 {% block content %}
-<article>
+<article data-guardian-version-id="{{ version.id }}" data-guardian-status="{{ status }}">
   <p class="crumbs"><a href="/places/{{ place.code }}">{{ place.name }}</a> · {{ situation.topic|capitalize }}</p>
   <h1>{{ version|reader_headline }}</h1>
   <p class="meta">{% if status == "withdrawn" %}<span class="tag tag-stale">Withdrawn</span>{% else %}{{ badge_tag(b) }}{% endif %}
@@ -91,7 +91,7 @@
       <thead><tr><th scope="col">Measure</th><th scope="col">Value</th><th scope="col">Period</th><th scope="col">Source</th></tr></thead>
       <tbody>
       {% for f in facts %}
-        <tr><th scope="row">{{ f.label }}</th><td data-label="Value">{{ f|fact_value }}</td><td data-label="Period">{{ f.period or "" }}</td><td data-label="Source">{{ f.source_label or "" }}</td></tr>
+        <tr data-guardian-fact-row="true"><th scope="row">{{ f.label }}</th><td data-label="Value">{{ f|fact_value }}</td><td data-label="Period">{{ f.period or "" }}</td><td data-label="Source">{{ f.source_label or "" }}</td></tr>
       {% endfor %}
       </tbody>
     </table>

@@ -157,8 +157,9 @@ def test_quotes_never_exceed_the_sources_limit(
     assert all(e["quote"] is None for e in evidence)
     permission.max_quote_chars, permission.approved_at = 100, None  # permission not approved
     session.flush()
-    evidence = client.get("/v1/situations/price-pms_litre-ng-la").json()["evidence"]
-    assert all(e["quote"] is None for e in evidence)
+    # Without approved reuse rights, the current eligibility gate withholds the
+    # whole assessment rather than exposing its figures with the quote removed.
+    assert client.get("/v1/situations/price-pms_litre-ng-la").status_code == 404
 
 
 def test_versions_show_history_and_status(
