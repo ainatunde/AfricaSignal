@@ -13,12 +13,13 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import ValidationError
 from starlette.datastructures import UploadFile
 
 from africasignal import audit, backup_alerts, settings_store
 from africasignal.jobs import queue
+from africasignal.models import Setting, Source
 from africasignal.operations import alerts as alerts_ops
 from africasignal.operations import assessments as assessment_ops
 from africasignal.operations import channel_posts as channel_ops
@@ -36,11 +37,198 @@ from africasignal.operations import social_reply_policy as reply_policy_ops
 from africasignal.publish import social as social_ops
 from africasignal.publish import versions
 from africasignal.publish.whatsapp_text import PostError
+from africasignal.research.policy import (
+    ResearchPolicy,
+)
+from africasignal.research.policy import (
+    configure as configure_research,
+)
+from africasignal.research.qualification import RELEASE_GATES, Evaluation
+from africasignal.sources.permissions import current_permission
 from africasignal.storage import store_for_session
 from africasignal.web.deps import AdminOperator, DbSession
 from africasignal.web.routes.admin import _page, _redirect, _settings_group
 
 router = APIRouter(prefix="/admin")
+
+
+@router.get("/api/research")
+def research_status(auth: AdminOperator, db: DbSession) -> dict[str, object]:
+    from africasignal.research.guardian import status
+
+    return status(db)
+
+
+@router.get("/api/research/questions")
+def research_questions(auth: AdminOperator, db: DbSession) -> dict[str, object]:
+    from sqlalchemy import select
+
+    from africasignal.models import (
+        CorrectionAction,
+        ResearchAttempt,
+        ResearchDecision,
+        ResearchQuestion,
+    )
+
+    questions = list(
+        db.scalars(select(ResearchQuestion).order_by(ResearchQuestion.updated_at.desc()).limit(100))
+    )
+    ids = [question.id for question in questions]
+    attempts_by_question: dict[int, list[Any]] = {}
+    for attempt in db.scalars(
+        select(ResearchAttempt)
+        .where(ResearchAttempt.question_id.in_(ids))
+        .order_by(ResearchAttempt.id)
+    ):
+        attempts_by_question.setdefault(attempt.question_id, []).append(attempt)
+    decisions = {
+        item.question_id: item
+        for item in db.scalars(
+            select(ResearchDecision).where(ResearchDecision.question_id.in_(ids))
+        )
+    }
+    actions = {
+        item.question_id: item
+        for item in db.scalars(
+            select(CorrectionAction).where(CorrectionAction.question_id.in_(ids))
+        )
+    }
+    result = []
+    for question in questions:
+        attempts = attempts_by_question.get(question.id, [])
+        decision = decisions.get(question.id)
+        action = actions.get(question.id)
+        result.append(
+            {
+                "id": question.id,
+                "situation_id": question.situation_id,
+                "version_id": question.version_id,
+                "generation": question.generation,
+                "scope": question.scope,
+                "state": question.state,
+                "reason": question.reason,
+                "updated_at": question.updated_at.isoformat(),
+                "attempts": [
+                    {
+                        "source_id": item.source_id,
+                        "permission_version": item.permission_version,
+                        "outcome": item.outcome,
+                        "evidence_id": item.evidence_id,
+                    }
+                    for item in attempts
+                ],
+                "decision": (
+                    {"verdict": decision.verdict, "provenance": decision.provenance}
+                    if decision
+                    else None
+                ),
+                "correction": (
+                    {
+                        "state": action.state,
+                        "reason": action.reason,
+                        "before_version_id": action.before_version_id,
+                        "after_version_id": action.after_version_id,
+                    }
+                    if action
+                    else None
+                ),
+            }
+        )
+    return {"questions": result}
+
+
+@router.post("/api/research/policy", response_model=None)
+async def research_policy_save(
+    request: Request, auth: AdminOperator, db: DbSession
+) -> JSONResponse | dict[str, object]:
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("policy must be a JSON object")
+        expected_revision = int(payload.pop("expected_revision", -1))
+        policy = ResearchPolicy.model_validate(payload)
+        for source_id in policy.source_ids:
+            source = db.get(Source, source_id)
+            permission = current_permission(db, source_id)
+            if (
+                source is None
+                or not source.active
+                or permission is None
+                or not permission.may_collect
+                or permission.approved_at is None
+                or (
+                    permission.review_due_at is not None
+                    and permission.review_due_at <= datetime.now(UTC)
+                )
+                or (
+                    policy.application_enabled
+                    and (
+                        not permission.may_republish_numbers
+                        or source.adapter not in {"nbs", "nerc"}
+                    )
+                )
+            ):
+                raise ValueError(f"source {source_id} is not currently approved for collection")
+        configure_research(db, auth.operator, policy, expected_revision)
+    except (ValueError, TypeError, ValidationError) as exc:
+        db.rollback()
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    return {"policy": policy.model_dump(mode="json")}
+
+
+@router.post("/api/research/qualification/{ref}", response_model=None)
+async def research_qualification_record(
+    ref: str, request: Request, auth: AdminOperator, db: DbSession
+) -> JSONResponse | dict[str, object]:
+    import re
+
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", ref):
+        return JSONResponse({"error": "invalid qualification reference"}, status_code=422)
+    try:
+        payload = await request.json()
+        if not isinstance(payload, dict):
+            raise ValueError("qualification must be a JSON object")
+        evaluation = Evaluation.model_validate(payload.get("evaluation"))
+        gates = payload.get("gates")
+        if not isinstance(gates, dict) or set(gates) != set(RELEASE_GATES) | {"seven_day_canary"}:
+            raise ValueError("every release and promotion gate must be recorded")
+        if any(
+            not isinstance(gate, dict)
+            or set(gate) != {"passed", "evidence"}
+            or not isinstance(gate.get("passed"), bool)
+            or not isinstance(gate.get("evidence"), str)
+            or len(gate["evidence"]) > 256
+            or not gate["evidence"].strip()
+            or re.fullmatch(r"[A-Za-z0-9._:/-]{1,256}", gate["evidence"]) is None
+            for gate in gates.values()
+        ):
+            raise ValueError("each gate requires a pass/fail decision and safe evidence reference")
+        reviewer = str(getattr(auth.operator, "email", "") or auth.operator.id)
+        if evaluation.reviewer != reviewer or not evaluation.score()["release_eligible"]:
+            raise ValueError("qualification must pass and name the authenticated reviewer")
+        key = f"research.qualification.{ref}"
+        if db.get(Setting, key) is not None:
+            raise ValueError("qualification records are immutable; choose a new reference")
+        value = {
+            "evaluation": evaluation.model_dump(mode="json"),
+            "gates": gates,
+            "recorded_at": datetime.now(UTC).isoformat(),
+            "recorded_by": reviewer,
+        }
+        db.add(Setting(key=key, value=value))
+        audit.record(
+            db,
+            auth.operator,
+            "research.qualification_recorded",
+            "setting",
+            None,
+            after={"ref": ref, "score": evaluation.score(), "gates": gates},
+        )
+    except (ValueError, TypeError, ValidationError) as exc:
+        db.rollback()
+        return JSONResponse({"error": str(exc)}, status_code=422)
+    return {"ref": ref, "score": evaluation.score()}
+
 
 NOTICES = {
     "job_retried": "Job put back in the queue.",

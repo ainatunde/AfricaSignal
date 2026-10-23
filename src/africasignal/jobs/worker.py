@@ -158,9 +158,24 @@ class Worker:
                         log.exception("dead-job cleanup failed", extra=ctx)
         return True
 
-    def run_forever(self) -> None:
+    def run_forever(self, monitor: ProcessHeartbeat | None = None) -> None:
+        import time
+
+        last_recorded = 0.0
         while not self._stopping.is_set():
-            if not self.run_once():
+            processed = self.run_once()
+            if time.monotonic() - last_recorded >= 60:
+                from datetime import UTC, datetime
+
+                from africasignal.research.planner import mark
+
+                with self.factory() as session:
+                    mark(session, "ops.worker_last_cycle", {"at": datetime.now(UTC).isoformat()})
+                    session.commit()
+                if monitor:
+                    monitor.mark_healthy()
+                last_recorded = time.monotonic()
+            if not processed:
                 self._stopping.wait(POLL_SECONDS)
 
 
@@ -180,7 +195,7 @@ def main() -> None:
     monitor = ProcessHeartbeat("WORKER_HEARTBEAT_URL")
     monitor.start()
     try:
-        worker.run_forever()
+        worker.run_forever(monitor)
     except Exception:
         monitor.ping("fail")
         raise

@@ -123,6 +123,17 @@ def tick(session: Session, now: datetime | None = None) -> dict[str, int]:
             periodic.append(("social_listen_poll", f"social_listen_poll:{_slot(now, 1)}"))
     if get(session, "x_replies_enabled") == "yes":
         periodic.append(("social_mention_poll", f"social_mention_poll:{_slot(now, 1)}"))
+    from africasignal.research.policy import read_policy, readiness
+
+    periodic.append(("check_research", f"check_research:{_slot(now, 1)}"))
+    try:
+        research_enabled = (
+            read_policy(session).mode != "off" and readiness(session, now)[0] == "ready"
+        )
+    except ValueError:
+        research_enabled = False  # Guardian reports invalid policy; never enable implicitly.
+    if research_enabled:
+        periodic.append(("plan_research", f"plan_research:{_slot(now, 5)}"))
 
     # 4. Weekly digest: the operator-configured weekday/hour in Africa/Lagos.
     lagos = now.astimezone(LAGOS)

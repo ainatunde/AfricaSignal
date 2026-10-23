@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
@@ -44,10 +45,13 @@ class ProcessHeartbeat:
         *,
         interval_seconds: float = 60.0,
         url: str | None = None,
+        progress_timeout_seconds: float = 300.0,
     ) -> None:
         self.variable = variable
         self.url = (os.environ.get(variable, "") if url is None else url).strip()
         self.interval_seconds = interval_seconds
+        self.progress_timeout_seconds = progress_timeout_seconds
+        self._last_progress = time.monotonic()
         if self.url:
             _endpoint(self.url, "")  # fail startup on an insecure or malformed monitor URL
         self._stop = threading.Event()
@@ -68,6 +72,8 @@ class ProcessHeartbeat:
             self._healthy.clear()
         elif not self._healthy.is_set():
             return False
+        elif not state and time.monotonic() - self._last_progress > self.progress_timeout_seconds:
+            return False  # a live heartbeat thread cannot conceal a hung main process
         try:
             response = httpx.get(
                 _endpoint(self.url, state),
@@ -88,6 +94,7 @@ class ProcessHeartbeat:
     def mark_healthy(self) -> bool:
         """Resume success pings after the monitored process has completed a healthy work cycle."""
         self._healthy.set()
+        self._last_progress = time.monotonic()
         return self.ping()
 
     def _run(self) -> None:

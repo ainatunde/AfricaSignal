@@ -12,6 +12,10 @@ from africasignal.jobs.queue import enqueue
 def enqueue_extraction(session: Session, document_id: int) -> int | None:
     """Queue extraction of a document. The same document under the same prompt and model is queued
     at most once, so nothing is extracted twice."""
+    from africasignal.research.processing_scope import CURRENT
+
+    if CURRENT.get() is not None:
+        return None  # research only admits code-parsed, scoped facts at application time
     return enqueue(
         session,
         "extract_claims",

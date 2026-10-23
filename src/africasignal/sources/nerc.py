@@ -221,6 +221,12 @@ class NercAdapter:
             result.notes.append("not a DisCo tariff order: no tariff claims made by code")
             return result
         series = TARIFF_SERIES_PREFIX + DISCO_SLUGS[code]
+        from africasignal.research.processing_scope import CURRENT
+
+        scope = CURRENT.get()
+        if scope and series != scope["policy_series"]:
+            result.notes.append("outside the research policy-series scope")
+            return result
         if series not in series_codes(ctx.session):
             result.notes.append(
                 f"{code}: no policy series {series} (add it under Policies in the console); skipped"

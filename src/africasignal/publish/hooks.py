@@ -34,5 +34,10 @@ def clear_publication_hooks() -> None:
 
 
 def notify_published(session: Session, version_id: int, kind: NotificationKind) -> None:
+    from africasignal.models import Setting
+
+    # Research never grants distribution authority, including when an R7 hold later releases.
+    if session.get(Setting, f"research.no_external.version.{version_id}") is not None:
+        return
     for hook in list(_hooks):
         hook(session, version_id, kind)

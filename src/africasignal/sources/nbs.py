@@ -371,6 +371,11 @@ def _import_row(
     vintage: date,
     document: EvidenceDocument,
 ) -> None:
+    from africasignal.research.processing_scope import CURRENT
+
+    scope = CURRENT.get()
+    if scope and (series.item_code != scope["item_code"] or place_id != scope["place_id"]):
+        return
     for column, month in months.items():
         value = row.values[column]
         if value is None:

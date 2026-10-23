@@ -40,7 +40,17 @@ LLM_JOB_KINDS = frozenset(
 REACH_JOB_KINDS = frozenset({"agent_reach_search", "agent_reach_poll"})
 EXTERNAL_AGENT_JOB_KINDS = frozenset({"external_agent_submit"})
 CONTENT_JOB_KINDS = frozenset(
-    {"process_document", "gdelt_fetch_article", "import_nbs_file", "resolve_places"}
+    {
+        "process_document",
+        "gdelt_fetch_article",
+        "import_nbs_file",
+        "resolve_places",
+        "plan_research",
+        "research_question",
+        "judge_research",
+        "apply_research",
+        "verify_research",
+    }
 )
 WORKLOAD_KINDS = {
     "ai": LLM_JOB_KINDS,
@@ -311,6 +321,15 @@ def blocked_kinds(session: Any, rows: list[WorkloadControl], now: datetime) -> s
     for (kind,) in running:
         running_counts[kind] = running_counts.get(kind, 0) + 1
     blocked: set[str] = set()
+    research_kinds = {
+        "plan_research",
+        "research_question",
+        "judge_research",
+        "apply_research",
+        "verify_research",
+    }
+    if sum(running_counts.get(kind, 0) for kind in research_kinds) >= 1:
+        blocked.update(research_kinds)  # shared locked workload rows serialize replicas
     commercial = (
         session.query(CommercialControl)
         .filter(CommercialControl.singleton_id == 1)
