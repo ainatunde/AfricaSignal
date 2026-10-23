@@ -327,6 +327,10 @@ def test_stop_lets_the_current_job_finish_then_exits(
         assert s.execute(text("SELECT count(*) FROM job WHERE status='queued'")).scalar_one() == 1
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows SIGTERM uses TerminateProcess; graceful POSIX shutdown is tested on Linux",
+)
 def test_sigterm_stops_the_worker_process_cleanly(factory: sessionmaker[Session]) -> None:
     proc = subprocess.Popen(
         [sys.executable, "-m", "africasignal.jobs.worker"],

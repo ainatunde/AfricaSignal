@@ -1328,6 +1328,7 @@ def alerts_view(request: Request, auth: AdminOperator, db: DbSession) -> Respons
         "admin/alerts.html",
         auth,
         alerts=alerts_ops.alerts(db),
+        page_checks=alerts_ops.recent_guardian_checks(db),
         backup=alerts_ops.status_record(db, backup_alerts.BACKUP_STATUS_KEY),
         drill=alerts_ops.status_record(db, backup_alerts.DRILL_STATUS_KEY),
         history=alerts_ops.history(db),
