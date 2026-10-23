@@ -55,6 +55,11 @@ def _robots_for(host_url: str, timeout: float | None = None) -> RobotFileParser 
     deadline = time.monotonic() + request_budget
     failed = False
     try:
+        from africasignal.net.request_scope import CURRENT
+
+        request_scope = CURRENT.get()
+        if request_scope is not None:
+            request_scope.admit(f"{base}/robots.txt")
         with dns_budget(request_budget):
             transport = pinned_http_transport(host_url)
         remaining = deadline - time.monotonic()

@@ -8,6 +8,7 @@ from africasignal.net import fetch as fetch_mod
 from africasignal.net import netutil, politeness
 from africasignal.net.fetch import FetchResult, fetch_document
 from africasignal.net.httpcache import HttpCache
+from africasignal.net.request_scope import RequestScope, request_scope
 
 from .conftest import ChunkedStream, FakeWeb
 
@@ -130,6 +131,28 @@ def test_safe_redirect_is_followed(web: FakeWeb) -> None:
     result = fetch_document("https://example.ng/old")
     assert result.success and result.content == b"Target payload"
     assert result.url == "https://example.ng/new"
+
+
+def test_research_scope_counts_primary_and_robots_transport_requests(web: FakeWeb) -> None:
+    netutil.reset_cache()
+    web.add(URL, content=b"source document")
+    reserved: list[int] = []
+    scope = RequestScope(frozenset({"news.example.ng"}), lambda: reserved.append(1))
+    with request_scope(scope):
+        result = fetch_document(URL)
+    assert result.success
+    assert len(reserved) == 2  # page request and robots.txt; cached on later requests
+
+
+def test_research_scope_refuses_redirect_to_unapproved_host(web: FakeWeb) -> None:
+    web.redirect(URL, "https://example.ng/redirected")
+    reserved: list[int] = []
+    scope = RequestScope(frozenset({"news.example.ng"}), lambda: reserved.append(1))
+    with request_scope(scope):
+        result = fetch_document(URL)
+    assert not result.success
+    assert web.fetched() == [URL]
+    assert len(reserved) == 2
 
 
 def test_redirect_loop_stops_after_five_hops(web: FakeWeb) -> None:

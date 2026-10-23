@@ -71,7 +71,7 @@ cachecontrol==0.14.4
     # via
     #   cachecontrol
     #   pip-audit
-certifi==2026.7.22
+certifi==2026.10.19
     # via
     #   -c requirements.lock
     #   httpcore
@@ -289,7 +289,7 @@ openpyxl==3.1.5
     # via
     #   -c requirements.lock
     #   africasignal (pyproject.toml)
-opentelemetry-api==1.45.0
+opentelemetry-api==1.45.1
     # via
     #   -c requirements.lock
     #   fastapi
@@ -314,7 +314,7 @@ pdfplumber==0.11.10
     # via
     #   -c requirements.lock
     #   africasignal (pyproject.toml)
-pillow==12.3.0
+pillow==13.0.0
     # via
     #   -c requirements.lock
     #   pdfplumber

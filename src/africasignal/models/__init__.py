@@ -54,6 +54,12 @@ from africasignal.models.ops import (
     WorkloadControl,
 )
 from africasignal.models.places import Place, PlaceAlias
+from africasignal.models.research import (
+    CorrectionAction,
+    ResearchAttempt,
+    ResearchDecision,
+    ResearchQuestion,
+)
 from africasignal.models.runtime import JobArchive, JobDeduplication, RateLimitState
 from africasignal.models.sources import DiscoveredDomainDecision, Source, SourcePermission
 from africasignal.models.users import (
@@ -67,6 +73,10 @@ from africasignal.models.users import (
 )
 
 __all__ = [
+    "CorrectionAction",
+    "ResearchAttempt",
+    "ResearchDecision",
+    "ResearchQuestion",
     "AccountDeletion",
     "AgentReachCandidate",
     "AgentReachTask",

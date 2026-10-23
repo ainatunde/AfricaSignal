@@ -119,6 +119,14 @@ def fetch_document(
     ``max_requests_per_hour``); by default a domain is limited to one request per second.
     """
     started = _monotonic()
+    from africasignal.net.request_scope import CURRENT
+
+    research_scope = CURRENT.get()
+    if research_scope is not None:
+        research_scope.admit(url)
+        max_bytes = min(max_bytes, 10_000_000)
+        deadline = min(deadline, 30.0)
+        timeout = min(timeout, 10.0)
 
     def out_of_time() -> bool:
         return _monotonic() - started > deadline
@@ -230,6 +238,8 @@ def fetch_document(
                 next_url = urljoin(current_url, location)
                 resp.close()
                 hops += 1
+                if research_scope is not None:
+                    research_scope.admit(next_url)
 
                 try:
                     next_parsed = urlparse(next_url)
